@@ -1,0 +1,22 @@
+# Dependencias de Node (Frontend y Backend)
+node_modules/
+**/node_modules/
+
+# Caché y compilados de Angular y NestJS
+.angular/
+**/.angular/
+dist/
+**/dist/
+out-tsc/
+**/out-tsc/
+
+# Variables de entorno y credenciales locales
+.env
+**/.env
+*.env.local
+
+# Logs y archivos temporales del sistema operativo
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db

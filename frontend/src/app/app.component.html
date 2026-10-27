@@ -1,0 +1,856 @@
+<div class="app-shell" (mouseup)="finalizarPintadoRaton()">
+  <!-- BARRA SUPERIOR INSTITUCIONAL (INTEGRACIÓN SATÉLITE INTRANET) -->
+  <header class="top-header">
+    <div class="brand-group">
+      <div class="logo-badge">🏥</div>
+      <div>
+        <div class="app-title">RAFA TURNOS <span class="badge-version">v2.0 Clínico</span></div>
+        <div class="app-subtitle">Planificación Asistencial 24/7 • Ley 2101 (42h/sem) • Banco de Horas Continuo</div>
+      </div>
+    </div>
+
+    <div class="nav-tabs">
+      <button [class.active]="vistaActual() === 'PLANIFICADOR'" (click)="vistaActual.set('PLANIFICADOR')">
+        📅 Cuadrante Estilo Thurni
+      </button>
+      <button [class.active]="vistaActual() === 'DASHBOARD'" (click)="vistaActual.set('DASHBOARD')">
+        🗼 Torre de Control y Permutas
+        @if (permutasPendientesCount() > 0) {
+          <span class="pill-count">{{ permutasPendientesCount() }}</span>
+        }
+      </button>
+      <button [class.active]="vistaActual() === 'BANCO_NOMINA'" (click)="vistaActual.set('BANCO_NOMINA')">
+        🏦 Banco de Horas y Nómina CST
+      </button>
+      <button [class.active]="vistaActual() === 'FESTIVOS'" (click)="vistaActual.set('FESTIVOS')">
+        🇨🇴 Festivos y Caché RAM
+      </button>
+      <button [class.active]="vistaActual() === 'PORTAL_EMPLEADO'" (click)="vistaActual.set('PORTAL_EMPLEADO')">
+        👩‍⚕️ Portal del Empleado
+      </button>
+    </div>
+
+    <div class="header-actions">
+      <button class="btn-outline" (click)="modalIcalAbierto.set(true)" title="Sincronizar calendario móvil">
+        📲 Sincronizar Celular (iCal)
+      </button>
+      <a class="btn-intranet" href="javascript:void(0)" (click)="notificarIntranet()">
+        ⬅ Volver a la Intranet
+      </a>
+    </div>
+  </header>
+
+  @if (mensajeToast()) {
+    <div class="toast-banner">
+      <span>✅ {{ mensajeToast() }}</span>
+      <button (click)="mensajeToast.set('')">✕</button>
+    </div>
+  }
+
+  <!-- ======================================================================= -->
+  <!-- VISTA 1: PLANIFICADOR VISUAL INTERACTIVO (PARIDAD THURNI)               -->
+  <!-- ======================================================================= -->
+  @if (vistaActual() === 'PLANIFICADOR') {
+    <section class="toolbar-controls">
+      <div class="selectors-group">
+        <div class="control-item">
+          <label>Servicio Asistencial:</label>
+          <select [ngModel]="servicioSeleccionadoId()" (ngModelChange)="cambiarServicio($event)">
+            @for (srv of servicios(); track srv.id) {
+              <option [value]="srv.id">{{ srv.nombre }} ({{ srv.tipoAsistencia }})</option>
+            }
+          </select>
+        </div>
+
+        <div class="control-item">
+          <label>Mes / Año:</label>
+          <select [ngModel]="mesSeleccionado()" (ngModelChange)="cambiarMes($event)">
+            @for (m of mesesDisponibles; track m.valor) {
+              <option [value]="m.valor">{{ m.nombre }} {{ anioSeleccionado() }}</option>
+            }
+          </select>
+        </div>
+
+        <div class="estado-cuadrante-badge" [attr.data-estado]="estadoCuadrante()">
+          Estado: <strong>{{ estadoCuadrante() }}</strong>
+        </div>
+      </div>
+
+      <div class="actions-group">
+        <label class="toggle-check">
+          <input type="checkbox" [ngModel]="mostrarComparadorPrevisto()" (ngModelChange)="mostrarComparadorPrevisto.set($event)">
+          <span>🔍 Ver Diff vs. Previsto</span>
+        </label>
+
+        <button class="btn-secondary" (click)="abrirModalRotacion()">
+          🔄 Rotar Personal Homólogo ({{ servicioActual().tipoAsistencia }})
+        </button>
+
+        <button class="btn-wizard" (click)="ejecutarAutocompletarHuecos()">
+          🤖 Auto-Balancear Huecos (Prioriza Deuda Banco)
+        </button>
+
+        <button class="btn-primary" (click)="cambiarEstadoCuadrante()">
+          @if (estadoCuadrante() === 'BORRADOR') {
+            🚀 Publicar Cuadrante
+          } @else if (estadoCuadrante() === 'PUBLICADO') {
+            🔒 Cerrar Mes para Nómina
+          } @else {
+            🔓 Reabrir Cuadrante
+          }
+        </button>
+
+        <button class="btn-excel" (click)="exportarExcelNomina()">
+          📊 Exportar Excel Nómina
+        </button>
+      </div>
+    </section>
+
+    <!-- PALETA CROMÁTICA DE TURNOS ESTILO THURNI -->
+    <section class="thurni-palette-bar">
+      <div class="palette-instructions">
+        <strong>🎨 Paleta Thurni:</strong>
+        <span>Haz clic en una ficha para modo <b>Pincel (arrastrar pintando)</b>, arrástrala a una celda, o usa el teclado (Flechas + <code>M, T, N, G, S, L, C, V, I, Supr</code>)</span>
+      </div>
+
+      <div class="palette-chips">
+        @for (t of listaTurnosPaleta; track t.codigo) {
+          <div
+            class="shift-chip"
+            [class.selected]="turnoPincelActivo() === t.codigo"
+            [style.background-color]="t.bgHex"
+            [style.color]="t.textHex"
+            [style.border-color]="t.borderHex"
+            draggable="true"
+            (dragstart)="onDragStartPaleta($event, t.codigo)"
+            (click)="seleccionarPincel(t.codigo)"
+            title="{{ t.nombre }} ({{ t.horario }}) - {{ t.horasOrdinarias }}h">
+            <div class="chip-code">{{ t.codigo }}</div>
+            <div class="chip-meta">
+              <span class="chip-name">{{ t.nombre }}</span>
+              <span class="chip-hours">{{ t.horario }}</span>
+            </div>
+          </div>
+        }
+
+        <div
+          class="shift-chip eraser-chip"
+          [class.selected]="turnoPincelActivo() === ''"
+          draggable="true"
+          (dragstart)="onDragStartPaleta($event, '')"
+          (click)="seleccionarPincel('')">
+          <div class="chip-code">🧽</div>
+          <div class="chip-meta">
+            <span class="chip-name">Borrador</span>
+            <span class="chip-hours">Limpiar celda</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- BARRA DE ALERTAS CLÍNICAS Y NORMATIVAS EN VIVO -->
+    @if (infraccionesActivas().length > 0) {
+      <div class="alert-bar-violations">
+        <div class="alert-title">
+          ⚠️ <strong>{{ infraccionesActivas().length }} Alertas Normativas CST / Clínicas detectadas en tiempo real:</strong>
+        </div>
+        <div class="alert-list">
+          @for (inf of infraccionesActivas().slice(0, 4); track $index) {
+            <span class="violation-pill" (click)="enfocarCelda(inf.empleadoId, inf.dia)">
+              {{ inf.mensaje }}
+            </span>
+          }
+        </div>
+      </div>
+    }
+
+    <!-- MATRIZ DEL CUADRANTE MENSUAL -->
+    <div class="grid-container">
+      <table class="schedule-matrix">
+        <thead>
+          <tr>
+            <th class="col-sticky-emp">Colaborador / Categoría</th>
+            <th class="col-empalme" title="Último turno del mes anterior (Protección de Empalme)">Emp.<br>Ant</th>
+            @for (d of diasDelMes(); track d.dia) {
+              <th
+                class="col-day"
+                [class.is-sunday]="d.esDomingo"
+                [class.is-holiday]="!!d.festivo"
+                [title]="d.festivo ? '🇨🇴 FESTIVO: ' + d.festivo.nombre + ' (+75% Recargo)' : (d.esDomingo ? 'Domingo (+75% Recargo)' : 'Día Ordinario')">
+                <div class="day-number">{{ d.dia }}</div>
+                <div class="day-letter">{{ d.letraDia }}</div>
+                @if (d.festivo) {
+                  <div class="holiday-dot">🇨🇴</div>
+                }
+              </th>
+            }
+            <th class="col-summary" title="Horas Reales Programadas vs Contrato Mes (Ley 2101)">Horas<br>Mes</th>
+            <th class="col-summary" title="Saldo Arrastrado del Mes Anterior">Banco<br>Ant.</th>
+            <th class="col-summary" title="Diferencia del Mes (Trabajadas - Contrato - Amortizadas COMP)">Mov.<br>Mes</th>
+            <th class="col-summary col-banco-final" title="Nuevo Saldo Acumulado Continuo (Pasa al siguiente mes)">Nuevo<br>Banco</th>
+            <th class="col-summary" title="Recargos Nocturnos (HON+HDFN) y Domingos/Festivos">Noches /<br>Dom-Fest</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          @for (fila of filasCuadrante(); track fila.empleado.id) {
+            <tr [class.row-rotacion]="fila.esPersonalRotado">
+              <!-- Info del Empleado -->
+              <td class="col-sticky-emp">
+                <div class="emp-cell">
+                  <div class="emp-avatar" [attr.data-cat]="fila.empleado.categoria">
+                    {{ obtenerIniciales(fila.empleado.nombre) }}
+                  </div>
+                  <div class="emp-details">
+                    <div class="emp-name">
+                      {{ fila.empleado.nombre }}
+                      @if (fila.esPersonalRotado) {
+                        <span class="badge-rotado" title="Colaborador de otro servicio homólogo">🔄 Rotación</span>
+                      }
+                    </div>
+                    <div class="emp-role">{{ fila.empleado.categoria }} • Contrato {{ fila.empleado.horasContratoMes }}h</div>
+                  </div>
+                </div>
+              </td>
+
+              <!-- Empalme Mes Anterior -->
+              <td class="col-empalme">
+                <span class="empalme-badge" [attr.data-code]="fila.empleado.ultimoTurnoMesPrevio">
+                  {{ fila.empleado.ultimoTurnoMesPrevio || '-' }}
+                </span>
+              </td>
+
+              <!-- Celdas de los días 1..30/31 -->
+              @for (d of diasDelMes(); track d.dia) {
+                @let celda = fila.celdas[d.dia];
+                @let cfg = obtenerConfigTurno(celda?.codigo || '');
+                @let conflicto = obtenerConflictoCelda(fila.empleado.id, d.dia);
+                @let cambioDiff = mostrarComparadorPrevisto() && celda?.previsto !== undefined && celda?.previsto !== celda?.codigo;
+
+                <td
+                  class="matrix-cell"
+                  tabindex="0"
+                  [class.cell-focused]="celdaEnfocada()?.empId === fila.empleado.id && celdaEnfocada()?.dia === d.dia"
+                  [class.cell-sunday]="d.esDomingo"
+                  [class.cell-holiday]="!!d.festivo"
+                  [class.cell-conflict]="!!conflicto"
+                  [style.background-color]="cfg ? cfg.bgHex : ''"
+                  [style.color]="cfg ? cfg.textHex : ''"
+                  (mousedown)="iniciarPintadoCelda(fila.empleado.id, d.dia)"
+                  (mouseenter)="continuarPintadoCelda(fila.empleado.id, d.dia)"
+                  (dragover)="onDragOverCelda($event)"
+                  (drop)="onDropCelda($event, fila.empleado.id, d.dia)"
+                  (keydown)="onKeyDownCelda($event, fila.empleado.id, d.dia)"
+                  [title]="construirTooltipCelda(fila.empleado, d, celda, conflicto)">
+
+                  <div class="cell-inner">
+                    <span class="cell-code">{{ celda?.codigo || '' }}</span>
+                    @if (celda?.esRotacion) {
+                      <span class="rotacion-mini-tag">🔄</span>
+                    }
+                    @if (conflicto) {
+                      <span class="conflict-indicator">!</span>
+                    }
+                    @if (cambioDiff) {
+                      <span class="diff-triangle" title="Previsto original: {{ celda?.previsto || 'Vacío' }}"></span>
+                    }
+                  </div>
+                </td>
+              }
+
+              <!-- Totales y Banco de Horas por Colaborador -->
+              <td class="col-summary font-mono">
+                <strong>{{ fila.horasTrabajadas }}h</strong>
+                <span class="sub-contract">/ {{ fila.empleado.horasContratoMes }}h</span>
+              </td>
+
+              <td class="col-summary font-mono">
+                <span class="banco-pill" [class.pos]="fila.empleado.saldoBancoAnterior > 0" [class.neg]="fila.empleado.saldoBancoAnterior < 0">
+                  {{ formatearSigno(fila.empleado.saldoBancoAnterior) }}h
+                </span>
+              </td>
+
+              <td class="col-summary font-mono">
+                <span [class.text-pos]="fila.diferenciaMes > 0" [class.text-neg]="fila.diferenciaMes < 0">
+                  {{ formatearSigno(fila.diferenciaMes) }}h
+                </span>
+                @if (fila.horasAmortizadasComp > 0) {
+                  <div class="comp-note" title="Horas descontadas del banco por turno COMP">(-{{ fila.horasAmortizadasComp }}h COMP)</div>
+                }
+              </td>
+
+              <td class="col-summary col-banco-final font-mono">
+                <span
+                  class="banco-badge-final"
+                  [class.status-ok]="fila.nuevoSaldoBanco >= -6 && fila.nuevoSaldoBanco <= 18"
+                  [class.status-warn]="(fila.nuevoSaldoBanco > 18 && fila.nuevoSaldoBanco <= 30) || (fila.nuevoSaldoBanco < -6 && fila.nuevoSaldoBanco >= -18)"
+                  [class.status-danger]="fila.nuevoSaldoBanco > 30 || fila.nuevoSaldoBanco < -18">
+                  {{ formatearSigno(fila.nuevoSaldoBanco) }}h
+                </span>
+              </td>
+
+              <td class="col-summary">
+                <div class="equity-counts">
+                  <span title="Turnos de Noche en el mes">🌙 {{ fila.conteoNoches }}</span>
+                  <span title="Domingos y Festivos laborados (≥3 genera Compensatorio)">☀️ {{ fila.conteoDomFest }}</span>
+                  @if (fila.causaCompensatorioDominical) {
+                    <span class="comp-dom-tag" title="Laboró 3 o más domingos: Causa 1 Compensatorio Legal CST">🏅+1 Comp</span>
+                  }
+                </div>
+              </td>
+            </tr>
+          }
+        </tbody>
+
+        <!-- FOOTER REACTIVO DE COBERTURAS MÍNIMAS POR TURNO -->
+        <tfoot>
+          <tr class="coverage-row">
+            <td colspan="2" class="col-sticky-emp coverage-label">
+              ☀️ Cobertura Mañana (M + G12 + G24) • <strong>Mín: {{ servicioActual().reqManana }}</strong>
+            </td>
+            @for (d of diasDelMes(); track d.dia) {
+              @let cob = coberturaPorDia()[d.dia];
+              <td class="coverage-cell" [class.cov-ok]="cob.manana >= servicioActual().reqManana" [class.cov-deficit]="cob.manana < servicioActual().reqManana">
+                {{ cob.manana }}/{{ servicioActual().reqManana }}
+              </td>
+            }
+            <td colspan="5" class="coverage-summary-note">
+              Cálculo instantáneo O(1) con Angular Signals
+            </td>
+          </tr>
+
+          <tr class="coverage-row">
+            <td colspan="2" class="col-sticky-emp coverage-label">
+              🌤️ Cobertura Tarde (T + G12 + G24) • <strong>Mín: {{ servicioActual().reqTarde }}</strong>
+            </td>
+            @for (d of diasDelMes(); track d.dia) {
+              @let cob = coberturaPorDia()[d.dia];
+              <td class="coverage-cell" [class.cov-ok]="cob.tarde >= servicioActual().reqTarde" [class.cov-deficit]="cob.tarde < servicioActual().reqTarde">
+                {{ cob.tarde }}/{{ servicioActual().reqTarde }}
+              </td>
+            }
+            <td colspan="5" class="coverage-summary-note">
+              Verde = Cobertura Asistencial Cumplida
+            </td>
+          </tr>
+
+          <tr class="coverage-row">
+            <td colspan="2" class="col-sticky-emp coverage-label">
+              🌙 Cobertura Noche (N + G24) • <strong>Mín: {{ servicioActual().reqNoche }}</strong>
+            </td>
+            @for (d of diasDelMes(); track d.dia) {
+              @let cob = coberturaPorDia()[d.dia];
+              <td class="coverage-cell" [class.cov-ok]="cob.noche >= servicioActual().reqNoche" [class.cov-deficit]="cob.noche < servicioActual().reqNoche">
+                {{ cob.noche }}/{{ servicioActual().reqNoche }}
+              </td>
+            }
+            <td colspan="5" class="coverage-summary-note">
+              Rojo = Déficit Clínico (Usa "Auto-Balancear Huecos")
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  }
+
+  <!-- ======================================================================= -->
+  <!-- VISTA 2: TORRE DE CONTROL, PERMUTAS 1-A-1 Y AUDITORÍA FORENSE           -->
+  <!-- ======================================================================= -->
+  @if (vistaActual() === 'DASHBOARD') {
+    <div class="dashboard-layout">
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-label">Cobertura Global del Servicio</div>
+          <div class="kpi-value">{{ porcentajeCoberturaGlobal() }}%</div>
+          <div class="kpi-sub">Basado en ratios mínimos de {{ servicioActual().nombre }}</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Alertas de Descanso &lt; 12h / Post-Guardia</div>
+          <div class="kpi-value" [class.text-neg]="infraccionesActivas().length > 0">{{ infraccionesActivas().length }}</div>
+          <div class="kpi-sub">Motor de validación normativa CST activo</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Balance Neto Banco de Horas</div>
+          <div class="kpi-value">{{ formatearSigno(balanceGlobalBancoServicio()) }}h</div>
+          <div class="kpi-sub">Acumulado continuo sin vencimiento periódico</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Permutas 1-a-1 por Aprobar</div>
+          <div class="kpi-value">{{ permutasPendientesCount() }}</div>
+          <div class="kpi-sub">Pre-validadas por perfil asistencial y descanso</div>
+        </div>
+      </div>
+
+      <div class="two-col-panels">
+        <!-- Panel de Permutas 1-a-1 entre compañeros -->
+        <div class="panel-card">
+          <div class="panel-header">
+            <h3>🤝 Solicitudes de Permuta 1-a-1 entre Pares</h3>
+            <span class="badge-info">Simulación automática de reglas</span>
+          </div>
+          <div class="permutas-list">
+            @for (p of listaPermutas(); track p.id) {
+              <div class="permuta-item">
+                <div class="permuta-main">
+                  <div class="permuta-title">
+                    <strong>{{ p.solicitanteNombre }}</strong> (Día {{ p.diaOrigen }}: <code>{{ p.turnoOrigen }}</code>)
+                    ⇄ <strong>{{ p.receptorNombre }}</strong> (Día {{ p.diaDestino }}: <code>{{ p.turnoDestino }}</code>)
+                  </div>
+                  <div class="permuta-meta">
+                    Categoría equivalente: <b>{{ p.categoria }}</b> • Solicitud: {{ p.fechaSolicitud }}
+                  </div>
+                  <div class="permuta-validation">
+                    ✅ {{ p.validacionReglas }}
+                  </div>
+                </div>
+                <div class="permuta-actions">
+                  @if (p.estado === 'PENDIENTE_SUPERVISOR') {
+                    <button class="btn-approve" (click)="aprobarPermuta(p.id)">✔ Aprobar Cambio</button>
+                    <button class="btn-reject" (click)="rechazarPermuta(p.id)">✕ Rechazar</button>
+                  } @else {
+                    <span class="status-tag" [attr.data-status]="p.estado">{{ p.estado }}</span>
+                  }
+                </div>
+              </div>
+            }
+          </div>
+        </div>
+
+        <!-- Bitácora Forense de Auditoría Médico-Legal -->
+        <div class="panel-card">
+          <div class="panel-header">
+            <h3>🛡️ Bitácora Forense de Auditoría (Trazabilidad Médico-Legal)</h3>
+            <span class="badge-info">Inmutable</span>
+          </div>
+          <div class="audit-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Fecha / Hora</th>
+                  <th>Actor</th>
+                  <th>Colaborador</th>
+                  <th>Día</th>
+                  <th>Cambio</th>
+                  <th>Justificación</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (log of bitacoraAuditoria(); track log.id) {
+                  <tr>
+                    <td class="font-mono">{{ log.timestamp }}</td>
+                    <td>{{ log.actor }}</td>
+                    <td><strong>{{ log.empleadoNombre }}</strong></td>
+                    <td>Día {{ log.dia }}</td>
+                    <td>
+                      <span class="mini-shift">{{ log.turnoAnterior || 'Vacío' }}</span>
+                      →
+                      <span class="mini-shift">{{ log.turnoNuevo || 'Vacío' }}</span>
+                    </td>
+                    <td>{{ log.motivo }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- ======================================================================= -->
+  <!-- VISTA 3: BANCO DE HORAS Y LIQUIDACIÓN DE RECARGOS CST (CERO PESOS $)    -->
+  <!-- ======================================================================= -->
+  @if (vistaActual() === 'BANCO_NOMINA') {
+    <div class="nomina-container">
+      <div class="nomina-banner">
+        <div>
+          <h2>🏦 Consolidado de Conceptos de Tiempo CST y Banco de Horas Continuo</h2>
+          <p>
+            <strong>Principio de Desacoplamiento Financiero Estricto:</strong> Rafa Turnos calcula exclusivamente volúmenes de horas y días de recargo legal (HOD, HON, HDFD, HDFN, Compensatorios y Banco de Horas). Los recargos nocturnos (35%) y festivos (75%) se reportan en el mes corriente; el Banco de Horas arrastra únicamente el saldo de tiempo ordinario sin fecha de caducidad.
+          </p>
+        </div>
+        <button class="btn-excel" (click)="exportarExcelNomina()">
+          📥 Descargar Consolidado Excel (CSV)
+        </button>
+      </div>
+
+      <div class="panel-card">
+        <table class="data-table nomina-table">
+          <thead>
+            <tr>
+              <th>Documento</th>
+              <th>Colaborador</th>
+              <th>Categoría</th>
+              <th>Contrato</th>
+              <th title="Horas Ordinarias Diurnas (06:00-21:00 L-S)">HOD</th>
+              <th title="Horas Ordinarias Nocturnas (21:00-06:00 L-S) Recargo 35%">HON (35%)</th>
+              <th title="Horas Dominicales/Festivas Diurnas (06:00-21:00) Recargo 75%">HDFD (75%)</th>
+              <th title="Horas Dominicales/Festivas Nocturnas (21:00-06:00) Recargo 110%">HDFN (110%)</th>
+              <th title="Total Horas Reales Laboradas en el Mes">Total Mes</th>
+              <th title="Domingos/Festivos laborados y Días Compensatorios Causados">Dom / Comp</th>
+              <th title="Días de Vacaciones e Incapacidad Médica">VAC / INC</th>
+              <th class="col-highlight-banco">Saldo Banco Ant.</th>
+              <th class="col-highlight-banco">Dif. Mes Actual</th>
+              <th class="col-highlight-banco">Nuevo Saldo Banco</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (r of resumenNominaCalculado(); track r.empleado.id) {
+              <tr>
+                <td class="font-mono">{{ r.empleado.documento }}</td>
+                <td><strong>{{ r.empleado.nombre }}</strong></td>
+                <td>{{ r.empleado.categoria }}</td>
+                <td class="font-mono">{{ r.empleado.horasContratoMes }}h</td>
+                <td class="font-mono">{{ r.hod }}h</td>
+                <td class="font-mono">{{ r.hon }}h</td>
+                <td class="font-mono">{{ r.hdfd }}h</td>
+                <td class="font-mono">{{ r.hdfn }}h</td>
+                <td class="font-mono"><strong>{{ r.horasTrabajadas }}h</strong></td>
+                <td class="font-mono">
+                  {{ r.conteoDomFest }} dom
+                  @if (r.causaCompensatorioDominical) {
+                    <span class="comp-dom-tag">+1 Comp</span>
+                  }
+                </td>
+                <td class="font-mono">{{ r.diasVac }}d / {{ r.diasInc }}d</td>
+                <td class="font-mono col-highlight-banco">{{ formatearSigno(r.empleado.saldoBancoAnterior) }}h</td>
+                <td class="font-mono col-highlight-banco">{{ formatearSigno(r.diferenciaMes) }}h</td>
+                <td class="font-mono col-highlight-banco">
+                  <strong [class.text-pos]="r.nuevoSaldoBanco > 0" [class.text-neg]="r.nuevoSaldoBanco < 0">
+                    {{ formatearSigno(r.nuevoSaldoBanco) }}h
+                  </strong>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  }
+
+  <!-- ======================================================================= -->
+  <!-- VISTA 4: CALENDARIO DE FESTIVOS DE COLOMBIA Y CACHÉ EN MEMORIA RAM      -->
+  <!-- ======================================================================= -->
+  @if (vistaActual() === 'FESTIVOS') {
+    <div class="nomina-container">
+      <div class="two-col-panels">
+        <div class="panel-card">
+          <div class="panel-header">
+            <h3>🇨🇴 Festivos Oficiales de Colombia {{ anioSeleccionado() }} (Algoritmo Meeus + Ley Emiliani)</h3>
+            <span class="badge-info">Caché RAM Activa O(1)</span>
+          </div>
+          <p class="panel-desc">
+            Generados internamente sin librerías externas ni APIs de internet. Almacenados en PostgreSQL (<code>festivos_colombia</code>) y precargados en memoria RAM (<code>onApplicationBootstrap</code>) para consultas en 0.0001 ms sin sobrecargar la base de datos.
+          </p>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Fecha ISO</th>
+                <th>Celebración / Decreto</th>
+                <th>Origen</th>
+                <th>Acción</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (f of listaFestivosAnio(); track f.fecha) {
+                <tr>
+                  <td class="font-mono"><strong>{{ f.fecha }}</strong></td>
+                  <td>{{ f.nombre }}</td>
+                  <td>
+                    @if (f.esOficialLey) {
+                      <span class="badge-law">Ley 51 de 1983</span>
+                    } @else {
+                      <span class="badge-custom">Decreto Manual Hospital</span>
+                    }
+                  </td>
+                  <td>
+                    @if (!f.esOficialLey) {
+                      <button class="btn-reject" (click)="eliminarDiaCivico(f.fecha)">Eliminar</button>
+                    } @else {
+                      <span class="text-muted">Inamovible / Oficial</span>
+                    }
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+
+        <div class="panel-card">
+          <div class="panel-header">
+            <h3>➕ Agregar Día Cívico o Festivo Institucional Extraordinario</h3>
+          </div>
+          <p class="panel-desc">
+            Si la Alcaldía, Gobernación o Gerencia del Hospital decreta un día cívico especial, regístralo aquí. Se persiste en base de datos e invalida/refresca el <code>Map</code> en memoria RAM al instante, aplicando el recargo del 75% en el cuadrante.
+          </p>
+          <div class="form-stack">
+            <label>Fecha del Día Cívico:</label>
+            <input type="date" [ngModel]="nuevoFestivoFecha()" (ngModelChange)="nuevoFestivoFecha.set($event)">
+
+            <label>Nombre o Motivo del Decreto:</label>
+            <input type="text" placeholder="Ej. Día del Hospital / Emergencia Sanitaria" [ngModel]="nuevoFestivoNombre()" (ngModelChange)="nuevoFestivoNombre.set($event)">
+
+            <button class="btn-primary" (click)="agregarDiaCivico()">
+              💾 Guardar en BD y Refrescar Caché RAM
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- ======================================================================= -->
+  <!-- VISTA 5: PORTAL DEL EMPLEADO (ROL PERSONAL ASISTENCIAL / AUTOSERVICIO)  -->
+  <!-- ======================================================================= -->
+  @if (vistaActual() === 'PORTAL_EMPLEADO') {
+    @let portal = datosEmpleadoPortal();
+    <div class="nomina-container">
+      <!-- Barra superior de simulación de colaborador -->
+      <div class="nomina-banner">
+        <div class="selectors-group">
+          <div class="logo-badge">👩‍⚕️</div>
+          <div>
+            <h2>Portal Personal del Colaborador (Vista Móvil / Intranet)</h2>
+            <p>
+              Así visualiza el profesional su agenda mensual publicada, su saldo transparente en el <strong>Banco de Horas</strong> y el autoservicio de <strong>Permutas 1-a-1</strong> (sin acceso a edición de la matriz ni a diagnósticos médicos de terceros).
+            </p>
+          </div>
+        </div>
+
+        <div class="control-item">
+          <label>Simular sesión como:</label>
+          <select [ngModel]="empleadoPortalId()" (ngModelChange)="cambiarEmpleadoPortal($event)">
+            @for (e of empleados(); track e.id) {
+              <option [value]="e.id">{{ e.nombre }} ({{ e.categoria }})</option>
+            }
+          </select>
+        </div>
+      </div>
+
+      <!-- Bloque 1: Tarjetas de Resumen Personal y Mi Banco de Horas -->
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-label">Mi Servicio Base y Perfil</div>
+          <div class="kpi-value" style="font-size: 20px;">{{ portal.servicioBase.nombre }}</div>
+          <div class="kpi-sub">{{ portal.empleado.categoria }} • C.C. {{ portal.empleado.documento }}</div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="kpi-label">Mis Horas Programadas en el Mes</div>
+          <div class="kpi-value">{{ portal.horasTrabajadas }}h <span style="font-size: 15px; color: #64748b;">/ {{ portal.empleado.horasContratoMes }}h</span></div>
+          <div class="kpi-sub">🌙 {{ portal.conteoNoches }} Noches • ☀️ {{ portal.conteoDomFest }} Domingos/Festivos</div>
+        </div>
+
+        <div class="kpi-card" style="background: #f0f9ff; border-color: #bae6fd;">
+          <div class="kpi-label">🏦 Mi Banco de Horas Acumulado</div>
+          <div class="kpi-value" [class.text-pos]="portal.nuevoSaldoBanco > 0" [class.text-neg]="portal.nuevoSaldoBanco < 0">
+            {{ formatearSigno(portal.nuevoSaldoBanco) }}h
+          </div>
+          <div class="kpi-sub">
+            Saldo mes ant: <b>{{ formatearSigno(portal.empleado.saldoBancoAnterior) }}h</b> • Mov. este mes: <b>{{ formatearSigno(portal.diferenciaMes) }}h</b> (Sin caducidad)
+          </div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="kpi-label">Sincronización con mi Teléfono</div>
+          <div style="margin: 8px 0;">
+            <button class="btn-primary" (click)="modalIcalAbierto.set(true)">📲 Vincular a Google / iPhone Calendar</button>
+          </div>
+          <div class="kpi-sub">Actualización automática ante permutas aprobadas</div>
+        </div>
+      </div>
+
+      <!-- Bloque 2: Mi Calendario Mensual Personal -->
+      <div class="panel-card">
+        <div class="panel-header">
+          <h3>📅 Mi Calendario Personal de Turnos (Haz clic en un día para solicitar permuta o ver tu equipo de guardia)</h3>
+          <span class="badge-info">Día seleccionado: {{ diaPermutaSeleccionado() }}</span>
+        </div>
+
+        <div class="employee-calendar-strip">
+          @for (d of diasDelMes(); track d.dia) {
+            @let celdaMia = portal.celdas[d.dia];
+            @let cfgMio = obtenerConfigTurno(celdaMia?.codigo || '');
+            <div
+              class="emp-day-card"
+              [class.selected-day]="diaPermutaSeleccionado() === d.dia"
+              [class.sunday-card]="d.esDomingo || !!d.festivo"
+              [style.background-color]="cfgMio ? cfgMio.bgHex : '#ffffff'"
+              [style.border-color]="cfgMio ? cfgMio.borderHex : '#e2e8f0'"
+              (click)="seleccionarDiaEnPortal(d.dia)">
+              <div class="emp-day-head">
+                <span class="emp-day-num">{{ d.dia }}</span>
+                <span class="emp-day-let">{{ d.letraDia }}</span>
+                @if (d.festivo) {
+                  <span title="{{ d.festivo.nombre }}">🇨🇴</span>
+                }
+              </div>
+              <div class="emp-day-code" [style.color]="cfgMio ? cfgMio.textHex : '#64748b'">
+                {{ celdaMia?.codigo || 'L' }}
+              </div>
+              <div class="emp-day-name">
+                {{ cfgMio ? cfgMio.nombre : 'Libre' }}
+              </div>
+              <div class="emp-day-hours">
+                {{ cfgMio ? cfgMio.horario : 'Descanso' }}
+              </div>
+            </div>
+          }
+        </div>
+      </div>
+
+      <!-- Bloque 3 y 4: Solicitar Permuta 1-a-1 y Ver Equipo de Guardia -->
+      <div class="two-col-panels">
+        <!-- Solicitar Permuta 1-a-1 con validación automática -->
+        <div class="panel-card">
+          <div class="panel-header">
+            <h3>🤝 Solicitar Permuta 1-a-1 para el Día {{ diaPermutaSeleccionado() }}</h3>
+            <span class="badge-law">Solo misma categoría: {{ portal.empleado.categoria }}</span>
+          </div>
+          <p class="panel-desc">
+            Tu turno actual el <strong>Día {{ diaPermutaSeleccionado() }}</strong> es:
+            <span class="mini-shift">{{ portal.celdas[diaPermutaSeleccionado()].codigo || 'L' }}</span>.
+            El sistema filtra únicamente compañeros de tu mismo perfil asistencial en <strong>{{ portal.servicioBase.nombre }}</strong>:
+          </p>
+
+          <div class="form-stack">
+            <label>Selecciona compañero par para intercambiar el Día {{ diaPermutaSeleccionado() }}:</label>
+            <select [ngModel]="companeroPermutaId()" (ngModelChange)="companeroPermutaId.set($event)" style="padding: 8px; border-radius: 6px; border: 1px solid #cbd5e1; font-weight: 600;">
+              @for (par of companerosParesPortal(); track par.id) {
+                @let turnoPar = asignaciones()[par.id][diaPermutaSeleccionado()].codigo || 'L';
+                <option [value]="par.id">
+                  {{ par.nombre }} — Tiene asignado turno [{{ turnoPar }}] el Día {{ diaPermutaSeleccionado() }}
+                </option>
+              }
+            </select>
+
+            <button class="btn-primary" (click)="enviarSolicitudPermutaDesdePortal()">
+              🚀 Simular Reglas y Enviar Solicitud de Permuta
+            </button>
+          </div>
+
+          <div style="margin-top: 16px;">
+            <h4 style="margin-bottom: 8px; font-size: 12.5px; color: #334155;">Mis Solicitudes de Permuta Recientes:</h4>
+            <div class="permutas-list">
+              @for (mp of misPermutasPortal(); track mp.id) {
+                <div class="permuta-item">
+                  <div>
+                    <div class="permuta-title">
+                      Día {{ mp.diaOrigen }}: <strong>{{ mp.solicitanteNombre }}</strong> (<code>{{ mp.turnoOrigen }}</code>)
+                      ⇄ <strong>{{ mp.receptorNombre }}</strong> (<code>{{ mp.turnoDestino }}</code>)
+                    </div>
+                    <div class="permuta-validation">{{ mp.validacionReglas }}</div>
+                  </div>
+                  <span class="status-tag" [attr.data-status]="mp.estado">{{ mp.estado }}</span>
+                </div>
+              } @empty {
+                <div class="text-muted">No tienes permutas registradas en este periodo.</div>
+              }
+            </div>
+          </div>
+        </div>
+
+        <!-- ¿Quién está de turno conmigo ese día? -->
+        <div class="panel-card">
+          <div class="panel-header">
+            <h3>🏥 ¿Con quién comparto guardia el Día {{ diaPermutaSeleccionado() }} en {{ portal.servicioBase.nombre }}?</h3>
+            <span class="badge-info">Habeas Data Protegido</span>
+          </div>
+          <p class="panel-desc">
+            Compañeros con turno activo asignado en tu servicio para el <strong>Día {{ diaPermutaSeleccionado() }}</strong> (las ausencias médicas de terceros se mantienen privadas):
+          </p>
+
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Compañero de Equipo</th>
+                <th>Categoría Asistencial</th>
+                <th>Turno Día {{ diaPermutaSeleccionado() }}</th>
+                <th>Horario</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (eq of equipoDeGuardiaDiaSeleccionado(); track eq.empleado.id) {
+                @let cfgEq = obtenerConfigTurno(eq.turno);
+                <tr>
+                  <td><strong>{{ eq.empleado.nombre }}</strong></td>
+                  <td>{{ eq.empleado.categoria }}</td>
+                  <td>
+                    <span class="mini-shift" [style.background-color]="cfgEq?.bgHex" [style.color]="cfgEq?.textHex">
+                      {{ eq.turno }} — {{ cfgEq?.nombre }}
+                    </span>
+                  </td>
+                  <td class="font-mono">{{ cfgEq?.horario }}</td>
+                </tr>
+              } @empty {
+                <tr>
+                  <td colspan="4" class="text-muted">No hay otros compañeros en turno activo este día.</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- MODAL DE ROTACIÓN INTER-SERVICIOS HOMÓLOGOS -->
+  @if (modalRotacionAbierto()) {
+    <div class="modal-backdrop" (click)="modalRotacionAbierto.set(false)">
+      <div class="modal-box" (click)="$event.stopPropagation()">
+        <div class="modal-header">
+          <h3>🔄 Préstamo / Rotación entre Servicios Homólogos ({{ servicioActual().tipoAsistencia }})</h3>
+          <button (click)="modalRotacionAbierto.set(false)">✕</button>
+        </div>
+        <div class="modal-body">
+          <p>
+            Colaboradores de otros servicios que comparten afinidad clínica <strong>{{ servicioActual().tipoAsistencia }}</strong> y pueden cubrir turnos en <strong>{{ servicioActual().nombre }}</strong>:
+          </p>
+          <div class="rotacion-candidates">
+            @for (cand of candidatosRotacionHomologos(); track cand.id) {
+              <div class="candidate-row">
+                <div>
+                  <strong>{{ cand.nombre }}</strong> ({{ cand.categoria }})
+                  <div class="text-muted">Banco Actual: {{ formatearSigno(cand.saldoBancoAnterior) }}h</div>
+                </div>
+                <button class="btn-primary" (click)="vincularRotacionAlCuadrante(cand)">
+                  ➕ Incluir en este Cuadrante
+                </button>
+              </div>
+            } @empty {
+              <div class="empty-msg">Todos los profesionales homólogos disponibles ya están incluidos en la grilla actual.</div>
+            }
+          </div>
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- MODAL DE SINCRONIZACIÓN MÓVIL ICAL (WEBCAL://) -->
+  @if (modalIcalAbierto()) {
+    <div class="modal-backdrop" (click)="modalIcalAbierto.set(false)">
+      <div class="modal-box" (click)="$event.stopPropagation()">
+        <div class="modal-header">
+          <h3>📲 Sincronización Automática con el Celular (Estándar RFC 5545 iCalendar)</h3>
+          <button (click)="modalIcalAbierto.set(false)">✕</button>
+        </div>
+        <div class="modal-body">
+          <p>
+            Cada profesional se suscribe una única vez a su calendario personal (Google Calendar, Apple Calendar iOS o Outlook) sin instalar aplicaciones pesadas:
+          </p>
+          <div class="ical-box">
+            <code>webcal://intranet.hospital.gov.co/turnos/api/v1/calendario/feed/9f8e7d6c-5b4a-4321-890a-bcdef1234567.ics</code>
+          </div>
+          <ul class="ical-features">
+            <li>✅ Se actualiza solo en el teléfono cuando la supervisora aprueba una permuta.</li>
+            <li>✅ Funciona offline en el celular del médico o enfermera.</li>
+            <li>✅ Token criptográfico revocable en cualquier momento.</li>
+          </ul>
+          <div class="modal-footer">
+            <button class="btn-primary" (click)="copiarEnlaceIcal()">📋 Copiar Enlace Webcal</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  }
+</div>

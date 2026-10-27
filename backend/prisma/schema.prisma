@@ -1,0 +1,213 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TipoAsistencia {
+  CUIDADOS_INTENSIVOS
+  URGENCIAS
+  QUIRURGICO
+  HOSPITALIZACION
+  APOYO_DIAGNOSTICO
+  CONSULTA_EXTERNA
+}
+
+enum EstadoCuadrante {
+  BORRADOR
+  VALIDADO
+  PUBLICADO
+  CERRADO_NOMINA
+}
+
+enum EstadoPermuta {
+  PENDIENTE_PAR
+  PENDIENTE_SUPERVISOR
+  APROBADA
+  RECHAZADA
+}
+
+model Servicio {
+  id                     String                   @id @default(uuid())
+  intranetId             String?                  @unique
+  codigo                 String                   @unique
+  nombre                 String
+  tipoAsistencia         TipoAsistencia
+  empleadosBase          Empleado[]               @relation("ServicioBase")
+  cuadrantes             Cuadrante[]
+  asignacionesEjecutadas AsignacionTurno[]        @relation("ServicioEjecutor")
+  coberturas             RequerimientoCobertura[]
+
+  @@map("servicios")
+}
+
+model CategoriaProfesional {
+  id         String                   @id @default(uuid())
+  nombre     String                   @unique
+  empleados  Empleado[]
+  coberturas RequerimientoCobertura[]
+
+  @@map("categorias_profesionales")
+}
+
+model Empleado {
+  id                String               @id @default(uuid())
+  intranetId        String?              @unique
+  documento         String               @unique
+  nombre            String
+  correo            String?
+  horasSemanalesLey Int                  @default(42)
+  horasContratoMes  Int                  @default(168)
+  servicioBaseId    String
+  servicioBase      Servicio             @relation("ServicioBase", fields: [servicioBaseId], references: [id])
+  categoriaId       String
+  categoria         CategoriaProfesional @relation(fields: [categoriaId], references: [id])
+  asignaciones      AsignacionTurno[]
+  saldosBancoHoras  BancoHorasSaldo[]
+  novedades         NovedadAusencia[]
+  tokensCalendario  TokenCalendario[]
+
+  @@index([servicioBaseId])
+  @@map("empleados")
+}
+
+model TipoTurno {
+  id                  String                   @id @default(uuid())
+  codigo              String                   @unique // M, T, N, G12, G24, S, L, COMP, VAC, INC
+  nombre              String
+  horaInicio          String
+  horaFin             String
+  horasOrdinarias     Float
+  horasDiurnas        Float
+  horasNocturnas      Float
+  colorHex            String
+  descuentaBancoHoras Boolean                  @default(false)
+  asignaciones        AsignacionTurno[]
+  coberturas          RequerimientoCobertura[]
+
+  @@map("tipos_turno")
+}
+
+model RequerimientoCobertura {
+  id               String               @id @default(uuid())
+  servicioId       String
+  servicio         Servicio             @relation(fields: [servicioId], references: [id])
+  categoriaId      String
+  categoria        CategoriaProfesional @relation(fields: [categoriaId], references: [id])
+  tipoTurnoId      String
+  tipoTurno        TipoTurno            @relation(fields: [tipoTurnoId], references: [id])
+  cantidadMinima   Int
+  aplicaFestivoDom Boolean              @default(false)
+
+  @@map("requerimientos_cobertura")
+}
+
+model Cuadrante {
+  id           String            @id @default(uuid())
+  anio         Int
+  mes          Int
+  servicioId   String
+  servicio     Servicio          @relation(fields: [servicioId], references: [id])
+  estado       EstadoCuadrante   @default(BORRADOR)
+  asignaciones AsignacionTurno[]
+
+  @@unique([anio, mes, servicioId])
+  @@map("cuadrantes")
+}
+
+model AsignacionTurno {
+  id                 String            @id @default(uuid())
+  cuadranteId        String
+  cuadrante          Cuadrante         @relation(fields: [cuadranteId], references: [id])
+  empleadoId         String
+  empleado           Empleado          @relation(fields: [empleadoId], references: [id])
+  tipoTurnoId        String
+  tipoTurno          TipoTurno         @relation(fields: [tipoTurnoId], references: [id])
+  servicioEjecutorId String
+  servicioEjecutor   Servicio          @relation("ServicioEjecutor", fields: [servicioEjecutorId], references: [id])
+  fecha              DateTime          @db.Date
+  esRotacion         Boolean           @default(false)
+  codigoPrevisto     String?
+  hod                Float             @default(0)
+  hon                Float             @default(0)
+  hdfd               Float             @default(0)
+  hdfn               Float             @default(0)
+  hed                Float             @default(0)
+  hen                Float             @default(0)
+  auditorias         AuditoriaCambio[]
+
+  @@unique([empleadoId, fecha])
+  @@index([cuadranteId, fecha])
+  @@map("asignaciones_turno")
+}
+
+model BancoHorasSaldo {
+  id                  String   @id @default(uuid())
+  empleadoId          String
+  empleado            Empleado @relation(fields: [empleadoId], references: [id])
+  anio                Int
+  mes                 Int
+  saldoInicial        Float    @default(0) // Arrastrado del mes anterior (sin caducidad)
+  horasTrabajadas     Float    @default(0)
+  horasContratadas    Float    @default(168)
+  horasAmortizadasComp Float   @default(0)
+  diferenciaMes       Float    @default(0)
+  saldoFinalAcumulado Float    @default(0) // Pasa como saldoInicial al mes M+1
+  actualizadoEn       DateTime @updatedAt
+
+  @@unique([empleadoId, anio, mes])
+  @@map("banco_horas_saldos")
+}
+
+model FestivoColombia {
+  id              String   @id @default(uuid())
+  fecha           DateTime @unique @db.Date
+  anio            Int
+  nombre          String
+  esIrrenunciable Boolean  @default(true)
+  esOficialLey    Boolean  @default(true) // False cuando es Día Cívico decretado por el hospital
+  creadoEn        DateTime @default(now())
+
+  @@index([anio])
+  @@map("festivos_colombia")
+}
+
+model NovedadAusencia {
+  id          String   @id @default(uuid())
+  empleadoId  String
+  empleado    Empleado @relation(fields: [empleadoId], references: [id])
+  tipo        String   // VAC, INC, LIC
+  fechaInicio DateTime @db.Date
+  fechaFin    DateTime @db.Date
+  codigoCie10 String?  // Confidencial: solo visible para Gestión Humana (Habeas Data)
+
+  @@map("novedades_ausencia")
+}
+
+model AuditoriaCambio {
+  id                String          @id @default(uuid())
+  asignacionTurnoId String
+  asignacionTurno   AsignacionTurno @relation(fields: [asignacionTurnoId], references: [id])
+  actorId           String
+  ipAddress         String?
+  turnoAnterior     String
+  turnoNuevo        String
+  justificacion     String
+  timestamp         DateTime        @default(now())
+
+  @@map("auditorias_cambio")
+}
+
+model TokenCalendario {
+  id         String   @id @default(uuid())
+  empleadoId String
+  empleado   Empleado @relation(fields: [empleadoId], references: [id])
+  tokenHash  String   @unique
+  activo     Boolean  @default(true)
+  creadoEn   DateTime @default(now())
+
+  @@map("tokens_calendario")
+}
