@@ -40,15 +40,46 @@ model Servicio {
   cuadrantes             Cuadrante[]
   asignacionesEjecutadas AsignacionTurno[]        @relation("ServicioEjecutor")
   coberturas             RequerimientoCobertura[]
+  turnosHabilitados      ServicioTurnoHabilitado[]
+
+  // Relación de Servicios Hermanos (Afinidad clínica para rotación)
+  serviciosHermanosOrigen ServicioHermano[]       @relation("ServicioOrigen")
+  serviciosHermanosDestino ServicioHermano[]      @relation("ServicioHermano")
 
   @@map("servicios")
 }
 
+model ServicioHermano {
+  id                String   @id @default(uuid())
+  servicioId        String
+  servicio          Servicio @relation("ServicioOrigen", fields: [servicioId], references: [id], onDelete: Cascade)
+  servicioHermanoId String
+  servicioHermano   Servicio @relation("ServicioHermano", fields: [servicioHermanoId], references: [id], onDelete: Cascade)
+
+  @@unique([servicioId, servicioHermanoId])
+  @@map("servicios_hermanos")
+}
+
+model ServicioTurnoHabilitado {
+  id           String               @id @default(uuid())
+  servicioId   String
+  servicio     Servicio             @relation(fields: [servicioId], references: [id], onDelete: Cascade)
+  categoriaId  String
+  categoria    CategoriaProfesional @relation(fields: [categoriaId], references: [id], onDelete: Cascade)
+  tipoTurnoId  String
+  tipoTurno    TipoTurno            @relation(fields: [tipoTurnoId], references: [id], onDelete: Cascade)
+  habilitado   Boolean              @default(true)
+
+  @@unique([servicioId, categoriaId, tipoTurnoId])
+  @@map("servicios_turnos_habilitados")
+}
+
 model CategoriaProfesional {
-  id         String                   @id @default(uuid())
-  nombre     String                   @unique
-  empleados  Empleado[]
-  coberturas RequerimientoCobertura[]
+  id                String                    @id @default(uuid())
+  nombre            String                    @unique
+  empleados         Empleado[]
+  coberturas        RequerimientoCobertura[]
+  turnosHabilitados ServicioTurnoHabilitado[]
 
   @@map("categorias_profesionales")
 }
@@ -75,8 +106,8 @@ model Empleado {
 }
 
 model TipoTurno {
-  id                  String                   @id @default(uuid())
-  codigo              String                   @unique // M, T, N, G12, G24, S, L, COMP, VAC, INC
+  id                  String                    @id @default(uuid())
+  codigo              String                    @unique // M8, T8, N8, M6, T6, N12, D12, G24, ADM, COMP, etc.
   nombre              String
   horaInicio          String
   horaFin             String
@@ -84,9 +115,11 @@ model TipoTurno {
   horasDiurnas        Float
   horasNocturnas      Float
   colorHex            String
-  descuentaBancoHoras Boolean                  @default(false)
+  descuentaBancoHoras Boolean                   @default(false)
+  esNocturnoPesado    Boolean                   @default(false) // Obliga a S o L al día siguiente
   asignaciones        AsignacionTurno[]
   coberturas          RequerimientoCobertura[]
+  turnosHabilitados   ServicioTurnoHabilitado[]
 
   @@map("tipos_turno")
 }

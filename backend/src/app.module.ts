@@ -4,6 +4,7 @@ import { FestivosModule } from './modules/festivos/festivos.module';
 import { BancoHorasNominaModule } from './modules/banco-horas/banco-horas.module';
 import { CuadrantesModule } from './modules/cuadrantes/cuadrantes.module';
 import { OperacionesHospitalModule } from './modules/operaciones/operaciones.module';
+import { ServiciosAdminModule } from './modules/servicios-admin/servicios-admin.module';
 
 @Controller('api/v1')
 export class HealthController {
@@ -17,7 +18,8 @@ export class HealthController {
         'FestivosColombiaService (Caché RAM O(1) + Butcher/Meeus)',
         'BancoHorasNominaService (Continuo sin caducidad + Desacoplamiento Financiero)',
         'CuadrantesReglasService (Descanso 12h + Post-guardia + Rotación Homóloga)',
-        'IntranetIntegration (SSO JWT + Sincronización REST)',
+        'ServiciosAdminController (Gobierno de Servicios, Enlace de Hermanos y Adscripción)',
+        'IntranetIntegration (SSO JWT + Webhooks en Tiempo Real + Sincronización REST)',
         'CalendarioIcalController (RFC 5545 webcal://)',
       ],
     };
@@ -31,6 +33,7 @@ export class HealthController {
     BancoHorasNominaModule,
     CuadrantesModule,
     OperacionesHospitalModule,
+    ServiciosAdminModule,
   ],
   controllers: [HealthController],
 })

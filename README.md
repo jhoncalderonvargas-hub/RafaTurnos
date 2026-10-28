@@ -34,6 +34,7 @@ Toda la fase de análisis de requisitos, reglas de negocio y arquitectura se enc
 17. **[17. Modelo de Rotación de Personal entre Servicios Homólogos](./docs/analisis/17_rotacion_inter_servicios_asistenciales.md)**: Reglas clínicas de rotación por afinidad asistencial (`tipoAsistencia`: Cuidados Intensivos, Urgencias, Quirúrgico, Hospitalización), visualización de personal prestado y cómputo para centros de costo.
 18. **[18. Modelo de Banco de Horas (Acumulación Continua)](./docs/analisis/18_modelo_banco_de_horas.md)**: Acumulación continua de horas a favor o en contra mes a mes sin periodicidad de caducidad, separación de recargos económicos CST, turno de compensación `COMP` y trazabilidad en el reporte de nómina.
 19. **[19. Gestión de Festivos Oficiales de Colombia y Caché](./docs/analisis/19_gestion_festivos_colombia_y_cache.md)**: Algoritmo propio interno (Meeus/Ley Emiliani), persistencia en PostgreSQL (`festivos_colombia`), resiliencia ante reinicios, precarga en RAM (`onApplicationBootstrap`) y soporte de excepciones/días cívicos manuales.
+20. **[20. Arquitectura de Integración, Sincronización y Gobierno de Servicios](./docs/analisis/20_arquitectura_integracion_sincronizacion_y_gobierno_servicios.md)**: Delimitación de responsabilidades (Intranet provee identidad y perfil profesional; Rafa Turnos gobierna servicios, afinidad entre hermanos y adscripción), sincronización multi-canal (Webhooks en tiempo real, Cron 02:00 AM, SSO JIT y botón de contingencia) y ciclo de vida de vacaciones.
 
 ---
 

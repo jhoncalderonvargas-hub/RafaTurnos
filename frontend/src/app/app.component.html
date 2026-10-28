@@ -28,6 +28,9 @@
       <button [class.active]="vistaActual() === 'PORTAL_EMPLEADO'" (click)="vistaActual.set('PORTAL_EMPLEADO')">
         👩‍⚕️ Portal del Empleado
       </button>
+      <button [class.active]="vistaActual() === 'SERVICIOS_ADMIN'" (click)="vistaActual.set('SERVICIOS_ADMIN')">
+        🏥 Gestión de Servicios
+      </button>
     </div>
 
     <div class="header-actions">
@@ -67,6 +70,16 @@
           <select [ngModel]="mesSeleccionado()" (ngModelChange)="cambiarMes($event)">
             @for (m of mesesDisponibles; track m.valor) {
               <option [value]="m.valor">{{ m.nombre }} {{ anioSeleccionado() }}</option>
+            }
+          </select>
+        </div>
+
+        <div class="control-item">
+          <label>Filtrar Categoría:</label>
+          <select [ngModel]="filtroCategoriaActiva()" (ngModelChange)="filtroCategoriaActiva.set($event)">
+            <option value="TODAS">-- Todas las Categorías ({{ categoriasEnServicioActual().length }}) --</option>
+            @for (cat of categoriasEnServicioActual(); track cat) {
+              <option [value]="cat">{{ cat }}</option>
             }
           </select>
         </div>
@@ -794,7 +807,205 @@
     </div>
   }
 
-  <!-- MODAL DE ROTACIÓN INTER-SERVICIOS HOMÓLOGOS -->
+  <!-- ======================================================================= -->
+  <!-- VISTA 6: GESTIÓN AUTÓNOMA DE SERVICIOS Y ENLACES HERMANOS (DOC 20)       -->
+  <!-- ======================================================================= -->
+  @if (vistaActual() === 'SERVICIOS_ADMIN') {
+    <div class="view-container">
+      <div class="page-title-bar">
+        <div>
+          <h2>🏥 Gobierno Autónomo de Servicios Hospitalarios y Servicios Hermanos</h2>
+          <p class="subtitle">
+            Modelo de integración Doc 20: La Intranet hospitalaria gestiona la identidad y el perfil oficial.
+            <strong>Rafa Turnos gobierna de forma autónoma</strong> la creación de servicios, adscripción, turnos habilitados y enlaces entre servicios hermanos para rotación y cobertura.
+          </p>
+        </div>
+      </div>
+
+      <!-- Métricas Resumen de Servicios -->
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-num">{{ servicios().length }}</div>
+          <div class="kpi-label">Servicios Asistenciales Configurados</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-num">{{ empleados().length }}</div>
+          <div class="kpi-label">Colaboradores en Planta Asistencial</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-num font-mono">PostgreSQL 16</div>
+          <div class="kpi-label">Base de Datos Centralizada</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-num font-mono">Doc 20</div>
+          <div class="kpi-label">Protocolo de Rotación Homóloga Activo</div>
+        </div>
+      </div>
+
+      <!-- Formularios de Administración -->
+      <div class="admin-forms-grid">
+        <!-- Tarjeta Crear Servicio -->
+        <div class="panel-card">
+          <div class="panel-header">
+            <h3>➕ Crear Nuevo Servicio Asistencial</h3>
+            <span class="badge-nuevo">Autónomo en Rafa Turnos</span>
+          </div>
+          <p class="panel-desc">
+            Crea un nuevo servicio hospitalario directamente en la base de datos sin depender de sincronizaciones previas de la Intranet:
+          </p>
+          <div class="form-vertical">
+            <div class="form-row">
+              <label>Código Único (3-6 letras):</label>
+              <input
+                type="text"
+                placeholder="Ej: HEM, UCIP, NEO"
+                [ngModel]="nuevoServicioCodigo()"
+                (ngModelChange)="nuevoServicioCodigo.set($event)"
+              />
+            </div>
+            <div class="form-row">
+              <label>Nombre del Servicio:</label>
+              <input
+                type="text"
+                placeholder="Ej: Hemodiálisis Ambulatoria"
+                [ngModel]="nuevoServicioNombre()"
+                (ngModelChange)="nuevoServicioNombre.set($event)"
+              />
+            </div>
+            <div class="form-row">
+              <label>Tipo de Asistencia Clínica:</label>
+              <select
+                [ngModel]="nuevoServicioTipoAsistencia()"
+                (ngModelChange)="nuevoServicioTipoAsistencia.set($event)"
+              >
+                <option value="URGENCIAS">URGENCIAS (Turnos 24/7)</option>
+                <option value="HOSPITALIZACION">HOSPITALIZACIÓN (Pisos y Salas)</option>
+                <option value="UCI">UCI (Cuidados Intensivos / Intermedios)</option>
+                <option value="QUIRURGICO">QUIRÚRGICO (Quirófanos y Recuperación)</option>
+                <option value="APOYO_DIAGNOSTICO">APOYO DIAGNÓSTICO (Laboratorio / Imágenes / Farmacia)</option>
+                <option value="AMBULATORIO">AMBULATORIO (Consulta Externa / Terapias)</option>
+              </select>
+            </div>
+            <div class="form-actions">
+              <button class="btn-primary" (click)="crearNuevoServicioAutonomo()">
+                💾 Guardar Servicio en Base de Datos
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tarjeta Enlazar Servicios Hermanos -->
+        <div class="panel-card">
+          <div class="panel-header">
+            <h3>🔗 Enlazar Servicios Hermanos (Rotación Lateral)</h3>
+            <span class="badge-info">Afinidad Homóloga</span>
+          </div>
+          <p class="panel-desc">
+            Al conectar dos servicios como <strong>hermanos</strong>, los supervisores podrán visualizar e incluir en sus cuadrantes personal de la misma categoría que labore en el servicio hermano para cubrir descansos o contingencias:
+          </p>
+          <div class="form-vertical">
+            <div class="form-row">
+              <label>Servicio Origen:</label>
+              <select
+                [ngModel]="enlaceHermanoSrv1()"
+                (ngModelChange)="enlaceHermanoSrv1.set($event)"
+              >
+                @for (s of servicios(); track s.id) {
+                  <option [value]="s.id">{{ s.nombre }} ({{ s.codigo }})</option>
+                }
+              </select>
+            </div>
+            <div class="form-row">
+              <label>Servicio Hermano Destino:</label>
+              <select
+                [ngModel]="enlaceHermanoSrv2()"
+                (ngModelChange)="enlaceHermanoSrv2.set($event)"
+              >
+                @for (s of servicios(); track s.id) {
+                  <option [value]="s.id">{{ s.nombre }} ({{ s.codigo }})</option>
+                }
+              </select>
+            </div>
+            <div class="form-actions">
+              <button class="btn-wizard" (click)="guardarEnlaceHermanos()">
+                🔗 Crear Enlace Bidireccional
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Directorio de Servicios Configurados -->
+      <div class="panel-card">
+        <div class="panel-header">
+          <h3>📋 Catálogo y Directorio de Servicios Hospitalarios Activos</h3>
+          <span class="badge-count">{{ servicios().length }} Servicios</span>
+        </div>
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Código</th>
+                <th>Nombre del Servicio</th>
+                <th>Tipo Asistencia</th>
+                <th>Personal Adscrito</th>
+                <th>Servicios Hermanos (Préstamos Autorizados)</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (srv of servicios(); track srv.id) {
+                <tr>
+                  <td><strong class="font-mono">{{ srv.codigo }}</strong></td>
+                  <td>
+                    <strong>{{ srv.nombre }}</strong>
+                    @if (srv.intranetId) {
+                      <span class="pill-intranet" title="Vinculado con Intranet">ID Intranet: {{ srv.intranetId }}</span>
+                    } @else {
+                      <span class="pill-local" title="Creado directamente en Rafa Turnos">Rafa Autónomo</span>
+                    }
+                  </td>
+                  <td>
+                    <span class="badge-tipo-asistencia">{{ srv.tipoAsistencia }}</span>
+                  </td>
+                  <td>
+                    <span class="badge-personal">{{ srv.empleadosCount || 0 }} colaboradores</span>
+                  </td>
+                  <td>
+                    @if (srv.hermanos && srv.hermanos.length > 0) {
+                      <div class="hermanos-tags-wrap">
+                        @for (h of srv.hermanos; track h.id) {
+                          <span class="tag-hermano">
+                            🔗 {{ h.nombre }} ({{ h.codigo }})
+                            <button
+                              class="btn-tag-remove"
+                              (click)="desenlazarServicioHermano(srv.id, h.id)"
+                              title="Desvincular servicio hermano"
+                            >✕</button>
+                          </span>
+                        }
+                      </div>
+                    } @else {
+                      <span class="text-muted">Sin servicios hermanos configurados</span>
+                    }
+                  </td>
+                  <td>
+                    <button
+                      class="btn-sm-primary"
+                      (click)="cambiarServicio(srv.id); vistaActual.set('PLANIFICADOR')"
+                      title="Abrir este servicio en el cuadrante"
+                    >
+                      📅 Abrir Cuadrante
+                    </button>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  }
   @if (modalRotacionAbierto()) {
     <div class="modal-backdrop" (click)="modalRotacionAbierto.set(false)">
       <div class="modal-box" (click)="$event.stopPropagation()">
