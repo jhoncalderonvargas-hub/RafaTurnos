@@ -62,6 +62,52 @@ export class ServiciosAdminController {
     });
   }
 
+  // 1.3 Crear o actualizar un tipo de turno en el catálogo maestro (PostgreSQL)
+  @Post('turnos')
+  async guardarTipoTurno(
+    @Body()
+    data: {
+      codigo: string;
+      nombre: string;
+      horaInicio: string;
+      horaFin: string;
+      horasOrdinarias: number;
+      horasDiurnas: number;
+      horasNocturnas: number;
+      colorHex: string;
+      descuentaBancoHoras?: boolean;
+      esNocturnoPesado?: boolean;
+    }
+  ) {
+    const cod = data.codigo.trim().toUpperCase();
+    return this.prisma.tipoTurno.upsert({
+      where: { codigo: cod },
+      create: {
+        codigo: cod,
+        nombre: data.nombre.trim(),
+        horaInicio: data.horaInicio,
+        horaFin: data.horaFin,
+        horasOrdinarias: Number(data.horasOrdinarias) || 0,
+        horasDiurnas: Number(data.horasDiurnas) || 0,
+        horasNocturnas: Number(data.horasNocturnas) || 0,
+        colorHex: data.colorHex || '#E0F2FE',
+        descuentaBancoHoras: !!data.descuentaBancoHoras,
+        esNocturnoPesado: !!data.esNocturnoPesado,
+      },
+      update: {
+        nombre: data.nombre.trim(),
+        horaInicio: data.horaInicio,
+        horaFin: data.horaFin,
+        horasOrdinarias: Number(data.horasOrdinarias) || 0,
+        horasDiurnas: Number(data.horasDiurnas) || 0,
+        horasNocturnas: Number(data.horasNocturnas) || 0,
+        colorHex: data.colorHex || '#E0F2FE',
+        descuentaBancoHoras: !!data.descuentaBancoHoras,
+        esNocturnoPesado: !!data.esNocturnoPesado,
+      },
+    });
+  }
+
   // 2. Crear un servicio nuevo (autónomo en Rafa Turnos)
   @Post()
   async crearServicio(

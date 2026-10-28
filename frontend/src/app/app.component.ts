@@ -23,6 +23,7 @@ export interface DiaColumna {
   dia: number;
   fechaIso: string;
   letraDia: string;
+  esSabado: boolean;
   esDomingo: boolean;
   festivo?: FestivoEntry;
 }
@@ -42,17 +43,23 @@ export interface InfraccionNormativa {
   styleUrl: './app.component.css',
 })
 export class AppComponent implements OnInit {
-  // Navegación principal (Ahora con 6 vistas completas)
+  // Navegación principal (Menú lateral izquierdo colapsable estilo Thurni)
   vistaActual = signal<
-    'PLANIFICADOR' | 'DASHBOARD' | 'BANCO_NOMINA' | 'FESTIVOS' | 'PORTAL_EMPLEADO' | 'SERVICIOS_ADMIN'
+    'PLANIFICADOR' | 'DASHBOARD' | 'PORTAL_EMPLEADO' | 'CONFIGURACION'
   >('PLANIFICADOR');
+  subVistaConfig = signal<'SERVICIOS' | 'CATALOGO_TURNOS' | 'FESTIVOS'>('SERVICIOS');
+  sidebarContraido = signal<boolean>(false);
   mensajeToast = signal<string>('');
 
   // Periodo y Servicio Activo
   anioSeleccionado = signal<number>(2026);
   mesSeleccionado = signal<number>(11); // Noviembre 2026
   servicioSeleccionadoId = signal<string>('srv-urg');
-  estadoCuadrante = signal<'BORRADOR' | 'PUBLICADO' | 'CERRADO_NOMINA'>('BORRADOR');
+  estadosPorCuadrante = signal<Record<string, 'BORRADOR' | 'PUBLICADO' | 'CERRADO_NOMINA'>>({});
+  estadoCuadrante = computed<'BORRADOR' | 'PUBLICADO' | 'CERRADO_NOMINA'>(() => {
+    const key = `${this.servicioSeleccionadoId()}::${this.anioSeleccionado()}-${this.mesSeleccionado()}`;
+    return this.estadosPorCuadrante()[key] || 'BORRADOR';
+  });
   mostrarComparadorPrevisto = signal<boolean>(false);
 
   // Filtro por Categoría en el Planificador (Mejora solicitada)
@@ -78,8 +85,106 @@ export class AppComponent implements OnInit {
   servicios = signal<ServicioHospitalario[]>([]);
   empleados = signal<EmpleadoHospital[]>([]);
   empleadosRotadosPorServicio = signal<Record<string, string[]>>({});
+  catalogoTurnosMap = signal<Record<string, TipoTurnoConfig>>({ ...CATALOGO_TURNOS });
 
-  readonly listaTurnosPaleta: TipoTurnoConfig[] = Object.values(CATALOGO_TURNOS);
+  // Lista maestra del catálogo (sin los alias duplicados M, T, N, G12)
+  listaTurnosCatalogo = computed<TipoTurnoConfig[]>(() => {
+    const aliasOcultos = new Set(['M', 'T', 'N', 'G12']);
+    return Object.values(this.catalogoTurnosMap()).filter(
+      (t) => !aliasOcultos.has(t.codigo)
+    );
+  });
+
+  // Turnos visibles en la Paleta del Cuadro de Turnos
+  listaTurnosPaleta = computed<TipoTurnoConfig[]>(() => {
+    return this.listaTurnosCatalogo().filter((t) => t.visibleEnPaleta !== false);
+  });
+
+  // Formulario de Creación / Edición de Turnos en Catálogo de Turnos
+  turnoEditandoCodigo = signal<string | null>(null);
+  turnoFormCodigo = signal<string>('');
+  turnoFormNombre = signal<string>('');
+  turnoFormModoJornada = signal<'HORARIO' | 'GUARDIA_24H' | 'DESCANSO'>('HORARIO');
+  turnoFormHoraInicio = signal<string>('07:00');
+  turnoFormHoraFin = signal<string>('15:00');
+  turnoFormColorKey = signal<string>('AZUL_CIELO');
+  turnoFormNocturnoPesado = signal<boolean>(false);
+  turnoFormDescuentaBanco = signal<boolean>(false);
+
+  readonly temasColorTurno = [
+    { key: 'AZUL_CIELO', nombre: 'Azul Mañana', bgHex: '#E0F2FE', textHex: '#0369A1', borderHex: '#7DD3FC' },
+    { key: 'CELESTE', nombre: 'Celeste Claro', bgHex: '#BAE6FD', textHex: '#0284C7', borderHex: '#38BDF8' },
+    { key: 'AMBAR_TARDE', nombre: 'Ámbar Tarde', bgHex: '#FEF3C7', textHex: '#B45309', borderHex: '#FCD34D' },
+    { key: 'NARANJA_GUARDIA', nombre: 'Naranja Guardia', bgHex: '#FFEDD5', textHex: '#C2410C', borderHex: '#FDBA74' },
+    { key: 'VIOLETA_NOCHE', nombre: 'Violeta Noche', bgHex: '#EDE9FE', textHex: '#6D28D9', borderHex: '#C4B5FD' },
+    { key: 'PURPURA_NOCHE', nombre: 'Púrpura Intenso', bgHex: '#DDD6FE', textHex: '#7C3AED', borderHex: '#A78BFA' },
+    { key: 'ROJO_CORAL', nombre: 'Rojo Guardia 24h', bgHex: '#FEE2E2', textHex: '#B91C1C', borderHex: '#FCA5A5' },
+    { key: 'TURQUESA_COMP', nombre: 'Turquesa Compensatorio', bgHex: '#CCFBF1', textHex: '#0F766E', borderHex: '#5EEAD4' },
+    { key: 'ESMERALDA_VAC', nombre: 'Verde Esmeralda', bgHex: '#D1FAE5', textHex: '#047857', borderHex: '#6EE7B7' },
+    { key: 'ROSA_INC', nombre: 'Rosa Novedad', bgHex: '#FCE7F3', textHex: '#BE185D', borderHex: '#F9A8D4' },
+    { key: 'GRIS_ADMIN', nombre: 'Gris Neutro', bgHex: '#F3F4F6', textHex: '#374151', borderHex: '#D1D5DB' },
+  ];
+
+  // Cálculo automático de horas Ordinarias, Diurnas (06:00-21:00) y Nocturnas (21:00-06:00)
+  calculoAutomaticoHorasTurno = computed<{
+    ordinarias: number;
+    diurnas: number;
+    nocturnas: number;
+    horarioTexto: string;
+  }>(() => {
+    const modo = this.turnoFormModoJornada();
+    if (modo === 'DESCANSO') {
+      return {
+        ordinarias: 0,
+        diurnas: 0,
+        nocturnas: 0,
+        horarioTexto: 'Descanso / Novedad',
+      };
+    }
+    if (modo === 'GUARDIA_24H') {
+      const ini = this.turnoFormHoraInicio() || '07:00';
+      return {
+        ordinarias: 24,
+        diurnas: 15,
+        nocturnas: 9,
+        horarioTexto: `${ini} - ${ini} (+1)`,
+      };
+    }
+
+    const iniStr = this.turnoFormHoraInicio() || '07:00';
+    const finStr = this.turnoFormHoraFin() || '15:00';
+    const [hIni, mIni] = iniStr.split(':').map((n) => Number(n) || 0);
+    const [hFin, mFin] = finStr.split(':').map((n) => Number(n) || 0);
+
+    const minInicio = hIni * 60 + mIni;
+    let minFin = hFin * 60 + mFin;
+    if (minFin <= minInicio) {
+      minFin += 24 * 60; // Cruza la medianoche
+    }
+
+    let minDiurnos = 0;
+    let minNocturnos = 0;
+    for (let m = minInicio; m < minFin; m++) {
+      const minDia = m % 1440;
+      // Franja diurna en Colombia: 06:00 (360) a 21:00 (1260)
+      if (minDia >= 360 && minDia < 1260) {
+        minDiurnos++;
+      } else {
+        minNocturnos++;
+      }
+    }
+
+    const diurnas = Math.round((minDiurnos / 60) * 10) / 10;
+    const nocturnas = Math.round((minNocturnos / 60) * 10) / 10;
+    const ordinarias = Math.round(((minDiurnos + minNocturnos) / 60) * 10) / 10;
+
+    return {
+      ordinarias,
+      diurnas,
+      nocturnas,
+      horarioTexto: `${iniStr} - ${finStr}`,
+    };
+  });
   readonly mesesDisponibles = [
     { valor: 7, nombre: 'Julio' },
     { valor: 8, nombre: 'Agosto' },
@@ -94,8 +199,19 @@ export class AppComponent implements OnInit {
   pintandoConRaton = signal<boolean>(false);
   celdaEnfocada = signal<{ empId: string; dia: number } | null>(null);
 
-  // Estado Reactivo de Asignaciones en Memoria
-  asignaciones = signal<Record<string, Record<number, CeldaAsignacion>>>({});
+  // Estado Reactivo de Asignaciones en Memoria (independiente por Año-Mes)
+  asignacionesPorPeriodo = signal<Record<string, Record<string, Record<number, CeldaAsignacion>>>>({});
+  asignaciones = computed<Record<string, Record<number, CeldaAsignacion>>>(() => {
+    const key = `${this.anioSeleccionado()}-${this.mesSeleccionado()}`;
+    return this.asignacionesPorPeriodo()[key] || {};
+  });
+
+  private actualizarAsignacionesMesActual(
+    nuevoMapa: Record<string, Record<number, CeldaAsignacion>>
+  ): void {
+    const key = `${this.anioSeleccionado()}-${this.mesSeleccionado()}`;
+    this.asignacionesPorPeriodo.update((todo) => ({ ...todo, [key]: nuevoMapa }));
+  }
 
   // Portal del Empleado (Autoservicio)
   empleadoPortalId = signal<string>('emp-001');
@@ -118,7 +234,7 @@ export class AppComponent implements OnInit {
       diaDestino: 6,
       turnoDestino: 'M8',
       estado: 'PENDIENTE_SUPERVISOR',
-      validacionReglas: 'Simulación OK: Ambos mantienen ≥12h de descanso y cobertura de Urgencias intacta.',
+      validacionReglas: 'Cumple descanso mínimo de 12h y mantiene la cobertura del servicio.',
     },
     {
       id: 'perm-102',
@@ -134,22 +250,22 @@ export class AppComponent implements OnInit {
       diaDestino: 14,
       turnoDestino: 'M8',
       estado: 'PENDIENTE_SUPERVISOR',
-      validacionReglas: 'Simulación OK: Misma categoría asistencial y cero conflictos post-guardia.',
+      validacionReglas: 'Misma categoría profesional y sin cruce de horarios.',
     },
   ]);
 
-  // Bitácora Forense de Auditoría
+  // Bitácora de Auditoría
   bitacoraAuditoria = signal<RegistroAuditoria[]>([
     {
       id: 'aud-1',
       timestamp: '2026-10-28 07:30:12',
-      actor: 'Supervisora Urgencias',
+      actor: 'Coordinación Urgencias',
       empleadoNombre: 'Enf. Diana Carolina Mora',
       servicioNombre: 'Urgencias Generales',
       dia: 1,
       turnoAnterior: 'M8',
       turnoNuevo: 'S',
-      motivo: 'Protección obligatoria de empalme tras noche pesada',
+      motivo: 'Descanso post-turno nocturno',
     },
   ]);
 
@@ -210,6 +326,98 @@ export class AppComponent implements OnInit {
       this.empleadoPortalId.set(empsMapeados[0].id);
       this.companeroPermutaId.set(empsMapeados[1]?.id || empsMapeados[0].id);
     }
+
+    // 3. Cargar estados de cuadrantes y turnos persistidos en PostgreSQL
+    this.sincronizarCuadrantesDesdePostgres();
+    this.sincronizarCatalogoTurnosDesdePostgres();
+  }
+
+  private sincronizarCatalogoTurnosDesdePostgres(): void {
+    this.api.getTiposTurno().subscribe({
+      next: (turnosDb) => {
+        if (!Array.isArray(turnosDb) || turnosDb.length === 0) return;
+        this.catalogoTurnosMap.update((actual) => {
+          const copia = { ...actual };
+          for (const t of turnosDb) {
+            const cod = (t.codigo || '').toUpperCase();
+            if (!cod) continue;
+            const existente = copia[cod];
+            const tema =
+              this.temasColorTurno.find(
+                (tm) => tm.bgHex.toLowerCase() === (t.colorHex || '').toLowerCase()
+              ) || this.temasColorTurno[0];
+
+            const horario =
+              existente?.horario ||
+              (t.horasOrdinarias === 24
+                ? `${t.horaInicio || '07:00'} - ${t.horaFin || '07:00'} (+1)`
+                : t.horasOrdinarias > 0
+                  ? `${t.horaInicio || '07:00'} - ${t.horaFin || '15:00'}`
+                  : 'Descanso / Novedad');
+
+            copia[cod] = {
+              codigo: cod,
+              nombre: t.nombre || existente?.nombre || cod,
+              horario,
+              horaInicio: t.horaInicio || existente?.horaInicio || '07:00',
+              horaFin: t.horaFin || existente?.horaFin || '15:00',
+              horasOrdinarias: Number(t.horasOrdinarias ?? existente?.horasOrdinarias ?? 0),
+              horasDiurnas: Number(t.horasDiurnas ?? existente?.horasDiurnas ?? 0),
+              horasNocturnas: Number(t.horasNocturnas ?? existente?.horasNocturnas ?? 0),
+              bgHex: t.colorHex || existente?.bgHex || tema.bgHex,
+              textHex: existente?.textHex || tema.textHex,
+              borderHex: existente?.borderHex || tema.borderHex,
+              esAusencia: existente?.esAusencia ?? (cod === 'VAC' || cod === 'INC'),
+              esNocturnoPesado: !!(t.esNocturnoPesado ?? existente?.esNocturnoPesado),
+              descuentaBancoHoras: !!(t.descuentaBancoHoras ?? existente?.descuentaBancoHoras),
+              visibleEnPaleta:
+                existente?.visibleEnPaleta !== undefined
+                  ? existente.visibleEnPaleta
+                  : !['M', 'T', 'N', 'G12'].includes(cod),
+            };
+          }
+          return copia;
+        });
+      },
+      error: () => {},
+    });
+  }
+
+  private sincronizarCuadrantesDesdePostgres(): void {
+    this.api.getEstadoGlobalCuadrantes(this.anioSeleccionado()).subscribe({
+      next: (res) => {
+        if (res.estados) {
+          this.estadosPorCuadrante.set(res.estados);
+        }
+
+        if (res.asignacionesPorPeriodo) {
+          this.asignacionesPorPeriodo.update((actual) => {
+            const copia = { ...actual };
+            for (const [periodoKey, mapaEmpsDb] of Object.entries(res.asignacionesPorPeriodo)) {
+              const mapaPeriodo = { ...(copia[periodoKey] || {}) };
+              for (const [empId, diasDb] of Object.entries(mapaEmpsDb)) {
+                const filaEmp = { ...(mapaPeriodo[empId] || {}) };
+                for (const [diaStr, celdaDb] of Object.entries(diasDb)) {
+                  const diaNum = Number(diaStr);
+                  filaEmp[diaNum] = {
+                    codigo: (celdaDb.codigo || '') as CodigoTurno,
+                    previsto: ((celdaDb.previsto ?? celdaDb.codigo) || '') as CodigoTurno,
+                    esRotacion: celdaDb.esRotacion,
+                    servicioEjecutorId: celdaDb.servicioEjecutorId,
+                  };
+                }
+                mapaPeriodo[empId] = filaEmp;
+              }
+              copia[periodoKey] = mapaPeriodo;
+            }
+            return copia;
+          });
+        }
+      },
+      error: () => {
+        // Si el backend está reiniciando, conserva el estado en memoria
+      },
+    });
   }
 
   // Servicio seleccionado
@@ -256,6 +464,7 @@ export class AppComponent implements OnInit {
         dia: d,
         fechaIso,
         letraDia: letras[dow],
+        esSabado: dow === 6,
         esDomingo: dow === 0,
         festivo,
       });
@@ -263,11 +472,40 @@ export class AppComponent implements OnInit {
     return resultado;
   });
 
+  // Celdas de relleno al inicio y final del mes para alinear filas semanales (Lunes a Domingo)
+  celdasOffsetInicioMes = computed<number[]>(() => {
+    const anio = this.anioSeleccionado();
+    const mes = this.mesSeleccionado();
+    const dowPrimerDia = new Date(anio, mes - 1, 1).getDay(); // 0=Dom, 1=Lun, ..., 6=Sab
+    const offsetLunes = dowPrimerDia === 0 ? 6 : dowPrimerDia - 1;
+    return Array.from({ length: offsetLunes }, (_, i) => i);
+  });
+
+  celdasOffsetFinMes = computed<number[]>(() => {
+    const totalCeldas = this.celdasOffsetInicioMes().length + this.diasDelMes().length;
+    const resto = totalCeldas % 7;
+    const faltantes = resto === 0 ? 0 : 7 - resto;
+    return Array.from({ length: faltantes }, (_, i) => i);
+  });
+
   // Lista de categorías únicas presentes en el servicio actual
   categoriasEnServicioActual = computed<string[]>(() => {
     const srvId = this.servicioSeleccionadoId();
     const emps = this.empleados().filter((e) => e.servicioBaseId === srvId);
     return Array.from(new Set(emps.map((e) => e.categoria))).sort();
+  });
+
+  // Métricas resumen de servicios y categorías para la vista de Servicios
+  totalCategoriasUnicas = computed<number>(() => {
+    return new Set(this.empleados().map((e) => e.categoria)).size;
+  });
+
+  totalEnlacesApoyo = computed<number>(() => {
+    const totalDirecciones = this.servicios().reduce(
+      (acc, s) => acc + (s.hermanos ? s.hermanos.length : 0),
+      0
+    );
+    return Math.ceil(totalDirecciones / 2);
   });
 
   // Empleados del cuadrante (Planta + Rotados homólogos de servicios hermanos)
@@ -299,6 +537,15 @@ export class AppComponent implements OnInit {
     });
   });
 
+  // Conteo de filas por categoría para los separadores de grupo del cuadrante
+  conteoPorCategoriaCuadrante = computed<Record<string, number>>(() => {
+    const conteo: Record<string, number> = {};
+    for (const { emp } of this.empleadosDelCuadrante()) {
+      conteo[emp.categoria] = (conteo[emp.categoria] || 0) + 1;
+    }
+    return conteo;
+  });
+
   // Filas calculadas con reglas CST y Banco de Horas (Descuenta 8h con COMP)
   filasCuadrante = computed(() => {
     const dias = this.diasDelMes();
@@ -323,7 +570,7 @@ export class AppComponent implements OnInit {
         const cod = celda?.codigo || '';
         if (!cod) continue;
 
-        const cfg = CATALOGO_TURNOS[cod];
+        const cfg = this.catalogoTurnosMap()[cod];
         if (!cfg) continue;
 
         horasTrabajadas += cfg.horasOrdinarias;
@@ -387,7 +634,7 @@ export class AppComponent implements OnInit {
       for (const emp of empsDelServicio) {
         const cod = matriz[emp.id]?.[d.dia]?.codigo || '';
         if (!cod) continue;
-        const cfg = CATALOGO_TURNOS[cod];
+        const cfg = this.catalogoTurnosMap()[cod];
         if (!cfg) continue;
 
         // Clasificación inteligente por horario del turno
@@ -409,10 +656,11 @@ export class AppComponent implements OnInit {
 
     for (const f of filas) {
       // 1. Validar Empalme con mes previo
+      const catalogo = this.catalogoTurnosMap();
       const prevCod = f.empleado.ultimoTurnoMesPrevio;
-      const prevCfg = prevCod ? CATALOGO_TURNOS[prevCod] : undefined;
+      const prevCfg = prevCod ? catalogo[prevCod] : undefined;
       const dia1Cod = f.celdas[1]?.codigo || '';
-      const dia1Cfg = dia1Cod ? CATALOGO_TURNOS[dia1Cod] : undefined;
+      const dia1Cfg = dia1Cod ? catalogo[dia1Cod] : undefined;
 
       if (prevCfg?.esNocturnoPesado && dia1Cfg && dia1Cfg.horasOrdinarias > 0 && dia1Cod !== 'S') {
         alertas.push({
@@ -431,8 +679,8 @@ export class AppComponent implements OnInit {
         const cAct = f.celdas[dActual]?.codigo || '';
 
         if (!cPrev || !cAct) continue;
-        const cfgPrev = CATALOGO_TURNOS[cPrev];
-        const cfgAct = CATALOGO_TURNOS[cAct];
+        const cfgPrev = catalogo[cPrev];
+        const cfgAct = catalogo[cAct];
 
         if (cfgPrev?.esNocturnoPesado && cfgAct && cfgAct.horasOrdinarias > 0 && cAct !== 'S' && cAct !== 'L') {
           alertas.push({
@@ -507,7 +755,7 @@ export class AppComponent implements OnInit {
 
     for (const d of dias) {
       const cod = celdasEmp[d.dia]?.codigo || '';
-      const cfg = cod ? CATALOGO_TURNOS[cod] : undefined;
+      const cfg = cod ? this.catalogoTurnosMap()[cod] : undefined;
       if (!cfg) continue;
 
       horasTrabajadas += cfg.horasOrdinarias;
@@ -564,27 +812,32 @@ export class AppComponent implements OnInit {
 
   private sembrarCuadranteConPlantillaReal(emps: EmpleadoHospital[]): void {
     const rueda8h: CodigoTurno[] = ['M8', 'M8', 'T8', 'T8', 'N8', 'S', 'L', 'L'];
-    const mapaInicial: Record<string, Record<number, CeldaAsignacion>> = {};
+    const anio = this.anioSeleccionado();
+    const porPeriodo: Record<string, Record<string, Record<number, CeldaAsignacion>>> = {};
 
-    emps.forEach((emp, idx) => {
-      mapaInicial[emp.id] = {};
-      for (let d = 1; d <= 31; d++) {
-        if (d === 1 && (emp.ultimoTurnoMesPrevio === 'N8' || emp.ultimoTurnoMesPrevio === 'G24')) {
-          mapaInicial[emp.id][d] = { codigo: 'S', previsto: 'S' };
-          continue;
+    for (const m of this.mesesDisponibles) {
+      const mapaMes: Record<string, Record<number, CeldaAsignacion>> = {};
+      emps.forEach((emp, idx) => {
+        mapaMes[emp.id] = {};
+        for (let d = 1; d <= 31; d++) {
+          if (d === 1 && (emp.ultimoTurnoMesPrevio === 'N8' || emp.ultimoTurnoMesPrevio === 'G24')) {
+            mapaMes[emp.id][d] = { codigo: 'S', previsto: 'S' };
+            continue;
+          }
+          const anterior = mapaMes[emp.id][d - 1]?.codigo;
+          if (anterior === 'N8' || anterior === 'G24') {
+            mapaMes[emp.id][d] = { codigo: 'S', previsto: 'S' };
+            continue;
+          }
+
+          const cod = rueda8h[(d + idx * 2 + m.valor) % rueda8h.length];
+          mapaMes[emp.id][d] = { codigo: cod, previsto: cod };
         }
-        const anterior = mapaInicial[emp.id][d - 1]?.codigo;
-        if (anterior === 'N8' || anterior === 'G24') {
-          mapaInicial[emp.id][d] = { codigo: 'S', previsto: 'S' };
-          continue;
-        }
+      });
+      porPeriodo[`${anio}-${m.valor}`] = mapaMes;
+    }
 
-        const cod = rueda8h[(d + idx * 2) % rueda8h.length];
-        mapaInicial[emp.id][d] = { codigo: cod, previsto: cod };
-      }
-    });
-
-    this.asignaciones.set(mapaInicial);
+    this.asignacionesPorPeriodo.set(porPeriodo);
   }
 
   // Interacciones con la Paleta y Celdas
@@ -610,7 +863,7 @@ export class AppComponent implements OnInit {
   iniciarPintadoCelda(empId: string, dia: number): void {
     this.celdaEnfocada.set({ empId, dia });
     this.pintandoConRaton.set(true);
-    this.aplicarTurnoEnCelda(empId, dia, this.turnoPincelActivo(), 'Pintado con Pincel Thurni');
+    this.aplicarTurnoEnCelda(empId, dia, this.turnoPincelActivo(), 'Asignación manual');
   }
 
   continuarPintadoCelda(empId: string, dia: number): void {
@@ -646,7 +899,7 @@ export class AppComponent implements OnInit {
 
   aplicarTurnoEnCelda(empId: string, dia: number, nuevoCodigo: CodigoTurno, origen: string): void {
     if (this.estadoCuadrante() === 'CERRADO_NOMINA') {
-      this.mostrarNotificacion('El cuadrante está CERRADO para Nómina. Reábrelo para editar.');
+      this.mostrarNotificacion('El cuadro de turnos está CERRADO para Nómina. Reábrelo para editar.');
       return;
     }
 
@@ -678,11 +931,9 @@ export class AppComponent implements OnInit {
       servicioEjecutorId: this.servicioSeleccionadoId(),
     };
 
-    actualMap[empId] = filaEmp;
-    this.asignaciones.set(actualMap);
-
     // Auto-protección con Saliente (S) al día siguiente
-    const cfgNuevo = CATALOGO_TURNOS[nuevoCodigo];
+    const cfgNuevo = this.catalogoTurnosMap()[nuevoCodigo];
+    let seAutoAsignoSaliente = false;
     if (cfgNuevo?.esNocturnoPesado && dia < this.diasDelMes().length) {
       const sig = filaEmp[dia + 1]?.codigo || '';
       if (!sig || sig === 'L') {
@@ -691,7 +942,40 @@ export class AppComponent implements OnInit {
           previsto: filaEmp[dia + 1]?.previsto ?? sig,
           esRotacion,
         };
+        seAutoAsignoSaliente = true;
       }
+    }
+
+    actualMap[empId] = filaEmp;
+    this.actualizarAsignacionesMesActual(actualMap);
+
+    // Persistir cambio de celda en PostgreSQL (asignaciones_turno)
+    this.api
+      .guardarCeldaCuadrante({
+        servicioId: this.servicioSeleccionadoId(),
+        anio: this.anioSeleccionado(),
+        mes: this.mesSeleccionado(),
+        dia,
+        empleadoId: empId,
+        codigo: nuevoCodigo,
+        previsto: filaEmp[dia].previsto || '',
+        esRotacion,
+      })
+      .subscribe();
+
+    if (seAutoAsignoSaliente) {
+      this.api
+        .guardarCeldaCuadrante({
+          servicioId: this.servicioSeleccionadoId(),
+          anio: this.anioSeleccionado(),
+          mes: this.mesSeleccionado(),
+          dia: dia + 1,
+          empleadoId: empId,
+          codigo: 'S',
+          previsto: filaEmp[dia + 1].previsto || '',
+          esRotacion,
+        })
+        .subscribe();
     }
 
     if (empObj) {
@@ -710,11 +994,110 @@ export class AppComponent implements OnInit {
     }
   }
 
+  /**
+   * Deja el cuadrante del servicio activo en blanco para que Gestión Humana
+   * lo construya a mano. Conserva las novedades oficiales (VAC / INC) que
+   * provienen de la Intranet y no se pueden borrar desde el planificador.
+   */
+  limpiarCuadranteCompleto(): void {
+    if (this.estadoCuadrante() === 'CERRADO_NOMINA') {
+      this.mostrarNotificacion('El cuadro de turnos está CERRADO para Nómina. Reábrelo para editar.');
+      return;
+    }
+
+    const srvNombre = this.servicioActual().nombre;
+    const confirmado = window.confirm(
+      `¿Dejar en blanco TODO el cuadro de turnos de "${srvNombre}"?\n\n` +
+        'Se borrarán los turnos asignados (incluida la sugerencia automática). ' +
+        'Las vacaciones e incapacidades oficiales se conservan.'
+    );
+    if (!confirmado) return;
+
+    const actualMap = { ...this.asignaciones() };
+    let celdasLimpiadas = 0;
+    const loteParaDb: {
+      empleadoId: string;
+      dia: number;
+      codigo: string;
+      previsto?: string;
+      esRotacion?: boolean;
+    }[] = [];
+
+    for (const { emp, esRotado } of this.empleadosDelCuadrante()) {
+      const fila = { ...(actualMap[emp.id] || {}) };
+      for (const d of this.diasDelMes()) {
+        const celda = fila[d.dia];
+        if (!celda || celda.codigo === '' || celda.codigo === 'VAC' || celda.codigo === 'INC') {
+          continue;
+        }
+        const prev = celda.previsto ?? celda.codigo;
+        fila[d.dia] = {
+          codigo: '',
+          previsto: prev,
+          esRotacion: esRotado,
+        };
+        loteParaDb.push({
+          empleadoId: emp.id,
+          dia: d.dia,
+          codigo: '',
+          previsto: prev,
+          esRotacion: esRotado,
+        });
+        celdasLimpiadas++;
+      }
+      actualMap[emp.id] = fila;
+    }
+
+    this.actualizarAsignacionesMesActual(actualMap);
+
+    if (loteParaDb.length > 0) {
+      this.api
+        .guardarLoteCuadrante({
+          servicioId: this.servicioSeleccionadoId(),
+          anio: this.anioSeleccionado(),
+          mes: this.mesSeleccionado(),
+          celdas: loteParaDb,
+        })
+        .subscribe();
+    }
+
+    this.bitacoraAuditoria.set([
+      {
+        id: 'aud-' + Date.now(),
+        timestamp: new Date().toTimeString().substring(0, 8),
+        actor: 'Gestión Humana',
+        empleadoNombre: 'Todo el servicio',
+        servicioNombre: srvNombre,
+        dia: 0,
+        turnoAnterior: '',
+        turnoNuevo: '',
+        motivo: `Limpieza total del cuadro de turnos (${celdasLimpiadas} turnos borrados) para construcción manual`,
+      },
+      ...this.bitacoraAuditoria().slice(0, 25),
+    ]);
+
+    this.mostrarNotificacion(
+      `Cuadro de turnos en blanco: ${celdasLimpiadas} turnos borrados. VAC e INC oficiales conservadas.`
+    );
+  }
+
   ejecutarAutocompletarHuecos(): void {
+    if (this.estadoCuadrante() === 'CERRADO_NOMINA') {
+      this.mostrarNotificacion('El cuadro de turnos está CERRADO para Nómina. Reábrelo para editar.');
+      return;
+    }
+
     const dias = this.diasDelMes();
     const srv = this.servicioActual();
     const actualMap = { ...this.asignaciones() };
     let totalAsignados = 0;
+    const loteParaDb: {
+      empleadoId: string;
+      dia: number;
+      codigo: string;
+      previsto?: string;
+      esRotacion?: boolean;
+    }[] = [];
 
     for (const d of dias) {
       const cob = this.coberturaPorDia()[d.dia];
@@ -739,12 +1122,20 @@ export class AppComponent implements OnInit {
         for (let i = 0; i < Math.min(cant, candidatos.length); i++) {
           const cand = candidatos[i];
           const fila = { ...(actualMap[cand.empleado.id] || {}) };
+          const prev = fila[d.dia]?.previsto ?? 'L';
           fila[d.dia] = {
             codigo: turno,
-            previsto: fila[d.dia]?.previsto ?? 'L',
+            previsto: prev,
             esRotacion: cand.esPersonalRotado,
           };
           actualMap[cand.empleado.id] = fila;
+          loteParaDb.push({
+            empleadoId: cand.empleado.id,
+            dia: d.dia,
+            codigo: turno,
+            previsto: prev,
+            esRotacion: cand.esPersonalRotado,
+          });
           totalAsignados++;
         }
       };
@@ -754,13 +1145,24 @@ export class AppComponent implements OnInit {
       cubrir('N8', faltanN);
     }
 
-    this.asignaciones.set(actualMap);
+    this.actualizarAsignacionesMesActual(actualMap);
+
+    if (loteParaDb.length > 0) {
+      this.api
+        .guardarLoteCuadrante({
+          servicioId: this.servicioSeleccionadoId(),
+          anio: this.anioSeleccionado(),
+          mes: this.mesSeleccionado(),
+          celdas: loteParaDb,
+        })
+        .subscribe();
+    }
     this.mostrarNotificacion(
-      `Motor Heurístico cubrió ${totalAsignados} turnos priorizando personal con deuda en el Banco de Horas.`
+      `Se completaron automáticamente ${totalAsignados} turnos faltantes.`
     );
   }
 
-  // Administración de Servicios y Enlaces Hermanos (Doc 20)
+  // Administración de Servicios y Servicios de Apoyo
   crearNuevoServicioAutonomo(): void {
     const cod = this.nuevoServicioCodigo().trim();
     const nom = this.nuevoServicioNombre().trim();
@@ -778,8 +1180,8 @@ export class AppComponent implements OnInit {
         tipoAsistencia: tipo,
       })
       .subscribe({
-        next: (nuevo) => {
-          this.mostrarNotificacion(`Servicio "${nom}" creado exitosamente en PostgreSQL.`);
+        next: () => {
+          this.mostrarNotificacion(`Servicio "${nom}" creado correctamente.`);
           this.nuevoServicioCodigo.set('');
           this.nuevoServicioNombre.set('');
           this.recargarServicios();
@@ -798,7 +1200,7 @@ export class AppComponent implements OnInit {
             hermanos: [],
           };
           this.servicios.set([...this.servicios(), nuevoSrv]);
-          this.mostrarNotificacion(`Servicio "${nom}" registrado.`);
+          this.mostrarNotificacion(`Servicio "${nom}" creado correctamente.`);
         },
       });
   }
@@ -808,17 +1210,17 @@ export class AppComponent implements OnInit {
     const id2 = this.enlaceHermanoSrv2();
 
     if (id1 === id2) {
-      this.mostrarNotificacion('Selecciona dos servicios distintos para enlazarlos como hermanos.');
+      this.mostrarNotificacion('Selecciona dos servicios distintos para vincularlos como apoyo.');
       return;
     }
 
     this.api.enlazarServiciosHermanos(id1, id2).subscribe({
       next: () => {
-        this.mostrarNotificacion('Servicios enlazados exitosamente como Hermanos.');
+        this.mostrarNotificacion('Servicios vinculados como servicios de apoyo.');
         this.recargarServicios();
       },
       error: () => {
-        this.mostrarNotificacion('Enlace de servicios hermanos registrado.');
+        this.mostrarNotificacion('Servicios vinculados como servicios de apoyo.');
       },
     });
   }
@@ -826,11 +1228,10 @@ export class AppComponent implements OnInit {
   desenlazarServicioHermano(srv1Id: string, srv2Id: string): void {
     this.api.desenlazarServiciosHermanos(srv1Id, srv2Id).subscribe({
       next: () => {
-        this.mostrarNotificacion('Enlace hermano desvinculado con éxito.');
+        this.mostrarNotificacion('Vínculo de servicio de apoyo eliminado.');
         this.recargarServicios();
       },
       error: () => {
-        // Fallback en memoria si la API estuviera offline
         this.servicios.update((lista) =>
           lista.map((s) => {
             if (s.id === srv1Id) {
@@ -842,7 +1243,7 @@ export class AppComponent implements OnInit {
             return s;
           })
         );
-        this.mostrarNotificacion('Enlace hermano desvinculado.');
+        this.mostrarNotificacion('Vínculo de servicio de apoyo eliminado.');
       },
     });
   }
@@ -855,7 +1256,7 @@ export class AppComponent implements OnInit {
     });
   }
 
-  // Rotaciones
+  // Personal de Apoyo
   abrirModalRotacion(): void {
     this.modalRotacionAbierto.set(true);
   }
@@ -869,10 +1270,10 @@ export class AppComponent implements OnInit {
       this.empleadosRotadosPorServicio.set(mapaRot);
     }
     this.modalRotacionAbierto.set(false);
-    this.mostrarNotificacion(`${cand.nombre} vinculado en Rotación Homóloga.`);
+    this.mostrarNotificacion(`${cand.nombre} agregado como personal de apoyo al cuadrante.`);
   }
 
-  // Permutas
+  // Cambios de Turno
   aprobarPermuta(idPermuta: string): void {
     const perm = this.listaPermutas().find((p) => p.id === idPermuta);
     if (!perm) return;
@@ -881,26 +1282,26 @@ export class AppComponent implements OnInit {
       perm.solicitanteId,
       perm.diaOrigen,
       perm.turnoDestino,
-      `Permuta #${perm.id} aprobada con ${perm.receptorNombre}`
+      `Cambio de turno aprobado con ${perm.receptorNombre}`
     );
     this.aplicarTurnoEnCelda(
       perm.receptorId,
       perm.diaDestino,
       perm.turnoOrigen,
-      `Permuta #${perm.id} aprobada con ${perm.solicitanteNombre}`
+      `Cambio de turno aprobado con ${perm.solicitanteNombre}`
     );
 
     this.listaPermutas.set(
       this.listaPermutas().map((p) => (p.id === idPermuta ? { ...p, estado: 'APROBADA' } : p))
     );
-    this.mostrarNotificacion(`Permuta aprobada. Cuadrante y calendarios actualizados.`);
+    this.mostrarNotificacion(`Cambio de turno aprobado y actualizado en el cuadrante.`);
   }
 
   rechazarPermuta(idPermuta: string): void {
     this.listaPermutas.set(
       this.listaPermutas().map((p) => (p.id === idPermuta ? { ...p, estado: 'RECHAZADA' } : p))
     );
-    this.mostrarNotificacion('Solicitud de permuta rechazada.');
+    this.mostrarNotificacion('Solicitud de cambio de turno rechazada.');
   }
 
   enviarSolicitudPermutaDesdePortal(): void {
@@ -934,11 +1335,11 @@ export class AppComponent implements OnInit {
       diaDestino: dia,
       turnoDestino: turnoComp,
       estado: 'PENDIENTE_SUPERVISOR',
-      validacionReglas: `Simulación OK: Misma categoría (${datosMios.empleado.categoria}), descanso ≥12h garantizado.`,
+      validacionReglas: `Misma categoría (${datosMios.empleado.categoria}) y descanso mínimo de 12h cumplido.`,
     };
 
     this.listaPermutas.set([nuevaPermuta, ...this.listaPermutas()]);
-    this.mostrarNotificacion(`Solicitud de permuta enviada a la Supervisora.`);
+    this.mostrarNotificacion(`Solicitud de cambio de turno enviada.`);
   }
 
   // Días cívicos
@@ -950,7 +1351,7 @@ export class AppComponent implements OnInit {
     FestivosColombiaHelper.agregarFestivoManual(fecha, nombre);
     this.versionCacheFestivos.update((v) => v + 1);
     this.api.agregarDiaCivico(fecha, nombre).subscribe();
-    this.mostrarNotificacion(`Día Cívico "${nombre}" guardado y refrescado en Caché RAM.`);
+    this.mostrarNotificacion(`Día cívico "${nombre}" agregado al calendario.`);
   }
 
   eliminarDiaCivico(fecha: string): void {
@@ -1015,16 +1416,56 @@ export class AppComponent implements OnInit {
 
   cambiarEstadoCuadrante(): void {
     const actual = this.estadoCuadrante();
+    const srvId = this.servicioSeleccionadoId();
+    const anio = this.anioSeleccionado();
+    const mes = this.mesSeleccionado();
+    const key = `${srvId}::${anio}-${mes}`;
+    const mesNombre =
+      this.mesesDisponibles.find((m) => m.valor === mes)?.nombre || String(mes);
+    const srvNombre = this.servicioActual().nombre;
+
+    let nuevoEstado: 'BORRADOR' | 'PUBLICADO' | 'CERRADO_NOMINA';
     if (actual === 'BORRADOR') {
-      this.estadoCuadrante.set('PUBLICADO');
-      this.mostrarNotificacion('Cuadrante PUBLICADO para los colaboradores.');
+      nuevoEstado = 'PUBLICADO';
+      this.mostrarNotificacion(
+        `Cuadro de turnos de ${srvNombre} (${mesNombre} ${anio}) publicado.`
+      );
     } else if (actual === 'PUBLICADO') {
-      this.estadoCuadrante.set('CERRADO_NOMINA');
-      this.mostrarNotificacion('Mes CERRADO para Nómina. Saldos de Banco de Horas consolidados.');
+      nuevoEstado = 'CERRADO_NOMINA';
+      this.mostrarNotificacion(
+        `Mes de ${mesNombre} ${anio} (${srvNombre}) cerrado para Nómina.`
+      );
     } else {
-      this.estadoCuadrante.set('BORRADOR');
-      this.mostrarNotificacion('Cuadrante reabierto en modo BORRADOR.');
+      nuevoEstado = 'BORRADOR';
+      this.mostrarNotificacion(
+        `Cuadro de turnos de ${srvNombre} (${mesNombre} ${anio}) reabierto en borrador.`
+      );
     }
+
+    this.estadosPorCuadrante.update((m) => ({ ...m, [key]: nuevoEstado }));
+
+    const saldosConsolidados =
+      nuevoEstado === 'CERRADO_NOMINA'
+        ? this.filasCuadrante().map((f) => ({
+            empleadoId: f.empleado.id,
+            saldoInicial: f.empleado.saldoBancoAnterior,
+            horasTrabajadas: f.horasTrabajadas,
+            horasContratadas: f.empleado.horasContratoMes,
+            horasAmortizadasComp: f.horasAmortizadasComp,
+            diferenciaMes: f.diferenciaMes,
+            saldoFinalAcumulado: f.nuevoSaldoBanco,
+          }))
+        : undefined;
+
+    this.api
+      .actualizarEstadoCuadrante({
+        servicioId: srvId,
+        anio,
+        mes,
+        estado: nuevoEstado,
+        saldosConsolidados,
+      })
+      .subscribe();
   }
 
   seleccionarDiaEnPortal(dia: number): void {
@@ -1049,15 +1490,133 @@ export class AppComponent implements OnInit {
 
   copiarEnlaceIcal(): void {
     this.modalIcalAbierto.set(false);
-    this.mostrarNotificacion('Enlace webcal:// copiado al portapapeles.');
+    this.mostrarNotificacion('Enlace de calendario copiado al portapapeles.');
   }
 
   notificarIntranet(): void {
-    this.mostrarNotificacion('Redirección a la Intranet Hospitalaria con SSO JWT.');
+    this.mostrarNotificacion('Regresando a la Intranet Hospitalaria...');
   }
 
   obtenerConfigTurno(cod: CodigoTurno): TipoTurnoConfig | undefined {
-    return cod ? CATALOGO_TURNOS[cod] : undefined;
+    return cod ? this.catalogoTurnosMap()[cod] : undefined;
+  }
+
+  cargarTurnoParaEdicion(turno: TipoTurnoConfig): void {
+    this.turnoEditandoCodigo.set(turno.codigo);
+    this.turnoFormCodigo.set(turno.codigo);
+    this.turnoFormNombre.set(turno.nombre);
+
+    if (turno.horasOrdinarias === 0) {
+      this.turnoFormModoJornada.set('DESCANSO');
+    } else if (turno.horasOrdinarias === 24) {
+      this.turnoFormModoJornada.set('GUARDIA_24H');
+    } else {
+      this.turnoFormModoJornada.set('HORARIO');
+    }
+
+    this.turnoFormHoraInicio.set(turno.horaInicio || '07:00');
+    this.turnoFormHoraFin.set(turno.horaFin || '15:00');
+    this.turnoFormNocturnoPesado.set(!!turno.esNocturnoPesado);
+    this.turnoFormDescuentaBanco.set(!!turno.descuentaBancoHoras);
+
+    const tema =
+      this.temasColorTurno.find(
+        (tm) => tm.bgHex.toLowerCase() === turno.bgHex.toLowerCase()
+      ) || this.temasColorTurno[0];
+    this.turnoFormColorKey.set(tema.key);
+  }
+
+  limpiarFormularioTurno(): void {
+    this.turnoEditandoCodigo.set(null);
+    this.turnoFormCodigo.set('');
+    this.turnoFormNombre.set('');
+    this.turnoFormModoJornada.set('HORARIO');
+    this.turnoFormHoraInicio.set('07:00');
+    this.turnoFormHoraFin.set('15:00');
+    this.turnoFormColorKey.set('AZUL_CIELO');
+    this.turnoFormNocturnoPesado.set(false);
+    this.turnoFormDescuentaBanco.set(false);
+  }
+
+  guardarTurnoEnCatalogo(): void {
+    const codigo = this.turnoFormCodigo().trim().toUpperCase();
+    const nombre = this.turnoFormNombre().trim();
+
+    if (!codigo || !nombre) {
+      this.mostrarNotificacion('Ingresa el código y el nombre del turno.');
+      return;
+    }
+
+    const calc = this.calculoAutomaticoHorasTurno();
+    const tema =
+      this.temasColorTurno.find((t) => t.key === this.turnoFormColorKey()) ||
+      this.temasColorTurno[0];
+
+    const existente = this.catalogoTurnosMap()[codigo];
+    const nuevoTurno: TipoTurnoConfig = {
+      codigo,
+      nombre,
+      horario: calc.horarioTexto,
+      horaInicio: this.turnoFormHoraInicio(),
+      horaFin: this.turnoFormHoraFin(),
+      horasOrdinarias: calc.ordinarias,
+      horasDiurnas: calc.diurnas,
+      horasNocturnas: calc.nocturnas,
+      bgHex: tema.bgHex,
+      textHex: tema.textHex,
+      borderHex: tema.borderHex,
+      esAusencia: existente?.esAusencia ?? false,
+      esNocturnoPesado: this.turnoFormNocturnoPesado(),
+      descuentaBancoHoras: this.turnoFormDescuentaBanco(),
+      visibleEnPaleta: existente?.visibleEnPaleta ?? true,
+    };
+
+    this.catalogoTurnosMap.update((actual) => ({
+      ...actual,
+      [codigo]: nuevoTurno,
+    }));
+
+    this.api
+      .guardarTipoTurno({
+        codigo,
+        nombre,
+        horaInicio: nuevoTurno.horaInicio || '07:00',
+        horaFin: nuevoTurno.horaFin || '15:00',
+        horasOrdinarias: nuevoTurno.horasOrdinarias,
+        horasDiurnas: nuevoTurno.horasDiurnas,
+        horasNocturnas: nuevoTurno.horasNocturnas,
+        colorHex: nuevoTurno.bgHex,
+        descuentaBancoHoras: nuevoTurno.descuentaBancoHoras,
+        esNocturnoPesado: nuevoTurno.esNocturnoPesado,
+      })
+      .subscribe({
+        next: () => {
+          this.mostrarNotificacion(
+            `Turno [${codigo}] "${nombre}" guardado en el catálogo.`
+          );
+        },
+        error: () => {
+          this.mostrarNotificacion(
+            `Turno [${codigo}] actualizado en la sesión actual.`
+          );
+        },
+      });
+
+    this.limpiarFormularioTurno();
+  }
+
+  alternarVisibilidadTurnoPaleta(codigo: string): void {
+    this.catalogoTurnosMap.update((actual) => {
+      const item = actual[codigo];
+      if (!item) return actual;
+      return {
+        ...actual,
+        [codigo]: {
+          ...item,
+          visibleEnPaleta: item.visibleEnPaleta === false ? true : false,
+        },
+      };
+    });
   }
 
   obtenerConflictoCelda(empId: string, dia: number): InfraccionNormativa | undefined {
@@ -1094,7 +1653,7 @@ export class AppComponent implements OnInit {
     const partes: string[] = [`${emp.nombre} • ${emp.categoria} • Día ${d.dia}`];
     if (d.festivo) partes.push(`🇨🇴 Festivo: ${d.festivo.nombre}`);
     if (celda?.codigo) {
-      const cfg = CATALOGO_TURNOS[celda.codigo];
+      const cfg = this.catalogoTurnosMap()[celda.codigo];
       if (cfg) partes.push(`Turno: ${cfg.nombre} (${cfg.horario})`);
     } else {
       partes.push('Sin turno asignado');

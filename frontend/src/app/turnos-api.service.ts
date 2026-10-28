@@ -54,6 +54,26 @@ export class TurnosApiService {
     });
   }
 
+  // 1.5 Catálogo Maestro de Tipos de Turno (PostgreSQL)
+  getTiposTurno(): Observable<any[]> {
+    return this.http.get<any[]>(`${this.baseUrl}/servicios-admin/turnos`);
+  }
+
+  guardarTipoTurno(turno: {
+    codigo: string;
+    nombre: string;
+    horaInicio: string;
+    horaFin: string;
+    horasOrdinarias: number;
+    horasDiurnas: number;
+    horasNocturnas: number;
+    colorHex: string;
+    descuentaBancoHoras: boolean;
+    esNocturnoPesado: boolean;
+  }): Observable<any> {
+    return this.http.post(`${this.baseUrl}/servicios-admin/turnos`, turno);
+  }
+
   // 2. Festivos Oficiales y Días Cívicos (Caché RAM en NestJS)
   getFestivos(anio: number): Observable<{ festivos: FestivoEntry[] }> {
     return this.http.get<{ festivos: FestivoEntry[] }>(
@@ -77,7 +97,76 @@ export class TurnosApiService {
     );
   }
 
-  // 4. Validación de Reglas Clínicas
+  // 4. Persistencia y Validación de Cuadrantes en PostgreSQL
+  getEstadoGlobalCuadrantes(anio: number): Observable<{
+    anio: number;
+    estados: Record<string, 'BORRADOR' | 'PUBLICADO' | 'CERRADO_NOMINA'>;
+    asignacionesPorPeriodo: Record<
+      string,
+      Record<
+        string,
+        Record<
+          number,
+          {
+            codigo: string;
+            previsto?: string;
+            esRotacion?: boolean;
+            servicioEjecutorId?: string;
+          }
+        >
+      >
+    >;
+    saldosConsolidados: Record<string, number>;
+  }> {
+    return this.http.get<any>(`${this.baseUrl}/cuadrantes/estado-global?anio=${anio}`);
+  }
+
+  actualizarEstadoCuadrante(payload: {
+    servicioId: string;
+    anio: number;
+    mes: number;
+    estado: 'BORRADOR' | 'PUBLICADO' | 'CERRADO_NOMINA';
+    saldosConsolidados?: {
+      empleadoId: string;
+      saldoInicial: number;
+      horasTrabajadas: number;
+      horasContratadas: number;
+      horasAmortizadasComp: number;
+      diferenciaMes: number;
+      saldoFinalAcumulado: number;
+    }[];
+  }): Observable<any> {
+    return this.http.put(`${this.baseUrl}/cuadrantes/estado`, payload);
+  }
+
+  guardarCeldaCuadrante(payload: {
+    servicioId: string;
+    anio: number;
+    mes: number;
+    dia: number;
+    empleadoId: string;
+    codigo: string;
+    previsto?: string;
+    esRotacion?: boolean;
+  }): Observable<any> {
+    return this.http.put(`${this.baseUrl}/cuadrantes/celda`, payload);
+  }
+
+  guardarLoteCuadrante(payload: {
+    servicioId: string;
+    anio: number;
+    mes: number;
+    celdas: {
+      empleadoId: string;
+      dia: number;
+      codigo: string;
+      previsto?: string;
+      esRotacion?: boolean;
+    }[];
+  }): Observable<any> {
+    return this.http.put(`${this.baseUrl}/cuadrantes/lote`, payload);
+  }
+
   validarCeldaReglas(dto: ValidacionTurnoDto): Observable<any> {
     return this.http.post(`${this.baseUrl}/cuadrantes/validar-celda`, dto);
   }

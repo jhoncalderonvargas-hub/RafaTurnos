@@ -1,94 +1,169 @@
 .app-shell {
   min-height: 100vh;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   user-select: none;
+  background: #f8fafc;
 }
 
-/* HEADER SUPERIOR */
-.top-header {
+/* MENÚ LATERAL IZQUIERDO COLAPSABLE (ESTILO THURNI) */
+.side-nav {
+  width: 230px;
+  min-width: 230px;
   background: #0f172a;
   color: #ffffff;
-  padding: 10px 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  border-right: 1px solid #1e293b;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.12);
+  z-index: 30;
+  transition: width 0.18s ease, min-width 0.18s ease;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+.side-nav.collapsed {
+  width: 62px;
+  min-width: 62px;
+}
+
+.side-brand {
+  padding: 12px 10px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-  z-index: 30;
+  gap: 8px;
+  border-bottom: 1px solid #1e293b;
 }
 
-.brand-group {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.side-nav.collapsed .side-brand {
+  flex-direction: column;
+  padding: 10px 6px;
+  gap: 6px;
+}
+
+.brand-text {
+  flex: 1;
+  min-width: 0;
 }
 
 .logo-badge {
-  font-size: 24px;
+  font-size: 20px;
   background: #1e293b;
-  width: 42px;
-  height: 42px;
-  border-radius: 10px;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
   border: 1px solid #334155;
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
 .app-title {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 800;
   letter-spacing: 0.4px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.badge-version {
-  background: #0284c7;
-  color: #fff;
-  font-size: 10px;
-  padding: 2px 7px;
-  border-radius: 99px;
-  font-weight: 600;
+  white-space: nowrap;
 }
 
 .app-subtitle {
-  font-size: 11px;
+  font-size: 10.5px;
   color: #94a3b8;
+  white-space: nowrap;
 }
 
-.nav-tabs {
-  display: flex;
-  gap: 6px;
+.btn-collapse-side {
   background: #1e293b;
-  padding: 4px;
-  border-radius: 8px;
+  color: #cbd5e1;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  width: 26px;
+  height: 26px;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
-.nav-tabs button {
+.btn-collapse-side:hover {
+  background: #334155;
+  color: #ffffff;
+}
+
+.side-menu {
+  flex: 1;
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+}
+
+.side-section-label {
+  font-size: 10px;
+  font-weight: 800;
+  color: #64748b;
+  letter-spacing: 0.6px;
+  padding: 10px 8px 3px;
+}
+
+.side-divider {
+  height: 1px;
+  background: #1e293b;
+  margin: 6px 4px;
+}
+
+.side-item {
   background: transparent;
   color: #cbd5e1;
   border: none;
-  padding: 7px 14px;
-  border-radius: 6px;
+  padding: 9px 10px;
+  border-radius: 7px;
   font-size: 12.5px;
   font-weight: 600;
   display: flex;
   align-items: center;
-  gap: 6px;
-  transition: all 0.15s;
+  gap: 10px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, color 0.15s;
+  position: relative;
 }
 
-.nav-tabs button:hover {
+.side-nav.collapsed .side-item {
+  justify-content: center;
+  padding: 10px 0;
+}
+
+.side-item:hover {
   color: #ffffff;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.07);
 }
 
-.nav-tabs button.active {
+.side-item.active {
   background: #0284c7;
   color: #ffffff;
+}
+
+.side-icon {
+  font-size: 16px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.side-label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pill-count {
@@ -97,41 +172,72 @@
   font-size: 10px;
   padding: 1px 6px;
   border-radius: 99px;
+  font-weight: 700;
 }
 
-.header-actions {
+.side-nav.collapsed .pill-count {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  padding: 0 4px;
+  font-size: 9px;
+}
+
+.side-footer {
+  padding: 10px 8px;
+  border-top: 1px solid #1e293b;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.side-footer-btn {
+  background: #1e293b;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.side-nav.collapsed .side-footer-btn {
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.side-footer-btn:hover {
+  background: #334155;
+  color: #ffffff;
+}
+
+/* ÁREA DE TRABAJO DERECHA */
+.main-workspace {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .btn-outline {
-  background: #1e293b;
-  color: #e2e8f0;
-  border: 1px solid #475569;
+  background: #ffffff;
+  color: #334155;
+  border: 1px solid #cbd5e1;
   padding: 7px 12px;
   border-radius: 6px;
   font-size: 12px;
   font-weight: 600;
+  cursor: pointer;
 }
 
 .btn-outline:hover {
-  background: #334155;
-}
-
-.btn-intranet {
-  background: #334155;
-  color: #f8fafc;
-  text-decoration: none;
-  padding: 7px 13px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  border: 1px solid #475569;
-}
-
-.btn-intranet:hover {
-  background: #475569;
+  background: #f1f5f9;
 }
 
 /* TOAST */
@@ -436,10 +542,10 @@
   left: 0;
   background: #ffffff;
   z-index: 12;
-  min-width: 225px;
-  max-width: 225px;
+  min-width: 235px;
+  max-width: 235px;
   text-align: left !important;
-  padding: 5px 10px !important;
+  padding: 2px 10px !important;
   border-right: 2px solid #cbd5e1 !important;
 }
 
@@ -449,17 +555,18 @@ thead .col-sticky-emp {
 }
 
 .col-empalme {
-  min-width: 38px;
+  min-width: 44px;
   background: #f8fafc;
-  font-size: 10.5px;
+  font-size: 11.5px;
 }
 
 .empalme-badge {
   display: inline-block;
-  padding: 2px 5px;
+  padding: 1px 5px;
   border-radius: 4px;
   font-weight: 700;
-  font-size: 10px;
+  font-size: 11px;
+  line-height: 18px;
   background: #e2e8f0;
   color: #475569;
 }
@@ -471,13 +578,18 @@ thead .col-sticky-emp {
 }
 
 .col-day {
-  min-width: 32px;
-  width: 32px;
+  min-width: 36px;
+  width: 36px;
+}
+
+.col-day.is-saturday {
+  background: #e0f2fe !important;
+  color: #0369a1 !important;
 }
 
 .col-day.is-sunday {
-  background: #f1f5f9 !important;
-  color: #0369a1 !important;
+  background: #bae6fd !important;
+  color: #075985 !important;
 }
 
 .col-day.is-holiday {
@@ -486,35 +598,37 @@ thead .col-sticky-emp {
 }
 
 .day-number {
-  font-size: 11.5px;
+  font-size: 13px;
   font-weight: 800;
 }
 
 .day-letter {
-  font-size: 9.5px;
+  font-size: 10.5px;
   opacity: 0.75;
 }
 
 .holiday-dot {
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1;
 }
 
-/* FILA DE EMPLEADO */
+/* FILA DE EMPLEADO (compacta: una sola línea +20% legibilidad) */
 .emp-cell {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .emp-avatar {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   background: #e0f2fe;
   color: #0369a1;
   font-weight: 800;
-  font-size: 10.5px;
+  font-size: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -532,38 +646,77 @@ thead .col-sticky-emp {
 }
 
 .emp-name {
-  font-weight: 700;
-  font-size: 12px;
+  font-weight: 600;
+  font-size: 13px;
   color: #0f172a;
-  display: flex;
-  align-items: center;
-  gap: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
 }
 
 .emp-role {
-  font-size: 10px;
+  font-size: 11px;
   color: #64748b;
 }
 
 .badge-rotado {
   background: #e0e7ff;
   color: #3730a3;
-  font-size: 9.5px;
-  padding: 1px 5px;
+  font-size: 10.5px;
+  padding: 1px 4px;
   border-radius: 4px;
+  flex-shrink: 0;
+}
+
+/* SEPARADOR DE GRUPO POR CATEGORÍA */
+.group-row td {
+  background: #f1f5f9;
+  height: 22px;
+  padding: 0 !important;
+  border-bottom: 1px solid #cbd5e1;
+}
+
+.group-row .group-label {
+  background: #e2e8f0 !important;
+  padding: 0 10px !important;
+  font-size: 11.5px;
+  font-weight: 800;
+  color: #334155;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.group-count {
+  display: inline-block;
+  margin-left: 6px;
+  background: #ffffff;
+  color: #475569;
+  border-radius: 8px;
+  padding: 0 7px;
+  font-size: 11px;
 }
 
 /* CELDAS INTERACTIVAS */
 .matrix-cell {
-  height: 36px;
+  height: 29px;
+  padding: 0 !important;
   cursor: pointer;
   position: relative;
   transition: filter 0.08s;
   outline: none;
 }
 
+.matrix-cell.cell-saturday {
+  background-color: #f0f9ff;
+}
+
 .matrix-cell.cell-sunday {
-  background-color: #f8fafc;
+  background-color: #e0f2fe;
 }
 
 .matrix-cell.cell-holiday {
@@ -590,14 +743,15 @@ thead .col-sticky-emp {
   align-items: center;
   justify-content: center;
   font-weight: 800;
-  font-size: 11px;
+  font-size: 12.5px;
+  line-height: 1;
   position: relative;
 }
 
 .conflict-indicator {
   position: absolute;
   top: 1px;
-  right: 2px;
+  right: 1px;
   background: #dc2626;
   color: #fff;
   width: 12px;
@@ -610,9 +764,9 @@ thead .col-sticky-emp {
 
 .rotacion-mini-tag {
   position: absolute;
-  bottom: 1px;
+  bottom: 0;
   right: 1px;
-  font-size: 8px;
+  font-size: 8.5px;
 }
 
 .diff-triangle {
@@ -621,16 +775,25 @@ thead .col-sticky-emp {
   left: 0;
   width: 0;
   height: 0;
-  border-top: 8px solid #f59e0b;
-  border-right: 8px solid transparent;
+  border-top: 9px solid #f59e0b;
+  border-right: 9px solid transparent;
 }
 
-/* COLUMNAS DE BALANCE Y BANCO DE HORAS */
+/* COLUMNAS DE BALANCE Y BANCO DE HORAS (una sola línea) */
 .col-summary {
-  min-width: 68px;
-  padding: 4px 6px !important;
-  font-size: 11.5px;
+  min-width: 66px;
+  padding: 0 6px !important;
+  font-size: 12.5px;
   background: #fafafa;
+  white-space: nowrap;
+}
+
+.col-summary.col-recargo {
+  min-width: 52px;
+  padding: 0 5px !important;
+  font-size: 12px;
+  background: #f8fafc;
+  color: #334155;
 }
 
 .col-banco-final {
@@ -643,14 +806,13 @@ thead .col-sticky-emp {
 }
 
 .sub-contract {
-  font-size: 10px;
+  font-size: 11px;
   color: #64748b;
-  display: block;
 }
 
 .banco-pill {
   font-weight: 700;
-  padding: 2px 5px;
+  padding: 1px 5px;
   border-radius: 4px;
   background: #f1f5f9;
 }
@@ -666,17 +828,19 @@ thead .col-sticky-emp {
 }
 
 .comp-note {
-  font-size: 9.5px;
+  margin-left: 3px;
+  font-size: 10.5px;
   color: #0f766e;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .banco-badge-final {
   display: inline-block;
-  padding: 3px 7px;
+  padding: 1px 7px;
   border-radius: 99px;
   font-weight: 800;
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 19px;
 }
 
 .banco-badge-final.status-ok {
@@ -696,27 +860,29 @@ thead .col-sticky-emp {
 
 .equity-counts {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 10.5px;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .comp-dom-tag {
   background: #fef3c7;
-  color: #b45309;
   border: 1px solid #fcd34d;
   border-radius: 4px;
-  padding: 0 4px;
-  font-size: 9.5px;
-  font-weight: 700;
+  padding: 0 3px;
+  font-size: 10.5px;
+  line-height: 16px;
 }
 
 /* FOOTER DE COBERTURAS */
 .coverage-row td {
-  padding: 5px 3px;
+  padding: 4px 3px;
   font-weight: 700;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .coverage-label {
@@ -1056,27 +1222,88 @@ thead .col-sticky-emp {
   justify-content: flex-end;
 }
 
-/* PORTAL DEL EMPLEADO: CALENDARIO PERSONAL */
-.employee-calendar-strip {
+/* PORTAL DEL EMPLEADO: CALENDARIO PERSONAL (CUADRÍCULA SEMANAL 7 COLUMNAS) */
+.weekly-calendar-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(105px, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 8px;
 }
 
+.weekday-header {
+  text-align: center;
+  padding: 8px 6px;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #334155;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+
+/* Sombreado Nivel 1: Sábado (Azul cielo suave) */
+.weekday-header.sat-header {
+  background: #e0f2fe;
+  color: #0369a1;
+  border-color: #7dd3fc;
+}
+
+/* Sombreado Nivel 2: Domingo (Azul clínico ascendente más intenso) */
+.weekday-header.sun-header {
+  background: #bae6fd;
+  color: #075985;
+  border-color: #38bdf8;
+}
+
 .emp-day-card {
-  border: 2px solid #e2e8f0;
+  background: #ffffff;
+  border: 1.5px solid #e2e8f0;
   border-radius: 8px;
-  padding: 8px;
+  padding: 8px 10px;
+  min-height: 92px;
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  transition: transform 0.1s, box-shadow 0.1s;
+  justify-content: space-between;
+  gap: 5px;
+  transition: transform 0.1s, box-shadow 0.1s, border-color 0.1s;
 }
 
-.emp-day-card:hover {
+/* Sombreado con color ascendente en fin de semana: Nivel 1 (Sábado) -> Nivel 2 (Domingo) */
+.emp-day-card.sat-card {
+  background: linear-gradient(180deg, #f0f9ff 0%, #e0f2fe 100%);
+  border-color: #7dd3fc;
+}
+
+.emp-day-card.sat-card .emp-day-num {
+  color: #0369a1;
+}
+
+.emp-day-card.sun-card {
+  background: linear-gradient(180deg, #e0f2fe 0%, #bae6fd 100%);
+  border-color: #38bdf8;
+}
+
+.emp-day-card.sun-card .emp-day-num {
+  color: #075985;
+}
+
+.emp-day-card.holiday-card {
+  border-color: #f59e0b;
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.25);
+}
+
+.emp-day-card.empty-slot {
+  cursor: default;
+  opacity: 0.45;
+  border-style: dashed;
+  pointer-events: none;
+}
+
+.emp-day-card:not(.empty-slot):hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.08);
 }
 
 .emp-day-card.selected-day {
@@ -1094,24 +1321,50 @@ thead .col-sticky-emp {
 }
 
 .emp-day-num {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 800;
+  color: #0f172a;
+}
+
+.emp-festivo-tag {
+  font-size: 9.5px;
+  font-weight: 800;
+  background: #fef3c7;
+  color: #b45309;
+  border: 1px solid #fde68a;
+  padding: 1px 5px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.emp-shift-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1.5px solid transparent;
 }
 
 .emp-day-code {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 900;
-  margin-top: 2px;
+  line-height: 1.1;
 }
 
 .emp-day-name {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
-  color: #1e293b;
+  line-height: 1.2;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .emp-day-hours {
-  font-size: 9.5px;
+  font-size: 10px;
+  font-weight: 600;
   color: #475569;
 }
 
@@ -1286,6 +1539,166 @@ thead .col-sticky-emp {
 
 .btn-sm-primary:hover {
   background: #0369a1;
+}
+
+/* VISTA UNIFICADA DE CONFIGURACIÓN Y SUB-PESTAÑAS */
+.config-header-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+  padding: 12px 18px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+
+.config-header-bar h2 {
+  margin: 0;
+  font-size: 18px;
+  color: #0f172a;
+}
+
+.config-subtabs {
+  display: flex;
+  gap: 6px;
+  background: #f1f5f9;
+  padding: 4px;
+  border-radius: 8px;
+}
+
+.config-subtab-btn {
+  border: none;
+  background: transparent;
+  color: #475569;
+  padding: 7px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.config-subtab-btn:hover {
+  color: #0f172a;
+  background: #e2e8f0;
+}
+
+.config-subtab-btn.active {
+  background: #0284c7;
+  color: #ffffff;
+  box-shadow: 0 2px 4px rgba(2, 132, 199, 0.25);
+}
+
+/* FORMULARIO CATÁLOGO DE TURNOS */
+.two-col-inputs {
+  display: grid;
+  grid-template-columns: 1fr 1.6fr;
+  gap: 12px;
+}
+
+.auto-calc-banner {
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  color: #0f172a;
+}
+
+.calc-sub {
+  margin-left: 6px;
+  font-size: 11.5px;
+  color: #475569;
+}
+
+.calc-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.calc-pill-day {
+  background: #ffffff;
+  border: 1px solid #7dd3fc;
+  color: #0369a1;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+}
+
+.calc-pill-night {
+  background: #f5f3ff;
+  border: 1px solid #c4b5fd;
+  color: #6d28d9;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+}
+
+.color-themes-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.color-theme-swatch {
+  min-width: 44px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  font-weight: 800;
+  font-size: 12px;
+  cursor: pointer;
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+
+.color-theme-swatch.selected {
+  outline: 2px solid #0f172a;
+  transform: scale(1.06);
+}
+
+.form-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+}
+
+.btn-palette-toggle {
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #64748b;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-palette-toggle.active {
+  background: #f0fdf4;
+  border-color: #86efac;
+  color: #166534;
 }
 
 
