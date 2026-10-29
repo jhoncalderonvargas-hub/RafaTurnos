@@ -119,14 +119,108 @@ export class ServiciosAdminController {
       intranetId?: string;
     }
   ) {
+    const cod = data.codigo.trim().toUpperCase();
+    const nom = data.nombre.trim();
+
+    const existente = await this.prisma.servicio.findUnique({
+      where: { codigo: cod },
+    });
+    if (existente) {
+      throw new Error("El código de servicio '" + cod + "' ya se encuentra registrado por '" + existente.nombre + "'.");
+    }
+
     return this.prisma.servicio.create({
       data: {
-        codigo: data.codigo.toUpperCase(),
-        nombre: data.nombre,
+        codigo: cod,
+        nombre: nom,
         tipoAsistencia: data.tipoAsistencia,
         intranetId: data.intranetId,
       },
     });
+  }
+
+  // 2.1 Actualizar datos de un servicio existente
+  @Put(':id')
+  async actualizarServicio(
+    @Param('id') id: string,
+    @Body()
+    data: {
+      codigo: string;
+      nombre: string;
+      tipoAsistencia: any;
+    }
+  ) {
+    const cod = data.codigo.trim().toUpperCase();
+    const nom = data.nombre.trim();
+
+    const enConflicto = await this.prisma.servicio.findFirst({
+      where: {
+        codigo: cod,
+        NOT: { id },
+      },
+    });
+    if (enConflicto) {
+      throw new Error("El código '" + cod + "' ya está en uso por otro servicio (" + enConflicto.nombre + ").");
+    }
+
+    return this.prisma.servicio.update({
+      where: { id },
+      data: {
+        codigo: cod,
+        nombre: nom,
+        tipoAsistencia: data.tipoAsistencia,
+      },
+    });
+  }
+
+  // 2.2 Eliminar un servicio si no tiene restricciones de integridad
+  @Delete(':id')
+  async eliminarServicio(@Param('id') id: string) {
+    const servicio = await this.prisma.servicio.findUnique({
+      where: { id },
+      include: {
+        _count: {
+          select: {
+            empleadosBase: true,
+            cuadrantes: true,
+            asignacionesEjecutadas: true,
+          },
+        },
+      },
+    });
+
+    if (!servicio) {
+      throw new Error('El servicio no existe o ya fue eliminado.');
+    }
+
+    if (servicio._count.empleadosBase > 0) {
+      throw new Error(
+        "No es posible eliminar el servicio '" + servicio.nombre + "' porque tiene " + servicio._count.empleadosBase + " colaborador(es) adscrito(s). Trasládelos antes de eliminar."
+      );
+    }
+
+    if (servicio._count.cuadrantes > 0 || servicio._count.asignacionesEjecutadas > 0) {
+      throw new Error(
+        "No es posible eliminar el servicio '" + servicio.nombre + "' porque contiene historial de turnos o cuadrantes generados."
+      );
+    }
+
+    // Se eliminan los vínculos de hermanos
+    await this.prisma.servicioHermano.deleteMany({
+      where: {
+        OR: [{ servicioId: id }, { servicioHermanoId: id }],
+      },
+    });
+
+    await this.prisma.servicioTurnoHabilitado.deleteMany({
+      where: { servicioId: id },
+    });
+
+    await this.prisma.servicio.delete({
+      where: { id },
+    });
+
+    return { mensaje: "Servicio '" + servicio.nombre + "' eliminado correctamente." };
   }
 
   // 3. Enlazar dos "Servicios Hermanos" para habilitar rotación de personal homólogo

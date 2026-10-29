@@ -1,109 +1,129 @@
 <div class="app-shell" (mouseup)="finalizarPintadoRaton()">
-  <!-- MENÚ LATERAL IZQUIERDO COLAPSABLE (ESTILO THURNI) -->
-  <aside class="side-nav" [class.collapsed]="sidebarContraido()">
-    <div class="side-brand">
-      <div class="logo-badge" (click)="sidebarContraido.set(!sidebarContraido())" title="Mostrar / ocultar menú">🏥</div>
-      @if (!sidebarContraido()) {
-        <div class="brand-text">
-          <div class="app-title">RAFA TURNOS</div>
-          <div class="app-subtitle">Gestión de Turnos</div>
-        </div>
-      }
-      <button
-        class="btn-collapse-side"
-        (click)="sidebarContraido.set(!sidebarContraido())"
-        [title]="sidebarContraido() ? 'Expandir menú lateral' : 'Contraer menú lateral'">
-        {{ sidebarContraido() ? '»' : '«' }}
-      </button>
-    </div>
-
-    <nav class="side-menu">
-      @if (!sidebarContraido()) {
-        <div class="side-section-label">OPERACIÓN</div>
-      }
-      <button
-        class="side-item"
-        [class.active]="vistaActual() === 'PLANIFICADOR'"
-        (click)="vistaActual.set('PLANIFICADOR')"
-        title="Cuadro de Turnos">
-        <span class="side-icon">📅</span>
+  <!-- MENÚ LATERAL IZQUIERDO COLAPSABLE AUTOMÁTICAMENTE POR HOVER (ESTILO THURNI) -->
+  <div class="side-nav-rail" [class.is-pinned]="sidebarFijo()">
+    <aside
+      class="side-nav"
+      [class.collapsed]="sidebarContraido()"
+      [class.is-floating]="!sidebarFijo() && sidebarHovered()"
+      [class.is-pinned]="sidebarFijo()"
+      (mouseenter)="onSidebarMouseEnter()"
+      (mouseleave)="onSidebarMouseLeave()">
+      <div class="side-brand">
+        <div class="logo-badge" (click)="alternarFijarSidebar()" title="Fijar / liberar menú">🏥</div>
         @if (!sidebarContraido()) {
-          <span class="side-label">Cuadro de Turnos</span>
+          <div class="brand-text">
+            <div class="app-title">RAFA TURNOS</div>
+            <div class="app-subtitle">Gestión de Turnos</div>
+          </div>
         }
-      </button>
+        <button
+          class="btn-collapse-side"
+          [class.pinned]="sidebarFijo()"
+          (click)="alternarFijarSidebar()"
+          [title]="sidebarFijo() ? 'Desanclar menú (Modo flotante automático)' : 'Fijar menú lateral abierto'">
+          {{ sidebarFijo() ? '📌' : (sidebarContraido() ? '»' : '📌') }}
+        </button>
+      </div>
 
-      <button
-        class="side-item"
-        [class.active]="vistaActual() === 'DASHBOARD'"
-        (click)="vistaActual.set('DASHBOARD')"
-        title="Solicitudes y Historial">
-        <span class="side-icon">🔄</span>
+      <nav class="side-menu">
         @if (!sidebarContraido()) {
-          <span class="side-label">Solicitudes y Historial</span>
+          <div class="side-section-label">OPERACIÓN</div>
         }
-        @if (permutasPendientesCount() > 0) {
-          <span class="pill-count">{{ permutasPendientesCount() }}</span>
-        }
-      </button>
+        <button
+          class="side-item"
+          [class.active]="vistaActual() === 'PLANIFICADOR'"
+          (click)="onItemNavegacionClick('PLANIFICADOR')"
+          title="Cuadro de Turnos">
+          <span class="side-icon">📅</span>
+          @if (!sidebarContraido()) {
+            <span class="side-label">Cuadro de Turnos</span>
+          }
+        </button>
 
-      @if (!sidebarContraido()) {
-        <div class="side-section-label">COLABORADOR</div>
-      } @else {
-        <div class="side-divider"></div>
-      }
+        <button
+          class="side-item"
+          [class.active]="vistaActual() === 'DASHBOARD'"
+          (click)="onItemNavegacionClick('DASHBOARD')"
+          title="Solicitudes y Historial">
+          <span class="side-icon">🔄</span>
+          @if (!sidebarContraido()) {
+            <span class="side-label">Solicitudes y Historial</span>
+          }
+          @if (permutasPendientesCount() > 0) {
+            <span class="pill-count">{{ permutasPendientesCount() }}</span>
+          }
+        </button>
 
-      <button
-        class="side-item"
-        [class.active]="vistaActual() === 'PORTAL_EMPLEADO'"
-        (click)="vistaActual.set('PORTAL_EMPLEADO')"
-        title="Mi Calendario">
-        <span class="side-icon">👩‍⚕️</span>
+        <button
+          class="side-item"
+          [class.active]="vistaActual() === 'REPORTES'"
+          (click)="onItemNavegacionClick('REPORTES')"
+          title="Reportes y Analítica">
+          <span class="side-icon">📊</span>
+          @if (!sidebarContraido()) {
+            <span class="side-label">Reportes</span>
+          }
+        </button>
+
         @if (!sidebarContraido()) {
-          <span class="side-label">Mi Calendario</span>
+          <div class="side-section-label">COLABORADOR</div>
+        } @else {
+          <div class="side-divider"></div>
         }
-      </button>
 
-      @if (!sidebarContraido()) {
-        <div class="side-section-label">CONFIGURACIÓN</div>
-      } @else {
-        <div class="side-divider"></div>
-      }
+        <button
+          class="side-item"
+          [class.active]="vistaActual() === 'PORTAL_EMPLEADO'"
+          (click)="onItemNavegacionClick('PORTAL_EMPLEADO')"
+          title="Mi Calendario">
+          <span class="side-icon">👩‍⚕️</span>
+          @if (!sidebarContraido()) {
+            <span class="side-label">Mi Calendario</span>
+          }
+        </button>
 
-      <button
-        class="side-item"
-        [class.active]="vistaActual() === 'CONFIGURACION'"
-        (click)="vistaActual.set('CONFIGURACION')"
-        title="Configuración (Servicios, Catálogo de Turnos y Festivos)">
-        <span class="side-icon">⚙️</span>
         @if (!sidebarContraido()) {
-          <span class="side-label">Configuración</span>
+          <div class="side-section-label">CONFIGURACIÓN</div>
+        } @else {
+          <div class="side-divider"></div>
         }
-      </button>
-    </nav>
 
-    <div class="side-footer">
-      <button
-        class="side-footer-btn"
-        (click)="modalIcalAbierto.set(true)"
-        title="Vincular calendario con el teléfono">
-        <span class="side-icon">📲</span>
-        @if (!sidebarContraido()) {
-          <span>Vincular al Celular</span>
-        }
-      </button>
+        <button
+          class="side-item"
+          [class.active]="vistaActual() === 'CONFIGURACION'"
+          (click)="onItemNavegacionClick('CONFIGURACION')"
+          title="Configuración (Servicios, Catálogo de Turnos y Festivos)">
+          <span class="side-icon">⚙️</span>
+          @if (!sidebarContraido()) {
+            <span class="side-label">Configuración</span>
+          }
+        </button>
+      </nav>
 
-      <a
-        class="side-footer-btn intranet-link"
-        href="javascript:void(0)"
-        (click)="notificarIntranet()"
-        title="Volver a la Intranet">
-        <span class="side-icon">⬅</span>
-        @if (!sidebarContraido()) {
-          <span>Volver a la Intranet</span>
-        }
-      </a>
-    </div>
-  </aside>
+      <div class="side-footer">
+        <button
+          class="side-footer-btn"
+          (click)="modalIcalAbierto.set(true)"
+          title="Vincular calendario con el teléfono">
+          <span class="side-icon">📲</span>
+          @if (!sidebarContraido()) {
+            <span>Vincular al Celular</span>
+          }
+        </button>
+
+        <a
+          class="side-footer-btn intranet-link"
+          href="javascript:void(0)"
+          (click)="notificarIntranet()"
+          title="Volver a la Intranet">
+          <span class="side-icon">⬅</span>
+          @if (!sidebarContraido()) {
+            <span>Volver a la Intranet</span>
+          }
+        </a>
+      </div>
+    </aside>
+  </div>
 
   <!-- ÁREA DE TRABAJO PRINCIPAL -->
   <main class="main-workspace">
@@ -563,6 +583,376 @@
   }
 
   <!-- ======================================================================= -->
+  <!-- VISTA: REPORTES Y ANALÍTICA HOSPITALARIA                                -->
+  <!-- ======================================================================= -->
+  @if (vistaActual() === 'REPORTES') {
+    @let kpi = kpisReportes();
+    @let filas = datosReporteCalculados();
+    <div class="view-container">
+      <!-- Barra Superior de Filtros y Acciones -->
+      <div class="reportes-header-bar">
+        <div class="reportes-title-block">
+          <h2>📊 Reportes y Analítica</h2>
+          <span class="reportes-period-tag">Periodo: {{ nombreMesSeleccionado() }} {{ anioSeleccionado() }}</span>
+        </div>
+
+        <div class="reportes-controls-row">
+          <div class="control-item">
+            <label>Mes:</label>
+            <select [ngModel]="mesSeleccionado()" (ngModelChange)="cambiarMes($event)">
+              @for (m of mesesDisponibles; track m.valor) {
+                <option [value]="m.valor">{{ m.nombre }}</option>
+              }
+            </select>
+          </div>
+
+          <div class="control-item">
+            <label>Servicio:</label>
+            <select [ngModel]="filtroReporteServicioId()" (ngModelChange)="filtroReporteServicioId.set($event)">
+              <option value="TODOS">🏥 Todos los Servicios del Hospital</option>
+              @for (s of servicios(); track s.id) {
+                <option [value]="s.id">{{ s.nombre }} ({{ s.codigo }})</option>
+              }
+            </select>
+          </div>
+
+          <div class="control-item">
+            <label>Buscar:</label>
+            <input
+              type="text"
+              placeholder="Nombre, cédula o cargo..."
+              [ngModel]="busquedaReporteTexto()"
+              (ngModelChange)="busquedaReporteTexto.set($event)"
+              class="report-search-input"
+            />
+          </div>
+
+          <button class="btn-excel" (click)="exportarExcelReportes()">
+            📥 Exportar Excel (CSV)
+          </button>
+        </div>
+      </div>
+
+      <!-- Sub-pestañas de los 4 Reportes Clave -->
+      <div class="config-subtabs" style="margin-bottom: 16px;">
+        <button
+          class="config-subtab-btn"
+          [class.active]="subVistaReportes() === 'PRE_NOMINA'"
+          (click)="subVistaReportes.set('PRE_NOMINA')">
+          📥 Pre-Nómina Global
+        </button>
+        <button
+          class="config-subtab-btn"
+          [class.active]="subVistaReportes() === 'EQUIDAD'"
+          (click)="subVistaReportes.set('EQUIDAD')">
+          ⚖️ Equidad y Fatiga
+        </button>
+        <button
+          class="config-subtab-btn"
+          [class.active]="subVistaReportes() === 'BANCO_HORAS'"
+          (click)="subVistaReportes.set('BANCO_HORAS')">
+          🏦 Banco de Horas
+        </button>
+        <button
+          class="config-subtab-btn"
+          [class.active]="subVistaReportes() === 'AUSENTISMO'"
+          (click)="subVistaReportes.set('AUSENTISMO')">
+          🩺 Ausentismo y Novedades
+        </button>
+      </div>
+
+      <!-- Métricas Resumen (KPIs Dinámicos) -->
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-num">{{ kpi.totalEmpleados }}</div>
+          <div class="kpi-label">Colaboradores en Reporte</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-num">{{ kpi.totalHoras }}h</div>
+          <div class="kpi-label">Horas Totales Programadas</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-num">🌙 {{ kpi.totalNoches }} / ☀️ {{ kpi.totalDomFest }}</div>
+          <div class="kpi-label">Noches y Dom-Festivos</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-num">🏅 {{ kpi.totalCompensatorios }}</div>
+          <div class="kpi-label">Compensatorios Legales CST</div>
+        </div>
+        <div class="kpi-card" [class.alert-card-kpi]="kpi.criticosBanco > 0">
+          <div class="kpi-num">{{ kpi.criticosBanco }} / {{ kpi.totalAusentismoDias }}d</div>
+          <div class="kpi-label">Bancos Críticos / Ausencias</div>
+        </div>
+      </div>
+
+      <!-- TABLA 1: PRE-NÓMINA GLOBAL -->
+      @if (subVistaReportes() === 'PRE_NOMINA') {
+        <div class="panel-card">
+          <div class="panel-header">
+            <h3>📥 Consolidado de Pre-Nómina y Recargos Legales</h3>
+            <span class="badge-count">{{ filas.length }} Colaboradores</span>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Documento</th>
+                  <th>Colaborador</th>
+                  <th>Servicio Base</th>
+                  <th>Categoría</th>
+                  <th>Contrato</th>
+                  <th title="Horas Ordinarias Diurnas (06:00-21:00 L-S)">HOD</th>
+                  <th title="Horas Ordinarias Nocturnas (21:00-06:00 L-S) Recargo 35%">HON 35%</th>
+                  <th title="Horas Dominicales/Festivas Diurnas (06:00-21:00) Recargo 75%">HDFD 75%</th>
+                  <th title="Horas Dominicales/Festivas Nocturnas (21:00-06:00) Recargo 110%">HDFN 110%</th>
+                  <th>Total Mes</th>
+                  <th>Dom / Comp</th>
+                  <th>VAC / INC</th>
+                  <th>Saldo Ant.</th>
+                  <th>Mov. Mes</th>
+                  <th>Nuevo Banco</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (r of filas; track r.emp.id) {
+                  <tr>
+                    <td class="font-mono">{{ r.emp.documento }}</td>
+                    <td><strong>{{ r.emp.nombre }}</strong></td>
+                    <td><span class="badge-personal">{{ r.servicioNombre }}</span></td>
+                    <td>{{ r.emp.categoria }}</td>
+                    <td class="font-mono">{{ r.horasContratoMes }}h</td>
+                    <td class="font-mono">{{ r.hod }}h</td>
+                    <td class="font-mono">{{ r.hon }}h</td>
+                    <td class="font-mono">{{ r.hdfd }}h</td>
+                    <td class="font-mono">{{ r.hdfn }}h</td>
+                    <td class="font-mono"><strong>{{ r.horasTrabajadas }}h</strong></td>
+                    <td class="font-mono">
+                      {{ r.conteoDomFest }} dom
+                      @if (r.causaCompensatorioDominical) {
+                        <span class="comp-dom-tag">+1 Comp</span>
+                      }
+                    </td>
+                    <td class="font-mono">{{ r.diasVac }}d / {{ r.diasInc }}d</td>
+                    <td class="font-mono">{{ formatearSigno(r.saldoBancoAnterior) }}h</td>
+                    <td class="font-mono">{{ formatearSigno(r.diferenciaMes) }}h</td>
+                    <td class="font-mono">
+                      <strong [class.text-pos]="r.nuevoSaldoBanco > 0" [class.text-neg]="r.nuevoSaldoBanco < 0">
+                        {{ formatearSigno(r.nuevoSaldoBanco) }}h
+                      </strong>
+                    </td>
+                  </tr>
+                } @empty {
+                  <tr>
+                    <td colspan="15" class="text-muted" style="text-align: center; padding: 20px;">
+                      No se encontraron colaboradores con los filtros seleccionados.
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        </div>
+      }
+
+      <!-- TABLA 2: EQUIDAD Y FATIGA ASISTENCIAL -->
+      @if (subVistaReportes() === 'EQUIDAD') {
+        <div class="panel-card">
+          <div class="panel-header">
+            <h3>⚖️ Auditoría de Equidad en Cargas y Nivel de Fatiga</h3>
+            <span class="badge-count">{{ filas.length }} Colaboradores</span>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Documento</th>
+                  <th>Colaborador</th>
+                  <th>Servicio Base</th>
+                  <th>Categoría</th>
+                  <th>Noches Realizadas</th>
+                  <th>Dom. y Festivos</th>
+                  <th>Total Horas Nocturnas</th>
+                  <th>Compensatorio CST</th>
+                  <th>Índice de Carga / Fatiga</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (r of filas; track r.emp.id) {
+                  <tr>
+                    <td class="font-mono">{{ r.emp.documento }}</td>
+                    <td><strong>{{ r.emp.nombre }}</strong></td>
+                    <td><span class="badge-personal">{{ r.servicioNombre }}</span></td>
+                    <td>{{ r.emp.categoria }}</td>
+                    <td class="font-mono">🌙 <strong>{{ r.conteoNoches }}</strong> noches</td>
+                    <td class="font-mono">☀️ <strong>{{ r.conteoDomFest }}</strong> dom-fest</td>
+                    <td class="font-mono">{{ r.hon + r.hdfn }}h nocturnas</td>
+                    <td>
+                      @if (r.causaCompensatorioDominical) {
+                        <span class="comp-dom-tag">🏅 Causa Compensatorio</span>
+                      } @else {
+                        <span class="text-muted">No Aplica</span>
+                      }
+                    </td>
+                    <td>
+                      @if (r.nivelFatiga === 'ALTO') {
+                        <span class="badge-fatiga fatiga-alta">🔴 Alta Carga</span>
+                      } @else if (r.nivelFatiga === 'MODERADO') {
+                        <span class="badge-fatiga fatiga-moderada">🟡 Moderada</span>
+                      } @else {
+                        <span class="badge-fatiga fatiga-baja">🟢 Equilibrada</span>
+                      }
+                    </td>
+                  </tr>
+                } @empty {
+                  <tr>
+                    <td colspan="9" class="text-muted" style="text-align: center; padding: 20px;">
+                      No se encontraron colaboradores con los filtros seleccionados.
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        </div>
+      }
+
+      <!-- TABLA 3: BANCO DE HORAS -->
+      @if (subVistaReportes() === 'BANCO_HORAS') {
+        <div class="panel-card">
+          <div class="panel-header">
+            <h3>🏦 Estado Continuo y Semáforo del Banco de Horas</h3>
+            <span class="badge-count">{{ filas.length }} Colaboradores</span>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Documento</th>
+                  <th>Colaborador</th>
+                  <th>Servicio Base</th>
+                  <th>Cargo</th>
+                  <th>Saldo Inicial</th>
+                  <th>Horas Programadas</th>
+                  <th>Contrato Mes</th>
+                  <th>Amortizadas (COMP)</th>
+                  <th>Diferencia Mes</th>
+                  <th>Nuevo Saldo Continuo</th>
+                  <th>Semáforo de Riesgo</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (r of filas; track r.emp.id) {
+                  <tr>
+                    <td class="font-mono">{{ r.emp.documento }}</td>
+                    <td><strong>{{ r.emp.nombre }}</strong></td>
+                    <td><span class="badge-personal">{{ r.servicioNombre }}</span></td>
+                    <td>{{ r.emp.categoria }}</td>
+                    <td class="font-mono">{{ formatearSigno(r.saldoBancoAnterior) }}h</td>
+                    <td class="font-mono">{{ r.horasTrabajadas }}h</td>
+                    <td class="font-mono">{{ r.horasContratoMes }}h</td>
+                    <td class="font-mono">
+                      @if (r.horasAmortizadasComp > 0) {
+                        <span class="comp-note">-{{ r.horasAmortizadasComp }}h COMP</span>
+                      } @else {
+                        0h
+                      }
+                    </td>
+                    <td class="font-mono">{{ formatearSigno(r.diferenciaMes) }}h</td>
+                    <td class="font-mono">
+                      <strong>{{ formatearSigno(r.nuevoSaldoBanco) }}h</strong>
+                    </td>
+                    <td>
+                      @if (r.estadoBanco === 'CRITICO') {
+                        <span class="banco-badge-final status-danger">🔴 Crítico ({{ formatearSigno(r.nuevoSaldoBanco) }}h)</span>
+                      } @else if (r.estadoBanco === 'ATENCION') {
+                        <span class="banco-badge-final status-warn">🟡 Atención ({{ formatearSigno(r.nuevoSaldoBanco) }}h)</span>
+                      } @else {
+                        <span class="banco-badge-final status-ok">🟢 Equilibrado</span>
+                      }
+                    </td>
+                  </tr>
+                } @empty {
+                  <tr>
+                    <td colspan="11" class="text-muted" style="text-align: center; padding: 20px;">
+                      No se encontraron colaboradores con los filtros seleccionados.
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        </div>
+      }
+
+      <!-- TABLA 4: AUSENTISMO Y NOVEDADES -->
+      @if (subVistaReportes() === 'AUSENTISMO') {
+        <div class="panel-card">
+          <div class="panel-header">
+            <h3>🩺 Monitoreo de Ausentismo (Vacaciones e Incapacidades Médicas)</h3>
+            <span class="badge-count">{{ filas.length }} Colaboradores</span>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Documento</th>
+                  <th>Colaborador</th>
+                  <th>Servicio Base</th>
+                  <th>Cargo</th>
+                  <th>Días Vacaciones (VAC)</th>
+                  <th>Días Incapacidad (INC)</th>
+                  <th>Total Días de Ausencia</th>
+                  <th>Estado del Mes</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (r of filas; track r.emp.id) {
+                  <tr>
+                    <td class="font-mono">{{ r.emp.documento }}</td>
+                    <td><strong>{{ r.emp.nombre }}</strong></td>
+                    <td><span class="badge-personal">{{ r.servicioNombre }}</span></td>
+                    <td>{{ r.emp.categoria }}</td>
+                    <td class="font-mono">
+                      @if (r.diasVac > 0) {
+                        <span class="badge-nuevo">{{ r.diasVac }} días</span>
+                      } @else {
+                        <span class="text-muted">0</span>
+                      }
+                    </td>
+                    <td class="font-mono">
+                      @if (r.diasInc > 0) {
+                        <span class="badge-custom">{{ r.diasInc }} días</span>
+                      } @else {
+                        <span class="text-muted">0</span>
+                      }
+                    </td>
+                    <td class="font-mono">
+                      <strong>{{ r.diasVac + r.diasInc }} días</strong>
+                    </td>
+                    <td>
+                      @if (r.diasVac + r.diasInc > 0) {
+                        <span class="tag-hermano">Novedad Registrada</span>
+                      } @else {
+                        <span class="text-muted">Operación Normal</span>
+                      }
+                    </td>
+                  </tr>
+                } @empty {
+                  <tr>
+                    <td colspan="8" class="text-muted" style="text-align: center; padding: 20px;">
+                      No se encontraron colaboradores con los filtros seleccionados.
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        </div>
+      }
+    </div>
+  }
+
+  <!-- ======================================================================= -->
   <!-- VISTA 3: MI CALENDARIO (PORTAL DEL COLABORADOR)                         -->
   <!-- ======================================================================= -->
   @if (vistaActual() === 'PORTAL_EMPLEADO') {
@@ -784,28 +1174,52 @@
   <!-- ======================================================================= -->
   @if (vistaActual() === 'CONFIGURACION') {
     <div class="view-container">
-      <div class="config-header-bar">
-        <h2>⚙️ Configuración del Sistema</h2>
-        <div class="config-subtabs">
+      <!-- Cabecero Principal Unificado de Configuración -->
+      <div class="config-hero-card">
+        <div class="config-hero-main">
+          <div class="config-hero-brand">
+            <div class="config-icon-badge">⚙️</div>
+            <div class="config-hero-titles">
+              <div class="config-title-row">
+                <h2>Configuración del Sistema</h2>
+                <span class="config-badge-chip">Ajustes Generales</span>
+              </div>
+              <p class="config-hero-desc">
+                Gestión de servicios asistenciales, convenios de apoyo, catálogo de códigos de turno y calendario oficial de festivos
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <nav class="config-nav-tabs" aria-label="Módulos de Configuración">
           <button
-            class="config-subtab-btn"
+            type="button"
+            class="config-tab-btn"
             [class.active]="subVistaConfig() === 'SERVICIOS'"
             (click)="subVistaConfig.set('SERVICIOS')">
-            🏥 Servicios y Apoyo
+            <span class="tab-icon">🏥</span>
+            <span class="tab-text">Servicios y Apoyo</span>
+            <span class="tab-count-badge">{{ servicios().length }}</span>
           </button>
           <button
-            class="config-subtab-btn"
+            type="button"
+            class="config-tab-btn"
             [class.active]="subVistaConfig() === 'CATALOGO_TURNOS'"
             (click)="subVistaConfig.set('CATALOGO_TURNOS')">
-            🎨 Catálogo de Turnos
+            <span class="tab-icon">🎨</span>
+            <span class="tab-text">Catálogo de Turnos</span>
+            <span class="tab-count-badge">{{ listaTurnosCatalogo().length }}</span>
           </button>
           <button
-            class="config-subtab-btn"
+            type="button"
+            class="config-tab-btn"
             [class.active]="subVistaConfig() === 'FESTIVOS'"
             (click)="subVistaConfig.set('FESTIVOS')">
-            🇨🇴 Calendario de Festivos
+            <span class="tab-icon">🇨🇴</span>
+            <span class="tab-text">Calendario de Festivos</span>
+            <span class="tab-count-badge">{{ listaFestivosAnio().length }}</span>
           </button>
-        </div>
+        </nav>
       </div>
 
       <!-- SUB-VISTA A: SERVICIOS Y APOYO -->
@@ -832,10 +1246,19 @@
 
         <!-- Formularios de Administración -->
         <div class="admin-forms-grid">
-          <!-- Tarjeta Crear Servicio -->
+          <!-- Tarjeta Crear / Editar Servicio -->
           <div class="panel-card">
             <div class="panel-header">
-              <h3>➕ Crear Nuevo Servicio</h3>
+              <h3>
+                @if (servicioEditandoId()) {
+                  ✏️ Editando Servicio: {{ nuevoServicioNombre() }}
+                } @else {
+                  ➕ Crear Nuevo Servicio
+                }
+              </h3>
+              @if (servicioEditandoId()) {
+                <span class="badge-custom">Modo Edición</span>
+              }
             </div>
             <div class="form-vertical">
               <div class="form-row">
@@ -845,6 +1268,7 @@
                   placeholder="Ej: HEM, UCIP, NEO"
                   [ngModel]="nuevoServicioCodigo()"
                   (ngModelChange)="nuevoServicioCodigo.set($event)"
+                  maxlength="8"
                 />
               </div>
               <div class="form-row">
@@ -870,10 +1294,15 @@
                   <option value="AMBULATORIO">AMBULATORIO (Consulta Externa / Terapias)</option>
                 </select>
               </div>
-              <div class="form-actions">
-                <button class="btn-primary" (click)="crearNuevoServicioAutonomo()">
-                  💾 Crear Servicio
+              <div class="form-actions" style="display: flex; gap: 8px;">
+                <button class="btn-primary" (click)="guardarServicioAutonomo()">
+                  💾 {{ servicioEditandoId() ? 'Guardar Cambios' : 'Crear Servicio' }}
                 </button>
+                @if (servicioEditandoId()) {
+                  <button class="btn-outline" (click)="cancelarEdicionServicio()">
+                    ✕ Cancelar
+                  </button>
+                }
               </div>
             </div>
           </div>
@@ -965,13 +1394,30 @@
                       }
                     </td>
                     <td>
-                      <button
-                        class="btn-sm-primary"
-                        (click)="cambiarServicio(srv.id); vistaActual.set('PLANIFICADOR')"
-                        title="Abrir este servicio en el cuadro de turnos"
-                      >
-                        📅 Abrir Cuadro de Turnos
-                      </button>
+                      <div class="table-actions-cluster">
+                        <button
+                          class="btn-sm-primary"
+                          (click)="cambiarServicio(srv.id); vistaActual.set('PLANIFICADOR')"
+                          title="Abrir este servicio en el cuadro de turnos"
+                        >
+                          📅 Cuadro
+                        </button>
+                        <button
+                          class="btn-action-icon"
+                          (click)="cargarServicioParaEdicion(srv)"
+                          title="Editar código, nombre o área asistencial"
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          class="btn-action-icon btn-action-danger"
+                          (click)="eliminarServicioAutonomo(srv)"
+                          [disabled]="(srv.empleadosCount || 0) > 0"
+                          [title]="(srv.empleadosCount || 0) > 0 ? 'No se puede eliminar: tiene ' + srv.empleadosCount + ' colaboradores adscritos' : 'Eliminar este servicio'"
+                        >
+                          🗑️
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 }

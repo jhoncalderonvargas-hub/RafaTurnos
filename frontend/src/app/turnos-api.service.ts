@@ -34,6 +34,18 @@ export class TurnosApiService {
     return this.http.post(`${this.baseUrl}/servicios-admin`, servicio);
   }
 
+  actualizarServicio(id: string, servicio: {
+    codigo: string;
+    nombre: string;
+    tipoAsistencia: string;
+  }): Observable<any> {
+    return this.http.put(`${this.baseUrl}/servicios-admin/${id}`, servicio);
+  }
+
+  eliminarServicio(id: string): Observable<any> {
+    return this.http.delete(`${this.baseUrl}/servicios-admin/${id}`);
+  }
+
   enlazarServiciosHermanos(servicioId: string, hermanoId: string): Observable<any> {
     return this.http.post(
       `${this.baseUrl}/servicios-admin/${servicioId}/enlace-hermano/${hermanoId}`,
@@ -52,6 +64,11 @@ export class TurnosApiService {
       empleadoId,
       servicioBaseId,
     });
+  }
+
+  // 1.2 Listado Maestro de Empleados Asistenciales (PostgreSQL)
+  getEmpleados(): Observable<any[]> {
+    return this.http.get<any[]>(`${this.baseUrl}/servicios-admin/empleados`);
   }
 
   // 1.5 Catálogo Maestro de Tipos de Turno (PostgreSQL)

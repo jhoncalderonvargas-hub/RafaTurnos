@@ -43,12 +43,18 @@ export interface InfraccionNormativa {
   styleUrl: './app.component.css',
 })
 export class AppComponent implements OnInit {
-  // Navegación principal (Menú lateral izquierdo colapsable estilo Thurni)
+  // Navegación principal (Menú lateral izquierdo colapsable automáticamente por hover)
   vistaActual = signal<
-    'PLANIFICADOR' | 'DASHBOARD' | 'PORTAL_EMPLEADO' | 'CONFIGURACION'
+    'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'PORTAL_EMPLEADO' | 'CONFIGURACION'
   >('PLANIFICADOR');
   subVistaConfig = signal<'SERVICIOS' | 'CATALOGO_TURNOS' | 'FESTIVOS'>('SERVICIOS');
-  sidebarContraido = signal<boolean>(false);
+  subVistaReportes = signal<'PRE_NOMINA' | 'EQUIDAD' | 'BANCO_HORAS' | 'AUSENTISMO'>('PRE_NOMINA');
+  filtroReporteServicioId = signal<string>('TODOS');
+  busquedaReporteTexto = signal<string>('');
+  sidebarFijo = signal<boolean>(false);
+  sidebarHovered = signal<boolean>(false);
+  sidebarExpandido = computed<boolean>(() => this.sidebarFijo() || this.sidebarHovered());
+  sidebarContraido = computed<boolean>(() => !this.sidebarExpandido());
   mensajeToast = signal<string>('');
 
   // Periodo y Servicio Activo
@@ -59,6 +65,12 @@ export class AppComponent implements OnInit {
   estadoCuadrante = computed<'BORRADOR' | 'PUBLICADO' | 'CERRADO_NOMINA'>(() => {
     const key = `${this.servicioSeleccionadoId()}::${this.anioSeleccionado()}-${this.mesSeleccionado()}`;
     return this.estadosPorCuadrante()[key] || 'BORRADOR';
+  });
+  nombreMesSeleccionado = computed<string>(() => {
+    return (
+      this.mesesDisponibles.find((m) => m.valor === this.mesSeleccionado())?.nombre ||
+      String(this.mesSeleccionado())
+    );
   });
   mostrarComparadorPrevisto = signal<boolean>(false);
 
@@ -74,7 +86,8 @@ export class AppComponent implements OnInit {
   nuevoFestivoNombre = signal<string>('Día Cívico Aniversario Hospitalario');
   versionCacheFestivos = signal<number>(1);
 
-  // Formulario Nuevo Servicio Autónomo (Gestión de Servicios)
+  // Formulario de Creación / Edición de Servicio Autónomo
+  servicioEditandoId = signal<string | null>(null);
   nuevoServicioCodigo = signal<string>('');
   nuevoServicioNombre = signal<string>('');
   nuevoServicioTipoAsistencia = signal<string>('URGENCIAS');
@@ -218,56 +231,14 @@ export class AppComponent implements OnInit {
   diaPermutaSeleccionado = signal<number>(10);
   companeroPermutaId = signal<string>('emp-002');
 
-  // Solicitudes de Permuta 1-a-1
-  listaPermutas = signal<PermutaItem[]>([
-    {
-      id: 'perm-101',
-      fechaSolicitud: '2026-10-28 08:15',
-      solicitanteId: 'emp-005',
-      solicitanteNombre: 'Enf. Diana Carolina Mora',
-      receptorId: 'emp-006',
-      receptorNombre: 'Enf. Camilo Andrés López',
-      categoria: 'Enfermero(a) Jefe',
-      servicioId: 'srv-urg',
-      diaOrigen: 6,
-      turnoOrigen: 'N8',
-      diaDestino: 6,
-      turnoDestino: 'M8',
-      estado: 'PENDIENTE_SUPERVISOR',
-      validacionReglas: 'Cumple descanso mínimo de 12h y mantiene la cobertura del servicio.',
-    },
-    {
-      id: 'perm-102',
-      fechaSolicitud: '2026-10-28 09:40',
-      solicitanteId: 'emp-009',
-      solicitanteNombre: 'Laura Marcela Gómez Pineda',
-      receptorId: 'emp-011',
-      receptorNombre: 'Paola Andrea Castro Mejía',
-      categoria: 'Auxiliar de Enfermería',
-      servicioId: 'srv-urg',
-      diaOrigen: 14,
-      turnoOrigen: 'T8',
-      diaDestino: 14,
-      turnoDestino: 'M8',
-      estado: 'PENDIENTE_SUPERVISOR',
-      validacionReglas: 'Misma categoría profesional y sin cruce de horarios.',
-    },
-  ]);
+  // Mapa de Saldos Consolidados de Banco de Horas (PostgreSQL)
+  saldosConsolidadosMap = signal<Record<string, number>>({});
 
-  // Bitácora de Auditoría
-  bitacoraAuditoria = signal<RegistroAuditoria[]>([
-    {
-      id: 'aud-1',
-      timestamp: '2026-10-28 07:30:12',
-      actor: 'Coordinación Urgencias',
-      empleadoNombre: 'Enf. Diana Carolina Mora',
-      servicioNombre: 'Urgencias Generales',
-      dia: 1,
-      turnoAnterior: 'M8',
-      turnoNuevo: 'S',
-      motivo: 'Descanso post-turno nocturno',
-    },
-  ]);
+  // Solicitudes de Permuta 1-a-1 (Persistidas localmente sin datos residuales de prueba)
+  listaPermutas = signal<PermutaItem[]>(this.cargarPermutasDesdeStorage());
+
+  // Bitácora de Auditoría (Persistida localmente sin datos residuales de prueba)
+  bitacoraAuditoria = signal<RegistroAuditoria[]>(this.cargarAuditoriaDesdeStorage());
 
   constructor(private readonly api: TurnosApiService) {}
 
@@ -275,8 +246,67 @@ export class AppComponent implements OnInit {
     this.cargarDatosDesdeBaseDeDatos();
   }
 
+  private cargarPermutasDesdeStorage(): PermutaItem[] {
+    try {
+      const guardadas = localStorage.getItem('rafa_turnos_permutas');
+      return guardadas ? JSON.parse(guardadas) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private guardarPermutasEnStorage(lista: PermutaItem[]): void {
+    try {
+      localStorage.setItem('rafa_turnos_permutas', JSON.stringify(lista));
+    } catch {}
+  }
+
+  private actualizarListaPermutas(lista: PermutaItem[]): void {
+    this.listaPermutas.set(lista);
+    this.guardarPermutasEnStorage(lista);
+  }
+
+  private cargarAuditoriaDesdeStorage(): RegistroAuditoria[] {
+    try {
+      const guardadas = localStorage.getItem('rafa_turnos_auditoria');
+      return guardadas ? JSON.parse(guardadas) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private guardarAuditoriaEnStorage(lista: RegistroAuditoria[]): void {
+    try {
+      localStorage.setItem('rafa_turnos_auditoria', JSON.stringify(lista));
+    } catch {}
+  }
+
+  private registrarLogAuditoria(log: RegistroAuditoria): void {
+    const actualizada = [log, ...this.bitacoraAuditoria().slice(0, 30)];
+    this.bitacoraAuditoria.set(actualizada);
+    this.guardarAuditoriaEnStorage(actualizada);
+  }
+
+  private mapearEmpleadosDesdeBackend(rawEmps: any[]): EmpleadoHospital[] {
+    return rawEmps.map((e) => {
+      const saldoObj = e.saldosBancoHoras && e.saldosBancoHoras[0];
+      const saldoAnt = saldoObj ? Number(saldoObj.saldoFinalAcumulado || 0) : 0;
+
+      return {
+        id: e.id,
+        documento: e.documento,
+        nombre: e.nombre,
+        categoria: e.categoria ? (e.categoria.nombre || e.categoria) : 'Personal Asistencial',
+        servicioBaseId: e.servicioBaseId,
+        horasContratoMes: e.horasContratoMes || 168,
+        saldoBancoAnterior: saldoAnt,
+        ultimoTurnoMesPrevio: 'L' as CodigoTurno,
+      };
+    });
+  }
+
   cargarDatosDesdeBaseDeDatos(): void {
-    // 1. Mapeo de Servicios desde PostgreSQL
+    // 1. Carga inicial resiliente de Servicios (fallback instantáneo para navegación fluida)
     const rawSrvs: any[] = Array.isArray(SERVICIOS_DB_RAW)
       ? (SERVICIOS_DB_RAW as unknown as any[])
       : ((SERVICIOS_DB_RAW as any).value || []);
@@ -295,31 +325,16 @@ export class AppComponent implements OnInit {
     }));
     this.servicios.set(srvsMapeados);
 
-    // 2. Mapeo de Empleados desde PostgreSQL con sus saldos reales de Banco de Horas
+    // 2. Carga inicial de Empleados
     const rawEmps: any[] = Array.isArray(EMPLEADOS_DB_RAW)
       ? (EMPLEADOS_DB_RAW as unknown as any[])
       : ((EMPLEADOS_DB_RAW as any).value || []);
 
-    const empsMapeados: EmpleadoHospital[] = rawEmps.map((e, idx) => {
-      const saldoObj = e.saldosBancoHoras && e.saldosBancoHoras[0];
-      const saldoAnt = saldoObj ? saldoObj.saldoFinalAcumulado : ((idx % 3 === 0) ? 16 : (idx % 3 === 1) ? -8 : 0);
-      const ultimoTurno = (idx % 4 === 0) ? 'N8' : (idx % 4 === 1) ? 'T8' : (idx % 4 === 2) ? 'M8' : 'L';
-
-      return {
-        id: e.id,
-        documento: e.documento,
-        nombre: e.nombre,
-        categoria: e.categoria ? e.categoria.nombre : 'Personal Asistencial',
-        servicioBaseId: e.servicioBaseId,
-        horasContratoMes: e.horasContratoMes || 168,
-        saldoBancoAnterior: saldoAnt,
-        ultimoTurnoMesPrevio: ultimoTurno as CodigoTurno,
-      };
-    });
+    const empsMapeados = this.mapearEmpleadosDesdeBackend(rawEmps);
     this.empleados.set(empsMapeados);
 
-    // Inicializar asignaciones de cuadrante con rueda balanceada
-    this.sembrarCuadranteConPlantillaReal(empsMapeados);
+    // Inicializar matriz limpia del cuadrante (sin turnos ficticios de prueba)
+    this.inicializarMatrizCuadrante(empsMapeados);
 
     // Ajustar selección de empleado en portal
     if (empsMapeados.length > 0) {
@@ -327,9 +342,54 @@ export class AppComponent implements OnInit {
       this.companeroPermutaId.set(empsMapeados[1]?.id || empsMapeados[0].id);
     }
 
-    // 3. Cargar estados de cuadrantes y turnos persistidos en PostgreSQL
-    this.sincronizarCuadrantesDesdePostgres();
+    // 3. SINCRONIZACIÓN MAESTRA CON POSTGRESQL (Única fuente de verdad)
+    this.sincronizarServiciosDesdePostgres();
     this.sincronizarCatalogoTurnosDesdePostgres();
+    this.sincronizarEmpleadosDesdePostgres();
+    this.sincronizarFestivosDesdePostgres();
+    this.sincronizarCuadrantesDesdePostgres();
+  }
+
+  private sincronizarEmpleadosDesdePostgres(): void {
+    this.api.getEmpleados().subscribe({
+      next: (empsDb) => {
+        if (!Array.isArray(empsDb) || empsDb.length === 0) return;
+        const emps = this.mapearEmpleadosDesdeBackend(empsDb);
+        this.empleados.set(emps);
+      },
+      error: () => {},
+    });
+  }
+
+  private sincronizarFestivosDesdePostgres(): void {
+    this.api.getFestivos(this.anioSeleccionado()).subscribe({
+      next: (res) => {
+        if (res && Array.isArray(res.festivos)) {
+          for (const f of res.festivos) {
+            if (!f.esOficialLey) {
+              FestivosColombiaHelper.agregarFestivoManual(f.fecha, f.nombre);
+            }
+          }
+          this.versionCacheFestivos.update((v) => v + 1);
+        }
+      },
+      error: () => {},
+    });
+  }
+
+  private inicializarMatrizCuadrante(emps: EmpleadoHospital[]): void {
+    const anio = this.anioSeleccionado();
+    const porPeriodo: Record<string, Record<string, Record<number, CeldaAsignacion>>> = {};
+
+    for (const m of this.mesesDisponibles) {
+      const mapaMes: Record<string, Record<number, CeldaAsignacion>> = {};
+      emps.forEach((emp) => {
+        mapaMes[emp.id] = {};
+      });
+      porPeriodo[`${anio}-${m.valor}`] = mapaMes;
+    }
+
+    this.asignacionesPorPeriodo.set(porPeriodo);
   }
 
   private sincronizarCatalogoTurnosDesdePostgres(): void {
@@ -412,6 +472,10 @@ export class AppComponent implements OnInit {
             }
             return copia;
           });
+        }
+
+        if (res.saldosConsolidados) {
+          this.saldosConsolidadosMap.set(res.saldosConsolidados);
         }
       },
       error: () => {
@@ -594,11 +658,21 @@ export class AppComponent implements OnInit {
         }
       }
 
+      const anio = this.anioSeleccionado();
+      const mes = this.mesSeleccionado();
+      const anioPrev = mes === 1 ? anio - 1 : anio;
+      const mesPrev = mes === 1 ? 12 : mes - 1;
+      const saldoKeyPrev = `${emp.id}::${anioPrev}-${mesPrev}`;
+      const saldoAntReal = this.saldosConsolidadosMap()[saldoKeyPrev] !== undefined
+        ? this.saldosConsolidadosMap()[saldoKeyPrev]
+        : emp.saldoBancoAnterior;
+
       const diferenciaMes = horasTrabajadas - emp.horasContratoMes - horasAmortizadasComp;
-      const nuevoSaldoBanco = emp.saldoBancoAnterior + diferenciaMes;
+      const nuevoSaldoBanco = saldoAntReal + diferenciaMes;
+      const empConSaldo = { ...emp, saldoBancoAnterior: saldoAntReal };
 
       return {
-        empleado: emp,
+        empleado: empConSaldo,
         esPersonalRotado: esRotado,
         celdas: celdasEmp,
         horasTrabajadas,
@@ -722,6 +796,138 @@ export class AppComponent implements OnInit {
 
   resumenNominaCalculado = computed(() => this.filasCuadrante());
 
+  // Filas consolidadas para Reportes (Multi-servicio o filtrado)
+  datosReporteCalculados = computed(() => {
+    const srvFiltro = this.filtroReporteServicioId();
+    const textoBusqueda = this.busquedaReporteTexto().trim().toLowerCase();
+    const dias = this.diasDelMes();
+    const matriz = this.asignaciones();
+    const todosEmps = this.empleados();
+    const catalogo = this.catalogoTurnosMap();
+    const mapaServicios = new Map(this.servicios().map((s) => [s.id, s]));
+
+    let filtrados = todosEmps;
+    if (srvFiltro !== 'TODOS') {
+      filtrados = filtrados.filter((e) => e.servicioBaseId === srvFiltro);
+    }
+    if (textoBusqueda) {
+      filtrados = filtrados.filter(
+        (e) =>
+          e.nombre.toLowerCase().includes(textoBusqueda) ||
+          e.documento.includes(textoBusqueda) ||
+          e.categoria.toLowerCase().includes(textoBusqueda)
+      );
+    }
+
+    return filtrados.map((emp) => {
+      const srvObj = mapaServicios.get(emp.servicioBaseId);
+      const servicioNombre = srvObj ? srvObj.nombre : 'Servicio General';
+      const celdasEmp = matriz[emp.id] || {};
+
+      let horasTrabajadas = 0;
+      let hod = 0;
+      let hon = 0;
+      let hdfd = 0;
+      let hdfn = 0;
+      let horasAmortizadasComp = 0;
+      let conteoNoches = 0;
+      let conteoDomFest = 0;
+      let diasVac = 0;
+      let diasInc = 0;
+
+      for (const d of dias) {
+        const cod = celdasEmp[d.dia]?.codigo || '';
+        if (!cod) continue;
+        const cfg = catalogo[cod];
+        if (!cfg) continue;
+
+        horasTrabajadas += cfg.horasOrdinarias;
+        if (cfg.esNocturnoPesado || cfg.horasNocturnas > 0) conteoNoches++;
+        if (cod === 'VAC') diasVac++;
+        if (cod === 'INC') diasInc++;
+        if (cfg.descuentaBancoHoras) horasAmortizadasComp += 8;
+
+        const esDomOFest = d.esDomingo || !!d.festivo;
+        if (esDomOFest && cfg.horasOrdinarias > 0) {
+          conteoDomFest++;
+          hdfd += cfg.horasDiurnas;
+          hdfn += cfg.horasNocturnas;
+        } else {
+          hod += cfg.horasDiurnas;
+          hon += cfg.horasNocturnas;
+        }
+      }
+
+      const diferenciaMes = horasTrabajadas - emp.horasContratoMes - horasAmortizadasComp;
+      const nuevoSaldoBanco = emp.saldoBancoAnterior + diferenciaMes;
+
+      let estadoBanco: 'EQUILIBRADO' | 'ATENCION' | 'CRITICO' = 'EQUILIBRADO';
+      if (nuevoSaldoBanco > 30 || nuevoSaldoBanco < -18) {
+        estadoBanco = 'CRITICO';
+      } else if (nuevoSaldoBanco > 18 || nuevoSaldoBanco < -6) {
+        estadoBanco = 'ATENCION';
+      }
+
+      let nivelFatiga: 'BAJO' | 'MODERADO' | 'ALTO' = 'BAJO';
+      if (conteoNoches >= 5 || (conteoNoches >= 4 && conteoDomFest >= 3)) {
+        nivelFatiga = 'ALTO';
+      } else if (conteoNoches >= 3 || conteoDomFest >= 3) {
+        nivelFatiga = 'MODERADO';
+      }
+
+      return {
+        emp,
+        servicioNombre,
+        horasTrabajadas,
+        horasContratoMes: emp.horasContratoMes,
+        hod,
+        hon,
+        hdfd,
+        hdfn,
+        horasAmortizadasComp,
+        conteoNoches,
+        conteoDomFest,
+        causaCompensatorioDominical: conteoDomFest >= 3,
+        diasVac,
+        diasInc,
+        saldoBancoAnterior: emp.saldoBancoAnterior,
+        diferenciaMes,
+        nuevoSaldoBanco,
+        estadoBanco,
+        nivelFatiga,
+      };
+    });
+  });
+
+  kpisReportes = computed(() => {
+    const filas = this.datosReporteCalculados();
+    let totalHoras = 0;
+    let totalNoches = 0;
+    let totalDomFest = 0;
+    let totalCompensatorios = 0;
+    let criticosBanco = 0;
+    let totalAusentismoDias = 0;
+
+    for (const f of filas) {
+      totalHoras += f.horasTrabajadas;
+      totalNoches += f.conteoNoches;
+      totalDomFest += f.conteoDomFest;
+      if (f.causaCompensatorioDominical) totalCompensatorios++;
+      if (f.estadoBanco === 'CRITICO') criticosBanco++;
+      totalAusentismoDias += f.diasVac + f.diasInc;
+    }
+
+    return {
+      totalEmpleados: filas.length,
+      totalHoras,
+      totalNoches,
+      totalDomFest,
+      totalCompensatorios,
+      criticosBanco,
+      totalAusentismoDias,
+    };
+  });
+
   // Candidatos de rotación homólogos de servicios hermanos (Doc 20)
   candidatosRotacionHomologos = computed<EmpleadoHospital[]>(() => {
     const srvActual = this.servicioActual();
@@ -738,12 +944,12 @@ export class AppComponent implements OnInit {
     const emp = this.empleados().find((e) => e.id === id) || this.empleados()[0] || {
       id: 'emp-001',
       documento: '1010001001',
-      nombre: 'Dr. Alejandro Mendoza',
-      categoria: 'Médico General',
+      nombre: 'Personal Asistencial',
+      categoria: 'Personal Asistencial',
       servicioBaseId: 'srv-urg',
       horasContratoMes: 168,
-      saldoBancoAnterior: 16,
-      ultimoTurnoMesPrevio: 'T8',
+      saldoBancoAnterior: 0,
+      ultimoTurnoMesPrevio: 'L' as CodigoTurno,
     };
 
     const dias = this.diasDelMes();
@@ -764,12 +970,22 @@ export class AppComponent implements OnInit {
       if (cfg.descuentaBancoHoras) horasAmortizadasComp += 8;
     }
 
+    const anio = this.anioSeleccionado();
+    const mes = this.mesSeleccionado();
+    const anioPrev = mes === 1 ? anio - 1 : anio;
+    const mesPrev = mes === 1 ? 12 : mes - 1;
+    const saldoKeyPrev = `${emp.id}::${anioPrev}-${mesPrev}`;
+    const saldoAntReal = this.saldosConsolidadosMap()[saldoKeyPrev] !== undefined
+      ? this.saldosConsolidadosMap()[saldoKeyPrev]
+      : emp.saldoBancoAnterior;
+
     const diferenciaMes = horasTrabajadas - emp.horasContratoMes - horasAmortizadasComp;
-    const nuevoSaldoBanco = emp.saldoBancoAnterior + diferenciaMes;
+    const nuevoSaldoBanco = saldoAntReal + diferenciaMes;
     const servicioBase = this.servicios().find((s) => s.id === emp.servicioBaseId) || this.servicioActual();
+    const empConSaldo = { ...emp, saldoBancoAnterior: saldoAntReal };
 
     return {
-      empleado: emp,
+      empleado: empConSaldo,
       servicioBase,
       celdas: celdasEmp,
       horasTrabajadas,
@@ -810,35 +1026,7 @@ export class AppComponent implements OnInit {
     return this.listaPermutas().filter((p) => p.solicitanteId === id || p.receptorId === id);
   });
 
-  private sembrarCuadranteConPlantillaReal(emps: EmpleadoHospital[]): void {
-    const rueda8h: CodigoTurno[] = ['M8', 'M8', 'T8', 'T8', 'N8', 'S', 'L', 'L'];
-    const anio = this.anioSeleccionado();
-    const porPeriodo: Record<string, Record<string, Record<number, CeldaAsignacion>>> = {};
-
-    for (const m of this.mesesDisponibles) {
-      const mapaMes: Record<string, Record<number, CeldaAsignacion>> = {};
-      emps.forEach((emp, idx) => {
-        mapaMes[emp.id] = {};
-        for (let d = 1; d <= 31; d++) {
-          if (d === 1 && (emp.ultimoTurnoMesPrevio === 'N8' || emp.ultimoTurnoMesPrevio === 'G24')) {
-            mapaMes[emp.id][d] = { codigo: 'S', previsto: 'S' };
-            continue;
-          }
-          const anterior = mapaMes[emp.id][d - 1]?.codigo;
-          if (anterior === 'N8' || anterior === 'G24') {
-            mapaMes[emp.id][d] = { codigo: 'S', previsto: 'S' };
-            continue;
-          }
-
-          const cod = rueda8h[(d + idx * 2 + m.valor) % rueda8h.length];
-          mapaMes[emp.id][d] = { codigo: cod, previsto: cod };
-        }
-      });
-      porPeriodo[`${anio}-${m.valor}`] = mapaMes;
-    }
-
-    this.asignacionesPorPeriodo.set(porPeriodo);
-  }
+  // Matriz de turnos inicializada limpia (sin turnos de prueba)
 
   // Interacciones con la Paleta y Celdas
   seleccionarPincel(cod: CodigoTurno): void {
@@ -990,7 +1178,7 @@ export class AppComponent implements OnInit {
         turnoNuevo: nuevoCodigo,
         motivo: origen,
       };
-      this.bitacoraAuditoria.set([nuevoLog, ...this.bitacoraAuditoria().slice(0, 25)]);
+      this.registrarLogAuditoria(nuevoLog);
     }
   }
 
@@ -1061,20 +1249,17 @@ export class AppComponent implements OnInit {
         .subscribe();
     }
 
-    this.bitacoraAuditoria.set([
-      {
-        id: 'aud-' + Date.now(),
-        timestamp: new Date().toTimeString().substring(0, 8),
-        actor: 'Gestión Humana',
-        empleadoNombre: 'Todo el servicio',
-        servicioNombre: srvNombre,
-        dia: 0,
-        turnoAnterior: '',
-        turnoNuevo: '',
-        motivo: `Limpieza total del cuadro de turnos (${celdasLimpiadas} turnos borrados) para construcción manual`,
-      },
-      ...this.bitacoraAuditoria().slice(0, 25),
-    ]);
+    this.registrarLogAuditoria({
+      id: 'aud-' + Date.now(),
+      timestamp: new Date().toTimeString().substring(0, 8),
+      actor: 'Gestión Humana',
+      empleadoNombre: 'Todo el servicio',
+      servicioNombre: srvNombre,
+      dia: 0,
+      turnoAnterior: '',
+      turnoNuevo: '',
+      motivo: `Limpieza total del cuadro de turnos (${celdasLimpiadas} turnos borrados) para construcción manual`,
+    });
 
     this.mostrarNotificacion(
       `Cuadro de turnos en blanco: ${celdasLimpiadas} turnos borrados. VAC e INC oficiales conservadas.`
@@ -1163,46 +1348,126 @@ export class AppComponent implements OnInit {
   }
 
   // Administración de Servicios y Servicios de Apoyo
-  crearNuevoServicioAutonomo(): void {
-    const cod = this.nuevoServicioCodigo().trim();
+  cargarServicioParaEdicion(srv: ServicioHospitalario): void {
+    this.servicioEditandoId.set(srv.id);
+    this.nuevoServicioCodigo.set(srv.codigo);
+    this.nuevoServicioNombre.set(srv.nombre);
+    this.nuevoServicioTipoAsistencia.set(srv.tipoAsistencia || 'URGENCIAS');
+    this.mostrarNotificacion(`Modo edición activado: ${srv.nombre}`);
+  }
+
+  cancelarEdicionServicio(): void {
+    this.servicioEditandoId.set(null);
+    this.nuevoServicioCodigo.set('');
+    this.nuevoServicioNombre.set('');
+    this.nuevoServicioTipoAsistencia.set('URGENCIAS');
+  }
+
+  guardarServicioAutonomo(): void {
+    const cod = this.nuevoServicioCodigo().trim().toUpperCase();
     const nom = this.nuevoServicioNombre().trim();
     const tipo = this.nuevoServicioTipoAsistencia();
+    const editandoId = this.servicioEditandoId();
 
     if (!cod || !nom) {
-      this.mostrarNotificacion('Por favor completa el código y nombre del nuevo servicio.');
+      this.mostrarNotificacion('Por favor completa el código y nombre del servicio.');
       return;
     }
 
-    this.api
-      .crearServicio({
-        codigo: cod,
-        nombre: nom,
-        tipoAsistencia: tipo,
-      })
-      .subscribe({
-        next: () => {
-          this.mostrarNotificacion(`Servicio "${nom}" creado correctamente.`);
-          this.nuevoServicioCodigo.set('');
-          this.nuevoServicioNombre.set('');
-          this.recargarServicios();
-        },
-        error: () => {
-          // Fallback local
-          const nuevoSrv: ServicioHospitalario = {
-            id: 'srv-' + cod.toLowerCase(),
-            codigo: cod.toUpperCase(),
-            nombre: nom,
-            tipoAsistencia: tipo as any,
-            reqManana: 4,
-            reqTarde: 4,
-            reqNoche: 2,
-            empleadosCount: 0,
-            hermanos: [],
-          };
-          this.servicios.set([...this.servicios(), nuevoSrv]);
-          this.mostrarNotificacion(`Servicio "${nom}" creado correctamente.`);
-        },
-      });
+    // Validación de código duplicado
+    const duplicado = this.servicios().find(
+      (s) => s.codigo.toUpperCase() === cod && s.id !== editandoId
+    );
+    if (duplicado) {
+      this.mostrarNotificacion(`El código "${cod}" ya está asignado al servicio "${duplicado.nombre}".`);
+      return;
+    }
+
+    if (editandoId) {
+      // Actualizar existente
+      this.api
+        .actualizarServicio(editandoId, { codigo: cod, nombre: nom, tipoAsistencia: tipo })
+        .subscribe({
+          next: () => {
+            this.mostrarNotificacion(`Servicio "${nom}" actualizado correctamente.`);
+            this.cancelarEdicionServicio();
+            this.recargarServicios();
+          },
+          error: (err) => {
+            // Fallback en memoria local
+            this.servicios.update((lista) =>
+              lista.map((s) =>
+                s.id === editandoId
+                  ? { ...s, codigo: cod, nombre: nom, tipoAsistencia: tipo as any }
+                  : s
+              )
+            );
+            this.mostrarNotificacion(`Servicio "${nom}" actualizado correctamente.`);
+            this.cancelarEdicionServicio();
+          },
+        });
+    } else {
+      // Crear nuevo servicio
+      this.api
+        .crearServicio({ codigo: cod, nombre: nom, tipoAsistencia: tipo })
+        .subscribe({
+          next: () => {
+            this.mostrarNotificacion(`Servicio "${nom}" creado correctamente.`);
+            this.cancelarEdicionServicio();
+            this.recargarServicios();
+          },
+          error: () => {
+            // Fallback local
+            const nuevoSrv: ServicioHospitalario = {
+              id: 'srv-' + cod.toLowerCase(),
+              codigo: cod,
+              nombre: nom,
+              tipoAsistencia: tipo as any,
+              reqManana: 4,
+              reqTarde: 4,
+              reqNoche: 2,
+              empleadosCount: 0,
+              hermanos: [],
+            };
+            this.servicios.set([...this.servicios(), nuevoSrv]);
+            this.mostrarNotificacion(`Servicio "${nom}" creado correctamente.`);
+            this.cancelarEdicionServicio();
+          },
+        });
+    }
+  }
+
+  eliminarServicioAutonomo(srv: ServicioHospitalario): void {
+    if (srv.empleadosCount && srv.empleadosCount > 0) {
+      this.mostrarNotificacion(
+        `No se puede eliminar "${srv.nombre}": tiene ${srv.empleadosCount} colaboradores adscritos. Trasládelos antes de eliminar.`
+      );
+      return;
+    }
+
+    const confirmar = confirm(`¿Seguro que deseas eliminar el servicio "${srv.nombre}" (${srv.codigo})?`);
+    if (!confirmar) return;
+
+    this.api.eliminarServicio(srv.id).subscribe({
+      next: () => {
+        this.mostrarNotificacion(`Servicio "${srv.nombre}" eliminado correctamente.`);
+        if (this.servicioEditandoId() === srv.id) this.cancelarEdicionServicio();
+        this.recargarServicios();
+      },
+      error: (err) => {
+        // Fallback en memoria local si no hay colabs
+        this.servicios.update((lista) =>
+          lista
+            .filter((s) => s.id !== srv.id)
+            .map((s) => ({
+              ...s,
+              hermanos: (s.hermanos || []).filter((h) => h.id !== srv.id),
+            }))
+        );
+        this.mostrarNotificacion(`Servicio "${srv.nombre}" eliminado.`);
+        if (this.servicioEditandoId() === srv.id) this.cancelarEdicionServicio();
+      },
+    });
   }
 
   guardarEnlaceHermanos(): void {
@@ -1214,45 +1479,92 @@ export class AppComponent implements OnInit {
       return;
     }
 
+    const srv1 = this.servicios().find((s) => s.id === id1);
+    const srv2 = this.servicios().find((s) => s.id === id2);
+
+    if (!srv1 || !srv2) {
+      this.mostrarNotificacion('No se encontraron los servicios seleccionados.');
+      return;
+    }
+
+    const yaSonHermanos = (srv1.hermanos || []).some((h) => h.id === id2);
+    if (yaSonHermanos) {
+      this.mostrarNotificacion(`"${srv1.nombre}" y "${srv2.nombre}" ya se encuentran vinculados como apoyo.`);
+      return;
+    }
+
+    // Actualización inmediata en memoria y persistencia
+    const actualizarMemoria = () => {
+      this.servicios.update((lista) =>
+        lista.map((s) => {
+          if (s.id === id1) {
+            const hermanos = (s.hermanos || []).filter((h) => h.id !== id2);
+            return { ...s, hermanos: [...hermanos, { id: srv2.id, codigo: srv2.codigo, nombre: srv2.nombre }] };
+          }
+          if (s.id === id2) {
+            const hermanos = (s.hermanos || []).filter((h) => h.id !== id1);
+            return { ...s, hermanos: [...hermanos, { id: srv1.id, codigo: srv1.codigo, nombre: srv1.nombre }] };
+          }
+          return s;
+        })
+      );
+    };
+
+    actualizarMemoria();
+
     this.api.enlazarServiciosHermanos(id1, id2).subscribe({
       next: () => {
-        this.mostrarNotificacion('Servicios vinculados como servicios de apoyo.');
+        this.mostrarNotificacion(`Servicios "${srv1.codigo}" y "${srv2.codigo}" vinculados como apoyo.`);
         this.recargarServicios();
       },
       error: () => {
-        this.mostrarNotificacion('Servicios vinculados como servicios de apoyo.');
+        this.mostrarNotificacion(`Servicios "${srv1.codigo}" y "${srv2.codigo}" vinculados como apoyo.`);
       },
     });
   }
 
   desenlazarServicioHermano(srv1Id: string, srv2Id: string): void {
+    const actualizarMemoria = () => {
+      this.servicios.update((lista) =>
+        lista.map((s) => {
+          if (s.id === srv1Id) {
+            return { ...s, hermanos: (s.hermanos || []).filter((h) => h.id !== srv2Id) };
+          }
+          if (s.id === srv2Id) {
+            return { ...s, hermanos: (s.hermanos || []).filter((h) => h.id !== srv1Id) };
+          }
+          return s;
+        })
+      );
+    };
+
+    actualizarMemoria();
+
     this.api.desenlazarServiciosHermanos(srv1Id, srv2Id).subscribe({
       next: () => {
         this.mostrarNotificacion('Vínculo de servicio de apoyo eliminado.');
         this.recargarServicios();
       },
       error: () => {
-        this.servicios.update((lista) =>
-          lista.map((s) => {
-            if (s.id === srv1Id) {
-              return { ...s, hermanos: (s.hermanos || []).filter((h) => h.id !== srv2Id) };
-            }
-            if (s.id === srv2Id) {
-              return { ...s, hermanos: (s.hermanos || []).filter((h) => h.id !== srv1Id) };
-            }
-            return s;
-          })
-        );
         this.mostrarNotificacion('Vínculo de servicio de apoyo eliminado.');
       },
     });
   }
 
+  private sincronizarServiciosDesdePostgres(): void {
+    this.recargarServicios();
+  }
+
   private recargarServicios(): void {
-    this.api.getServicios().subscribe((srvs) => {
-      if (srvs && srvs.length > 0) {
-        this.servicios.set(srvs);
-      }
+    this.api.getServicios().subscribe({
+      next: (srvs) => {
+        if (srvs && srvs.length > 0) {
+          this.servicios.set(srvs);
+        }
+      },
+      error: () => {
+        // En caso de que el backend no responda, conserva los servicios de memoria
+      },
     });
   }
 
@@ -1291,14 +1603,14 @@ export class AppComponent implements OnInit {
       `Cambio de turno aprobado con ${perm.solicitanteNombre}`
     );
 
-    this.listaPermutas.set(
+    this.actualizarListaPermutas(
       this.listaPermutas().map((p) => (p.id === idPermuta ? { ...p, estado: 'APROBADA' } : p))
     );
     this.mostrarNotificacion(`Cambio de turno aprobado y actualizado en el cuadrante.`);
   }
 
   rechazarPermuta(idPermuta: string): void {
-    this.listaPermutas.set(
+    this.actualizarListaPermutas(
       this.listaPermutas().map((p) => (p.id === idPermuta ? { ...p, estado: 'RECHAZADA' } : p))
     );
     this.mostrarNotificacion('Solicitud de cambio de turno rechazada.');
@@ -1338,7 +1650,7 @@ export class AppComponent implements OnInit {
       validacionReglas: `Misma categoría (${datosMios.empleado.categoria}) y descanso mínimo de 12h cumplido.`,
     };
 
-    this.listaPermutas.set([nuevaPermuta, ...this.listaPermutas()]);
+    this.actualizarListaPermutas([nuevaPermuta, ...this.listaPermutas()]);
     this.mostrarNotificacion(`Solicitud de cambio de turno enviada.`);
   }
 
@@ -1402,6 +1714,127 @@ export class AppComponent implements OnInit {
     URL.revokeObjectURL(url);
 
     this.mostrarNotificacion('Archivo Excel (CSV) de Nómina y Banco de Horas descargado.');
+  }
+
+  // Controladores del Menú Lateral (Auto-colapso por Hover y Fijación)
+  alternarFijarSidebar(): void {
+    const nuevo = !this.sidebarFijo();
+    this.sidebarFijo.set(nuevo);
+    if (!nuevo) {
+      this.sidebarHovered.set(false);
+    }
+  }
+
+  onSidebarMouseEnter(): void {
+    if (!this.sidebarFijo()) {
+      this.sidebarHovered.set(true);
+    }
+  }
+
+  onSidebarMouseLeave(): void {
+    if (!this.sidebarFijo()) {
+      this.sidebarHovered.set(false);
+    }
+  }
+
+  onItemNavegacionClick(
+    vista: 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'PORTAL_EMPLEADO' | 'CONFIGURACION'
+  ): void {
+    this.vistaActual.set(vista);
+    if (!this.sidebarFijo()) {
+      this.sidebarHovered.set(false);
+    }
+  }
+
+  // Exportar Excel en la Sección de Reportes
+  exportarExcelReportes(): void {
+    const filas = this.datosReporteCalculados();
+    const sub = this.subVistaReportes();
+    const anio = this.anioSeleccionado();
+    const mes = this.mesSeleccionado();
+    let header = '';
+    let lineas: string[] = [];
+
+    if (sub === 'PRE_NOMINA') {
+      header = 'Documento;Colaborador;Servicio;Cargo;Contrato;HOD;HON_35;HDFD_75;HDFN_110;Total_Mes;Dom_Fest;Compensatorio_CST;VAC_Dias;INC_Dias;Saldo_Banco_Ant;Mov_Mes;Nuevo_Saldo_Banco';
+      lineas = filas.map((f) =>
+        [
+          f.emp.documento,
+          `"${f.emp.nombre}"`,
+          `"${f.servicioNombre}"`,
+          `"${f.emp.categoria}"`,
+          `${f.horasContratoMes}h`,
+          f.hod,
+          f.hon,
+          f.hdfd,
+          f.hdfn,
+          f.horasTrabajadas,
+          f.conteoDomFest,
+          f.causaCompensatorioDominical ? 'SI' : 'NO',
+          f.diasVac,
+          f.diasInc,
+          f.saldoBancoAnterior,
+          f.diferenciaMes,
+          f.nuevoSaldoBanco,
+        ].join(';')
+      );
+    } else if (sub === 'EQUIDAD') {
+      header = 'Documento;Colaborador;Servicio;Cargo;Turnos_Noche;Dom_Fest_Laborados;Total_Horas_Nocturnas;Compensatorio_Legal;Nivel_Fatiga';
+      lineas = filas.map((f) =>
+        [
+          f.emp.documento,
+          `"${f.emp.nombre}"`,
+          `"${f.servicioNombre}"`,
+          `"${f.emp.categoria}"`,
+          f.conteoNoches,
+          f.conteoDomFest,
+          f.hon + f.hdfn,
+          f.causaCompensatorioDominical ? 'SI' : 'NO',
+          f.nivelFatiga,
+        ].join(';')
+      );
+    } else if (sub === 'BANCO_HORAS') {
+      header = 'Documento;Colaborador;Servicio;Cargo;Saldo_Anterior;Horas_Trabajadas;Contrato;Amortizadas_COMP;Mov_Mes;Nuevo_Saldo_Continuo;Estado_Riesgo';
+      lineas = filas.map((f) =>
+        [
+          f.emp.documento,
+          `"${f.emp.nombre}"`,
+          `"${f.servicioNombre}"`,
+          `"${f.emp.categoria}"`,
+          f.saldoBancoAnterior,
+          f.horasTrabajadas,
+          f.horasContratoMes,
+          f.horasAmortizadasComp,
+          f.diferenciaMes,
+          f.nuevoSaldoBanco,
+          f.estadoBanco,
+        ].join(';')
+      );
+    } else {
+      header = 'Documento;Colaborador;Servicio;Cargo;Dias_Vacaciones;Dias_Incapacidad;Total_Ausencia_Dias';
+      lineas = filas.map((f) =>
+        [
+          f.emp.documento,
+          `"${f.emp.nombre}"`,
+          `"${f.servicioNombre}"`,
+          `"${f.emp.categoria}"`,
+          f.diasVac,
+          f.diasInc,
+          f.diasVac + f.diasInc,
+        ].join(';')
+      );
+    }
+
+    const contenidoCsv = '\uFEFF' + [header, ...lineas].join('\n');
+    const blob = new Blob([contenidoCsv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Reporte_${sub}_${anio}_${mes}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    this.mostrarNotificacion(`Reporte exportado exitosamente.`);
   }
 
   // Controladores de eventos

@@ -1,201 +1,193 @@
-﻿{
-    "value":  [
-                  {
-                      "id":  "srv-cir",
-                      "codigo":  "CIR",
-                      "nombre":  "Cirugía / Quirófanos y Recuperación",
-                      "tipoAsistencia":  "QUIRURGICO",
-                      "intranetId":  null,
-                      "reqManana":  4,
-                      "reqTarde":  4,
-                      "reqNoche":  2,
-                      "empleadosCount":  16,
-                      "hermanos":  [
-
-                                   ]
-                  },
-                  {
-                      "id":  "srv-cond",
-                      "codigo":  "COND",
-                      "nombre":  "Conductores de Ambulancia y Traslados",
-                      "tipoAsistencia":  "URGENCIAS",
-                      "intranetId":  null,
-                      "reqManana":  4,
-                      "reqTarde":  4,
-                      "reqNoche":  2,
-                      "empleadosCount":  8,
-                      "hermanos":  [
-
-                                   ]
-                  },
-                  {
-                      "id":  "srv-fact-cen",
-                      "codigo":  "FACT-CEN",
-                      "nombre":  "Facturación Central y Cartera",
-                      "tipoAsistencia":  "CONSULTA_EXTERNA",
-                      "intranetId":  null,
-                      "reqManana":  4,
-                      "reqTarde":  4,
-                      "reqNoche":  2,
-                      "empleadosCount":  4,
-                      "hermanos":  [
-
-                                   ]
-                  },
-                  {
-                      "id":  "srv-fact-urg",
-                      "codigo":  "FACT-URG",
-                      "nombre":  "Facturación y Admisiones Urgencias (24/7)",
-                      "tipoAsistencia":  "CONSULTA_EXTERNA",
-                      "intranetId":  null,
-                      "reqManana":  4,
-                      "reqTarde":  4,
-                      "reqNoche":  2,
-                      "empleadosCount":  5,
-                      "hermanos":  [
-
-                                   ]
-                  },
-                  {
-                      "id":  "srv-hosp",
-                      "codigo":  "HOSP",
-                      "nombre":  "Hospitalización Pisos",
-                      "tipoAsistencia":  "HOSPITALIZACION",
-                      "intranetId":  null,
-                      "reqManana":  4,
-                      "reqTarde":  4,
-                      "reqNoche":  2,
-                      "empleadosCount":  18,
-                      "hermanos":  [
-
-                                   ]
-                  },
-                  {
-                      "id":  "srv-lab-img",
-                      "codigo":  "LAB-IMG",
-                      "nombre":  "Laboratorio Clínico e Imágenes Diagnósticas",
-                      "tipoAsistencia":  "APOYO_DIAGNOSTICO",
-                      "intranetId":  null,
-                      "reqManana":  4,
-                      "reqTarde":  4,
-                      "reqNoche":  2,
-                      "empleadosCount":  12,
-                      "hermanos":  [
-
-                                   ]
-                  },
-                  {
-                      "id":  "srv-mant",
-                      "codigo":  "MANT",
-                      "nombre":  "Mantenimiento Hospitalario y Biomédica",
-                      "tipoAsistencia":  "CONSULTA_EXTERNA",
-                      "intranetId":  null,
-                      "reqManana":  4,
-                      "reqTarde":  4,
-                      "reqNoche":  2,
-                      "empleadosCount":  4,
-                      "hermanos":  [
-
-                                   ]
-                  },
-                  {
-                      "id":  "srv-mat",
-                      "codigo":  "MAT",
-                      "nombre":  "Maternidad y Salas de Parto",
-                      "tipoAsistencia":  "URGENCIAS",
-                      "intranetId":  null,
-                      "reqManana":  4,
-                      "reqTarde":  4,
-                      "reqNoche":  2,
-                      "empleadosCount":  12,
-                      "hermanos":  [
-
-                                   ]
-                  },
-                  {
-                      "id":  "srv-med-gral",
-                      "codigo":  "MED-GRAL",
-                      "nombre":  "Medicina General y Consulta Externa",
-                      "tipoAsistencia":  "HOSPITALIZACION",
-                      "intranetId":  null,
-                      "reqManana":  4,
-                      "reqTarde":  4,
-                      "reqNoche":  2,
-                      "empleadosCount":  6,
-                      "hermanos":  [
-
-                                   ]
-                  },
-                  {
-                      "id":  "srv-med-int",
-                      "codigo":  "MED-INT",
-                      "nombre":  "Medicina Interna (Cuidados Intermedios)",
-                      "tipoAsistencia":  "HOSPITALIZACION",
-                      "intranetId":  null,
-                      "reqManana":  4,
-                      "reqTarde":  4,
-                      "reqNoche":  2,
-                      "empleadosCount":  10,
-                      "hermanos":  [
-
-                                   ]
-                  },
-                  {
-                      "id":  "srv-of-var",
-                      "codigo":  "OF-VAR",
-                      "nombre":  "Oficios Varios y Desinfección Hospitalaria",
-                      "tipoAsistencia":  "CONSULTA_EXTERNA",
-                      "intranetId":  null,
-                      "reqManana":  4,
-                      "reqTarde":  4,
-                      "reqNoche":  2,
-                      "empleadosCount":  12,
-                      "hermanos":  [
-
-                                   ]
-                  },
-                  {
-                      "id":  "srv-ped",
-                      "codigo":  "PED",
-                      "nombre":  "Pediatría y Observación Pediátrica",
-                      "tipoAsistencia":  "URGENCIAS",
-                      "intranetId":  null,
-                      "reqManana":  4,
-                      "reqTarde":  4,
-                      "reqNoche":  2,
-                      "empleadosCount":  10,
-                      "hermanos":  [
-
-                                   ]
-                  },
-                  {
-                      "id":  "srv-farm",
-                      "codigo":  "FARM",
-                      "nombre":  "Servicio Farmacéutico Hospitalario",
-                      "tipoAsistencia":  "APOYO_DIAGNOSTICO",
-                      "intranetId":  null,
-                      "reqManana":  4,
-                      "reqTarde":  4,
-                      "reqNoche":  2,
-                      "empleadosCount":  8,
-                      "hermanos":  [
-
-                                   ]
-                  },
-                  {
-                      "id":  "srv-urg",
-                      "codigo":  "URG",
-                      "nombre":  "Urgencias Generales y Reanimación",
-                      "tipoAsistencia":  "URGENCIAS",
-                      "intranetId":  null,
-                      "reqManana":  4,
-                      "reqTarde":  4,
-                      "reqNoche":  2,
-                      "empleadosCount":  22,
-                      "hermanos":  [
-
-                                   ]
-                  }
-              ],
-    "Count":  14
-}
+[
+  {
+    "id": "srv-cir",
+    "codigo": "CIR",
+    "nombre": "Cirugía / Quirófanos y Recuperación",
+    "tipoAsistencia": "QUIRURGICO",
+    "intranetId": null,
+    "reqManana": 5,
+    "reqTarde": 4,
+    "reqNoche": 2,
+    "empleadosCount": 16,
+    "hermanos": []
+  },
+  {
+    "id": "srv-cond",
+    "codigo": "COND",
+    "nombre": "Conductores de Ambulancia y Traslados",
+    "tipoAsistencia": "URGENCIAS",
+    "intranetId": null,
+    "reqManana": 4,
+    "reqTarde": 4,
+    "reqNoche": 2,
+    "empleadosCount": 8,
+    "hermanos": []
+  },
+  {
+    "id": "srv-fact-cen",
+    "codigo": "FACT-CEN",
+    "nombre": "Facturación Central y Cartera",
+    "tipoAsistencia": "CONSULTA_EXTERNA",
+    "intranetId": null,
+    "reqManana": 4,
+    "reqTarde": 4,
+    "reqNoche": 2,
+    "empleadosCount": 4,
+    "hermanos": []
+  },
+  {
+    "id": "srv-fact-urg",
+    "codigo": "FACT-URG",
+    "nombre": "Facturación y Admisiones Urgencias (24/7)",
+    "tipoAsistencia": "CONSULTA_EXTERNA",
+    "intranetId": null,
+    "reqManana": 4,
+    "reqTarde": 4,
+    "reqNoche": 2,
+    "empleadosCount": 5,
+    "hermanos": []
+  },
+  {
+    "id": "srv-hosp",
+    "codigo": "HOSP",
+    "nombre": "Hospitalización Pisos",
+    "tipoAsistencia": "HOSPITALIZACION",
+    "intranetId": null,
+    "reqManana": 4,
+    "reqTarde": 4,
+    "reqNoche": 2,
+    "empleadosCount": 18,
+    "hermanos": []
+  },
+  {
+    "id": "srv-lab-img",
+    "codigo": "LAB-IMG",
+    "nombre": "Laboratorio Clínico e Imágenes Diagnósticas",
+    "tipoAsistencia": "APOYO_DIAGNOSTICO",
+    "intranetId": null,
+    "reqManana": 4,
+    "reqTarde": 4,
+    "reqNoche": 2,
+    "empleadosCount": 12,
+    "hermanos": []
+  },
+  {
+    "id": "srv-mant",
+    "codigo": "MANT",
+    "nombre": "Mantenimiento Hospitalario y Biomédica",
+    "tipoAsistencia": "CONSULTA_EXTERNA",
+    "intranetId": null,
+    "reqManana": 4,
+    "reqTarde": 4,
+    "reqNoche": 2,
+    "empleadosCount": 4,
+    "hermanos": []
+  },
+  {
+    "id": "srv-mat",
+    "codigo": "MAT",
+    "nombre": "Maternidad y Salas de Parto",
+    "tipoAsistencia": "URGENCIAS",
+    "intranetId": null,
+    "reqManana": 4,
+    "reqTarde": 4,
+    "reqNoche": 2,
+    "empleadosCount": 12,
+    "hermanos": [
+      {
+        "id": "srv-urg",
+        "codigo": "URG",
+        "nombre": "Urgencias Generales y Reanimación"
+      }
+    ]
+  },
+  {
+    "id": "srv-med-gral",
+    "codigo": "MED-GRAL",
+    "nombre": "Medicina General y Consulta Externa",
+    "tipoAsistencia": "HOSPITALIZACION",
+    "intranetId": null,
+    "reqManana": 4,
+    "reqTarde": 4,
+    "reqNoche": 2,
+    "empleadosCount": 6,
+    "hermanos": []
+  },
+  {
+    "id": "srv-med-int",
+    "codigo": "MED-INT",
+    "nombre": "Medicina Interna (Cuidados Intermedios)",
+    "tipoAsistencia": "HOSPITALIZACION",
+    "intranetId": null,
+    "reqManana": 4,
+    "reqTarde": 4,
+    "reqNoche": 2,
+    "empleadosCount": 10,
+    "hermanos": []
+  },
+  {
+    "id": "srv-of-var",
+    "codigo": "OF-VAR",
+    "nombre": "Oficios Varios y Desinfección Hospitalaria",
+    "tipoAsistencia": "CONSULTA_EXTERNA",
+    "intranetId": null,
+    "reqManana": 4,
+    "reqTarde": 4,
+    "reqNoche": 2,
+    "empleadosCount": 12,
+    "hermanos": []
+  },
+  {
+    "id": "srv-ped",
+    "codigo": "PED",
+    "nombre": "Pediatría y Observación Pediátrica",
+    "tipoAsistencia": "URGENCIAS",
+    "intranetId": null,
+    "reqManana": 4,
+    "reqTarde": 4,
+    "reqNoche": 2,
+    "empleadosCount": 10,
+    "hermanos": [
+      {
+        "id": "srv-urg",
+        "codigo": "URG",
+        "nombre": "Urgencias Generales y Reanimación"
+      }
+    ]
+  },
+  {
+    "id": "srv-farm",
+    "codigo": "FARM",
+    "nombre": "Servicio Farmacéutico Hospitalario",
+    "tipoAsistencia": "APOYO_DIAGNOSTICO",
+    "intranetId": null,
+    "reqManana": 4,
+    "reqTarde": 4,
+    "reqNoche": 2,
+    "empleadosCount": 8,
+    "hermanos": []
+  },
+  {
+    "id": "srv-urg",
+    "codigo": "URG",
+    "nombre": "Urgencias Generales y Reanimación",
+    "tipoAsistencia": "URGENCIAS",
+    "intranetId": null,
+    "reqManana": 6,
+    "reqTarde": 6,
+    "reqNoche": 4,
+    "empleadosCount": 22,
+    "hermanos": [
+      {
+        "id": "srv-mat",
+        "codigo": "MAT",
+        "nombre": "Maternidad y Salas de Parto"
+      },
+      {
+        "id": "srv-ped",
+        "codigo": "PED",
+        "nombre": "Pediatría y Observación Pediátrica"
+      }
+    ]
+  }
+]
