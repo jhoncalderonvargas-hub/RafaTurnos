@@ -88,17 +88,17 @@ async function main() {
   const turnosData = [
     // Rotativo 8h
     { codigo: 'M8', nombre: 'Mañana 8h', horaInicio: '07:00', horaFin: '15:00', horasOrdinarias: 8, horasDiurnas: 8, horasNocturnas: 0, colorHex: '#E0F2FE', descuentaBancoHoras: false },
-    { codigo: 'T8', nombre: 'Tarde 8h', horaInicio: '15:00', horaFin: '23:00', horasOrdinarias: 8, horasDiurnas: 6, horasNocturnas: 2, colorHex: '#FEF3C7', descuentaBancoHoras: false },
+    { codigo: 'T8', nombre: 'Tarde 8h', horaInicio: '15:00', horaFin: '23:00', horasOrdinarias: 8, horasDiurnas: 4, horasNocturnas: 4, colorHex: '#FEF3C7', descuentaBancoHoras: false },
     { codigo: 'N8', nombre: 'Noche 8h', horaInicio: '23:00', horaFin: '07:00', horasOrdinarias: 8, horasDiurnas: 1, horasNocturnas: 7, colorHex: '#EDE9FE', descuentaBancoHoras: false },
 
     // Rotativo 6h / 12h
     { codigo: 'M6', nombre: 'Mañana 6h', horaInicio: '07:00', horaFin: '13:00', horasOrdinarias: 6, horasDiurnas: 6, horasNocturnas: 0, colorHex: '#BAE6FD', descuentaBancoHoras: false },
     { codigo: 'T6', nombre: 'Tarde 6h', horaInicio: '13:00', horaFin: '19:00', horasOrdinarias: 6, horasDiurnas: 6, horasNocturnas: 0, colorHex: '#FDE68A', descuentaBancoHoras: false },
-    { codigo: 'N12', nombre: 'Noche 12h', horaInicio: '19:00', horaFin: '07:00', horasOrdinarias: 12, horasDiurnas: 3, horasNocturnas: 9, colorHex: '#DDD6FE', descuentaBancoHoras: false },
+    { codigo: 'N12', nombre: 'Noche 12h', horaInicio: '19:00', horaFin: '07:00', horasOrdinarias: 12, horasDiurnas: 1, horasNocturnas: 11, colorHex: '#DDD6FE', descuentaBancoHoras: false },
 
     // Guardias y Corridos
     { codigo: 'D12', nombre: 'Guardia Diurna 12h', horaInicio: '07:00', horaFin: '19:00', horasOrdinarias: 12, horasDiurnas: 12, horasNocturnas: 0, colorHex: '#FFEDD5', descuentaBancoHoras: false },
-    { codigo: 'G24', nombre: 'Guardia Médica 24h', horaInicio: '07:00', horaFin: '07:00', horasOrdinarias: 24, horasDiurnas: 15, horasNocturnas: 9, colorHex: '#FEE2E2', descuentaBancoHoras: false },
+    { codigo: 'G24', nombre: 'Guardia Médica 24h', horaInicio: '07:00', horaFin: '07:00', horasOrdinarias: 24, horasDiurnas: 13, horasNocturnas: 11, colorHex: '#FEE2E2', descuentaBancoHoras: false },
 
     // Administrativos y Horas Pico
     { codigo: 'ADM', nombre: 'Administrativo Oficina 8h', horaInicio: '08:00', horaFin: '17:00', horasOrdinarias: 8, horasDiurnas: 8, horasNocturnas: 0, colorHex: '#F3F4F6', descuentaBancoHoras: false },

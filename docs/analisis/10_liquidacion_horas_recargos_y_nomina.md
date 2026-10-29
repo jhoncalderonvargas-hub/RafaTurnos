@@ -13,10 +13,10 @@ El sistema clasifica las horas laboradas en los conceptos legales estándar seg�
 
 | Código | Concepto Reportado | Franja Horaria / Naturaleza | Unidad de Medida |
 |---|---|---|:---:|
-| **HOD** | Horas Ordinarias Diurnas | 06:00 a 21:00 (Lunes a Sábado) | Cantidad de horas |
-| **HON** | Horas Ordinarias Nocturnas | 21:00 a 06:00 (Lunes a Sábado) | Cantidad de horas |
-| **HDFD** | Horas Dominicales / Festivas Diurnas | 06:00 a 21:00 en Domingos o Festivos | Cantidad de horas |
-| **HDFN** | Horas Dominicales / Festivas Nocturnas | 21:00 a 06:00 en Domingos o Festivos | Cantidad de horas |
+| **HOD** | Horas Ordinarias Diurnas | 06:00 a 19:00 (Lunes a Sábado) | Cantidad de horas |
+| **HON** | Horas Ordinarias Nocturnas | 19:00 a 06:00 (Lunes a Sábado) | Cantidad de horas |
+| **HDFD** | Horas Dominicales / Festivas Diurnas | 06:00 a 19:00 en Domingos o Festivos | Cantidad de horas |
+| **HDFN** | Horas Dominicales / Festivas Nocturnas | 19:00 a 06:00 en Domingos o Festivos | Cantidad de horas |
 | **HED** | Horas Extras Diurnas | Exceso de jornada en día hábil | Cantidad de horas |
 | **HEN** | Horas Extras Nocturnas | Exceso de jornada en noche hábil | Cantidad de horas |
 | **HEDDF** | Horas Extras Dominicales/Festivas Diurnas | Exceso en domingo o festivo | Cantidad de horas |
@@ -65,8 +65,7 @@ En el mismo archivo se incluye la vista extendida día por día del cuadrante re
 Cuando un turno cruza el corte de horario (ej. turno `N` de 12 horas, 19:00 a 07:00), el sistema no necesita campos separados en la interfaz del cuadrante:
 - En la celda del cuadrante se sigue viendo de forma limpia y única: **`[ N ]`**.
 - Pero el motor interno en NestJS desglosa internamente la celda en sus respectivos acumuladores de horas para el reporte de nómina:
-  - 2 horas `HOD` (19:00 a 21:00)
-  - 3 horas `HON` (21:00 a 24:00)
+  - 5 horas `HON` (19:00 a 24:00)
   - 6 horas `HDFN` si cruzó a domingo festivo (00:00 a 06:00)
   - 1 hora `HDFD` (06:00 a 07:00)
 

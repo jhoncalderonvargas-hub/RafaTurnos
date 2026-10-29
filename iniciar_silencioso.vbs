@@ -6,7 +6,7 @@ currentDir = fso.GetParentFolderName(WScript.ScriptFullName)
 WshShell.Run "docker compose up -d", 0, True
 
 ' 2. Iniciar Backend (NestJS) completamente invisible
-backendCmd = "cmd /c cd /d """ & currentDir & "\backend"" && npm start"
+backendCmd = "cmd /c cd /d """ & currentDir & "\backend"" && npm run start:dev"
 WshShell.Run backendCmd, 0, False
 
 ' 3. Iniciar Frontend (Angular) completamente invisible

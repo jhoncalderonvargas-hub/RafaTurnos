@@ -174,6 +174,11 @@
       </div>
 
       <div class="actions-group">
+        <label class="toggle-check" title="Avanza automáticamente a la siguiente celda al presionar una tecla de turno">
+          <input type="checkbox" [ngModel]="autoAvanzarAlTeclear()" (ngModelChange)="autoAvanzarAlTeclear.set($event)">
+          <span>⚡ Auto-avanzar celda</span>
+        </label>
+
         <label class="toggle-check">
           <input type="checkbox" [ngModel]="mostrarComparadorPrevisto()" (ngModelChange)="mostrarComparadorPrevisto.set($event)">
           <span>🔍 Ver cambios frente al original</span>
@@ -211,10 +216,22 @@
     <section class="thurni-palette-bar">
       <div class="palette-instructions">
         <strong>🎨 Tipos de Turno:</strong>
-        <span>Selecciona un turno y haz clic o arrastra sobre las celdas (Atajos: <code>M, T, N, G, S, L, C, V, I, Supr</code>)</span>
+        <span>Usa <strong>👆 Puntero</strong> para navegar o teclear turnos (<code>1-8, M, T, N, D, G, S, L, C, V, I, Supr</code>). <span class="badge-ctrl-tip">💡 <strong>Ctrl + Arrastrar</strong> clona el turno de cualquier celda (estilo Excel).</span></span>
       </div>
 
       <div class="palette-chips">
+        <div
+          class="shift-chip pointer-chip"
+          [class.selected]="turnoPincelActivo() === 'POINTER'"
+          (click)="seleccionarPincel('POINTER')"
+          title="Modo Selección / Puntero: Haz clic para navegar o inspeccionar sin sobreescribir">
+          <div class="chip-code">👆</div>
+          <div class="chip-meta">
+            <span class="chip-name">Puntero</span>
+            <span class="chip-hours">Navegar / Teclado</span>
+          </div>
+        </div>
+
         @for (t of listaTurnosPaleta(); track t.codigo) {
           <div
             class="shift-chip"
@@ -266,7 +283,13 @@
     }
 
     <!-- MATRIZ DEL CUADRANTE MENSUAL -->
-    <div class="grid-container">
+    @if (clonandoConCtrl()) {
+      <div class="floating-clone-badge">
+        📋 <span>Clonando turno: <strong>{{ turnoClonandoConCtrl() || 'Vacío (Borrador)' }}</strong></span>
+      </div>
+    }
+
+    <div class="grid-container" [class.ctrl-pressed]="teclaCtrlPresionada()" [class.is-cloning]="clonandoConCtrl()">
       <table class="schedule-matrix">
         <thead>
           <tr>
@@ -275,6 +298,7 @@
             @for (d of diasDelMes(); track d.dia) {
               <th
                 class="col-day"
+                [class.col-focused]="celdaEnfocada()?.dia === d.dia"
                 [class.is-saturday]="d.esSabado"
                 [class.is-sunday]="d.esDomingo"
                 [class.is-holiday]="!!d.festivo"
@@ -287,10 +311,10 @@
               </th>
             }
             <th class="col-summary" title="Horas Reales Programadas vs Contrato Mes (Ley 2101)">Horas<br>Mes</th>
-            <th class="col-summary col-recargo" title="Horas Ordinarias Diurnas (06:00-21:00 L-S)">HOD</th>
-            <th class="col-summary col-recargo" title="Horas Ordinarias Nocturnas (21:00-06:00 L-S) Recargo 35%">HON<br>35%</th>
-            <th class="col-summary col-recargo" title="Horas Dominicales/Festivas Diurnas (06:00-21:00) Recargo 75%">HDFD<br>75%</th>
-            <th class="col-summary col-recargo" title="Horas Dominicales/Festivas Nocturnas (21:00-06:00) Recargo 110%">HDFN<br>110%</th>
+            <th class="col-summary col-recargo" title="Horas Ordinarias Diurnas (06:00-19:00 L-S)">HOD</th>
+            <th class="col-summary col-recargo" title="Horas Ordinarias Nocturnas (19:00-06:00 L-S) Recargo 35%">HON<br>35%</th>
+            <th class="col-summary col-recargo" title="Horas Dominicales/Festivas Diurnas (06:00-19:00) Recargo 75%">HDFD<br>75%</th>
+            <th class="col-summary col-recargo" title="Horas Dominicales/Festivas Nocturnas (19:00-06:00) Recargo 110%">HDFN<br>110%</th>
             <th class="col-summary" title="Saldo Arrastrado del Mes Anterior">Banco<br>Ant.</th>
             <th class="col-summary" title="Diferencia del Mes (Trabajadas - Contrato - Amortizadas COMP)">Mov.<br>Mes</th>
             <th class="col-summary col-banco-final" title="Nuevo Saldo Acumulado Continuo (Pasa al siguiente mes)">Nuevo<br>Banco</th>
@@ -310,7 +334,7 @@
                 <td class="group-fill" [attr.colspan]="diasDelMes().length + 10"></td>
               </tr>
             }
-            <tr [class.row-rotacion]="fila.esPersonalRotado">
+            <tr [class.row-rotacion]="fila.esPersonalRotado" [class.row-focused]="celdaEnfocada()?.empId === fila.empleado.id">
               <!-- Info del Empleado (una sola línea) -->
               <td class="col-sticky-emp" [title]="fila.empleado.nombre + ' • ' + fila.empleado.categoria">
                 <div class="emp-cell">
@@ -339,16 +363,18 @@
                 @let cambioDiff = mostrarComparadorPrevisto() && celda?.previsto !== undefined && celda?.previsto !== celda?.codigo;
 
                 <td
+                  [id]="'celda-' + fila.empleado.id + '-' + d.dia"
                   class="matrix-cell"
                   tabindex="0"
                   [class.cell-focused]="celdaEnfocada()?.empId === fila.empleado.id && celdaEnfocada()?.dia === d.dia"
+                  [class.cell-col-guide]="celdaEnfocada()?.dia === d.dia"
                   [class.cell-saturday]="d.esSabado"
                   [class.cell-sunday]="d.esDomingo"
                   [class.cell-holiday]="!!d.festivo"
                   [class.cell-conflict]="!!conflicto"
                   [style.background-color]="cfg ? cfg.bgHex : ''"
                   [style.color]="cfg ? cfg.textHex : ''"
-                  (mousedown)="iniciarPintadoCelda(fila.empleado.id, d.dia)"
+                  (mousedown)="iniciarPintadoCelda(fila.empleado.id, d.dia, $event)"
                   (mouseenter)="continuarPintadoCelda(fila.empleado.id, d.dia)"
                   (dragover)="onDragOverCelda($event)"
                   (drop)="onDropCelda($event, fila.empleado.id, d.dia)"
@@ -375,19 +401,19 @@
                 <strong>{{ fila.horasTrabajadas }}</strong><span class="sub-contract">/{{ fila.empleado.horasContratoMes }}</span>
               </td>
 
-              <td class="col-summary col-recargo font-mono" title="Horas Ordinarias Diurnas (06:00-21:00 L-S)">
+              <td class="col-summary col-recargo font-mono" title="Horas Ordinarias Diurnas (06:00-19:00 L-S)">
                 {{ fila.hod }}h
               </td>
 
-              <td class="col-summary col-recargo font-mono" title="Horas Ordinarias Nocturnas (21:00-06:00 L-S) Recargo 35%">
+              <td class="col-summary col-recargo font-mono" title="Horas Ordinarias Nocturnas (19:00-06:00 L-S) Recargo 35%">
                 {{ fila.hon }}h
               </td>
 
-              <td class="col-summary col-recargo font-mono" title="Horas Dominicales/Festivas Diurnas (06:00-21:00) Recargo 75%">
+              <td class="col-summary col-recargo font-mono" title="Horas Dominicales/Festivas Diurnas (06:00-19:00) Recargo 75%">
                 {{ fila.hdfd }}h
               </td>
 
-              <td class="col-summary col-recargo font-mono" title="Horas Dominicales/Festivas Nocturnas (21:00-06:00) Recargo 110%">
+              <td class="col-summary col-recargo font-mono" title="Horas Dominicales/Festivas Nocturnas (19:00-06:00) Recargo 110%">
                 {{ fila.hdfn }}h
               </td>
 
@@ -701,10 +727,10 @@
                   <th>Servicio Base</th>
                   <th>Categoría</th>
                   <th>Contrato</th>
-                  <th title="Horas Ordinarias Diurnas (06:00-21:00 L-S)">HOD</th>
-                  <th title="Horas Ordinarias Nocturnas (21:00-06:00 L-S) Recargo 35%">HON 35%</th>
-                  <th title="Horas Dominicales/Festivas Diurnas (06:00-21:00) Recargo 75%">HDFD 75%</th>
-                  <th title="Horas Dominicales/Festivas Nocturnas (21:00-06:00) Recargo 110%">HDFN 110%</th>
+                  <th title="Horas Ordinarias Diurnas (06:00-19:00 L-S)">HOD</th>
+                  <th title="Horas Ordinarias Nocturnas (19:00-06:00 L-S) Recargo 35%">HON 35%</th>
+                  <th title="Horas Dominicales/Festivas Diurnas (06:00-19:00) Recargo 75%">HDFD 75%</th>
+                  <th title="Horas Dominicales/Festivas Nocturnas (19:00-06:00) Recargo 110%">HDFN 110%</th>
                   <th>Total Mes</th>
                   <th>Dom / Comp</th>
                   <th>VAC / INC</th>
@@ -1288,10 +1314,10 @@
                 >
                   <option value="URGENCIAS">URGENCIAS (Turnos 24/7)</option>
                   <option value="HOSPITALIZACION">HOSPITALIZACIÓN (Pisos y Salas)</option>
-                  <option value="UCI">UCI (Cuidados Intensivos / Intermedios)</option>
+                  <option value="CUIDADOS_INTENSIVOS">UCI (Cuidados Intensivos / Intermedios)</option>
                   <option value="QUIRURGICO">QUIRÚRGICO (Quirófanos y Recuperación)</option>
                   <option value="APOYO_DIAGNOSTICO">APOYO DIAGNÓSTICO (Laboratorio / Imágenes / Farmacia)</option>
-                  <option value="AMBULATORIO">AMBULATORIO (Consulta Externa / Terapias)</option>
+                  <option value="CONSULTA_EXTERNA">CONSULTA EXTERNA / AMBULATORIO</option>
                 </select>
               </div>
               <div class="form-actions" style="display: flex; gap: 8px;">
@@ -1430,9 +1456,9 @@
       <!-- SUB-VISTA B: CATÁLOGO DE TURNOS -->
       @if (subVistaConfig() === 'CATALOGO_TURNOS') {
         @let calc = calculoAutomaticoHorasTurno();
-        <div class="admin-forms-grid">
+        <div class="catalogo-turnos-grid">
           <!-- Formulario de Creación / Edición de Turno -->
-          <div class="panel-card">
+          <div class="panel-card catalogo-form-card">
             <div class="panel-header">
               <h3>
                 @if (turnoEditandoCodigo()) {
@@ -1511,8 +1537,8 @@
                   <span class="calc-sub">({{ calc.horarioTexto }})</span>
                 </div>
                 <div class="calc-pills">
-                  <span class="calc-pill-day">☀️ Diurnas (06:00-21:00): <strong>{{ calc.diurnas }}h</strong></span>
-                  <span class="calc-pill-night">🌙 Nocturnas (21:00-06:00): <strong>{{ calc.nocturnas }}h</strong></span>
+                  <span class="calc-pill-day">☀️ Diurnas (06:00-19:00): <strong>{{ calc.diurnas }}h</strong></span>
+                  <span class="calc-pill-night">🌙 Nocturnas (19:00-06:00): <strong>{{ calc.nocturnas }}h</strong></span>
                 </div>
               </div>
 
@@ -1563,70 +1589,86 @@
             </div>
           </div>
 
-          <!-- Tabla del Catálogo Maestro de Turnos -->
-          <div class="panel-card">
+          <!-- Tabla del Catálogo Maestro de Turnos Optimizado -->
+          <div class="panel-card catalogo-table-card">
             <div class="panel-header">
               <h3>🎨 Turnos Configurados</h3>
               <span class="badge-count">{{ listaTurnosCatalogo().length }} Turnos</span>
             </div>
             <div class="table-responsive">
-              <table class="data-table">
+              <table class="data-table catalogo-table">
                 <thead>
                   <tr>
-                    <th>Ficha</th>
-                    <th>Nombre</th>
-                    <th>Horario</th>
-                    <th>Total</th>
-                    <th>Diurnas</th>
-                    <th>Nocturnas</th>
-                    <th>Reglas</th>
-                    <th>En Paleta</th>
-                    <th>Acción</th>
+                    <th class="col-turno">Turno</th>
+                    <th class="col-horario">Horario</th>
+                    <th class="col-horas">Horas</th>
+                    <th class="col-reglas">Reglas</th>
+                    <th class="col-gestion">Gestión</th>
                   </tr>
                 </thead>
                 <tbody>
                   @for (t of listaTurnosCatalogo(); track t.codigo) {
                     <tr>
-                      <td>
-                        <span
-                          class="mini-shift"
-                          [style.background-color]="t.bgHex"
-                          [style.color]="t.textHex"
-                          [style.border]="'1px solid ' + t.borderHex">
-                          {{ t.codigo }}
-                        </span>
+                      <td class="col-turno">
+                        <div class="turno-cell-cluster">
+                          <span
+                            class="mini-shift"
+                            [style.background-color]="t.bgHex"
+                            [style.color]="t.textHex"
+                            [style.border]="'1px solid ' + t.borderHex">
+                            {{ t.codigo }}
+                          </span>
+                          <div class="turno-info-block">
+                            <span class="turno-title">{{ t.nombre }}</span>
+                            @if (t.esAusencia) {
+                              <span class="badge-custom-sm">Novedad</span>
+                            }
+                          </div>
+                        </div>
                       </td>
-                      <td><strong>{{ t.nombre }}</strong></td>
-                      <td class="font-mono">{{ t.horario }}</td>
-                      <td class="font-mono"><strong>{{ t.horasOrdinarias }}h</strong></td>
-                      <td class="font-mono">{{ t.horasDiurnas }}h</td>
-                      <td class="font-mono">{{ t.horasNocturnas }}h</td>
-                      <td>
-                        @if (t.esNocturnoPesado) {
-                          <span class="badge-nuevo" title="Exige Saliente o Libre al día siguiente">Post-Turno</span>
-                        }
-                        @if (t.descuentaBancoHoras) {
-                          <span class="badge-tipo-asistencia" title="Amortiza 8h del Banco de Horas">-8h Banco</span>
-                        }
-                        @if (t.esAusencia) {
-                          <span class="badge-custom">Novedad</span>
-                        }
-                        @if (!t.esNocturnoPesado && !t.descuentaBancoHoras && !t.esAusencia) {
-                          <span class="text-muted">Estándar</span>
-                        }
+                      <td class="col-horario font-mono">
+                        {{ t.horario }}
                       </td>
-                      <td>
-                        <button
-                          class="btn-palette-toggle"
-                          [class.active]="t.visibleEnPaleta !== false"
-                          (click)="alternarVisibilidadTurnoPaleta(t.codigo)">
-                          {{ t.visibleEnPaleta !== false ? '✅ Visible' : '👁️ Oculto' }}
-                        </button>
+                      <td class="col-horas">
+                        <div class="horas-metric-cluster">
+                          <strong class="horas-total-num">{{ t.horasOrdinarias }}h</strong>
+                          @if (t.horasOrdinarias > 0) {
+                            <div class="horas-pill-row">
+                              <span class="badge-sub-day" title="Horas diurnas">{{ t.horasDiurnas }}D</span>
+                              <span class="badge-sub-night" title="Horas nocturnas">{{ t.horasNocturnas }}N</span>
+                            </div>
+                          }
+                        </div>
                       </td>
-                      <td>
-                        <button class="btn-sm-primary" (click)="cargarTurnoParaEdicion(t)">
-                          ✏️ Editar
-                        </button>
+                      <td class="col-reglas">
+                        <div class="reglas-tags-wrap">
+                          @if (t.esNocturnoPesado) {
+                            <span class="badge-nuevo" title="Exige descanso Saliente o Libre al día siguiente">🌙 Post-Turno</span>
+                          }
+                          @if (t.descuentaBancoHoras) {
+                            <span class="badge-banco-mini" title="Amortiza 8h del Banco de Horas">🏦 -8h Banco</span>
+                          }
+                          @if (!t.esNocturnoPesado && !t.descuentaBancoHoras && !t.esAusencia) {
+                            <span class="text-muted-sm">Estándar</span>
+                          }
+                        </div>
+                      </td>
+                      <td class="col-gestion">
+                        <div class="gestion-cluster">
+                          <button
+                            class="btn-palette-toggle"
+                            [class.active]="t.visibleEnPaleta !== false"
+                            (click)="alternarVisibilidadTurnoPaleta(t.codigo)"
+                            [title]="t.visibleEnPaleta !== false ? 'Visible en paleta rápida del cuadrante' : 'Oculto en paleta'">
+                            {{ t.visibleEnPaleta !== false ? '✅ Paleta' : '👁️ Oculto' }}
+                          </button>
+                          <button
+                            class="btn-sm-primary"
+                            (click)="cargarTurnoParaEdicion(t)"
+                            title="Editar este turno en el formulario">
+                            ✏️ Editar
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   }
@@ -1750,6 +1792,30 @@
           </ul>
           <div class="modal-footer">
             <button class="btn-primary" (click)="copiarEnlaceIcal()">📋 Copiar Enlace</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- MODAL DE CONFIRMACIÓN CENTRADO (VIEWPORT FIJO) -->
+  @if (modalConfirmacion(); as conf) {
+    <div class="modal-backdrop" (click)="cerrarConfirmacion()">
+      <div class="modal-box modal-box-confirm" (click)="$event.stopPropagation()">
+        <div class="modal-header" [class.modal-header-danger]="conf.esPeligroso">
+          <h3>{{ conf.titulo }}</h3>
+          <button (click)="cerrarConfirmacion()">✕</button>
+        </div>
+        <div class="modal-body">
+          <p class="confirm-message-text">{{ conf.mensaje }}</p>
+          <div class="modal-footer modal-footer-confirm">
+            <button class="btn-outline" (click)="cerrarConfirmacion()">Cancelar</button>
+            <button
+              [class.btn-danger]="conf.esPeligroso"
+              [class.btn-primary]="!conf.esPeligroso"
+              (click)="ejecutarConfirmacion()">
+              {{ conf.textoBotonConfirmar || 'Confirmar' }}
+            </button>
           </div>
         </div>
       </div>

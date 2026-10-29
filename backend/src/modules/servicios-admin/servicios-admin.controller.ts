@@ -1,5 +1,29 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  ConflictException,
+  Controller,
+  Delete,
+  Get,
+  NotFoundException,
+  Param,
+  Post,
+  Put,
+  Query,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+
+function normalizarTipoAsistencia(tipo: any): any {
+  if (!tipo) return 'URGENCIAS';
+  const val = String(tipo).trim().toUpperCase();
+  if (val === 'UCI' || val === 'CUIDADOS_INTENSIVOS') return 'CUIDADOS_INTENSIVOS';
+  if (val === 'AMBULATORIO' || val === 'CONSULTA_EXTERNA') return 'CONSULTA_EXTERNA';
+  if (val === 'QUIRURGICO') return 'QUIRURGICO';
+  if (val === 'HOSPITALIZACION') return 'HOSPITALIZACION';
+  if (val === 'APOYO_DIAGNOSTICO') return 'APOYO_DIAGNOSTICO';
+  if (val === 'URGENCIAS') return 'URGENCIAS';
+  return 'CONSULTA_EXTERNA';
+}
 
 @Controller('api/v1/servicios-admin')
 export class ServiciosAdminController {
@@ -119,21 +143,25 @@ export class ServiciosAdminController {
       intranetId?: string;
     }
   ) {
-    const cod = data.codigo.trim().toUpperCase();
-    const nom = data.nombre.trim();
+    const cod = data.codigo?.trim().toUpperCase();
+    const nom = data.nombre?.trim();
+
+    if (!cod || !nom) {
+      throw new BadRequestException('El código y el nombre del servicio son obligatorios.');
+    }
 
     const existente = await this.prisma.servicio.findUnique({
       where: { codigo: cod },
     });
     if (existente) {
-      throw new Error("El código de servicio '" + cod + "' ya se encuentra registrado por '" + existente.nombre + "'.");
+      throw new ConflictException(`El código de servicio '${cod}' ya se encuentra registrado por '${existente.nombre}'.`);
     }
 
     return this.prisma.servicio.create({
       data: {
         codigo: cod,
         nombre: nom,
-        tipoAsistencia: data.tipoAsistencia,
+        tipoAsistencia: normalizarTipoAsistencia(data.tipoAsistencia),
         intranetId: data.intranetId,
       },
     });
@@ -150,8 +178,12 @@ export class ServiciosAdminController {
       tipoAsistencia: any;
     }
   ) {
-    const cod = data.codigo.trim().toUpperCase();
-    const nom = data.nombre.trim();
+    const cod = data.codigo?.trim().toUpperCase();
+    const nom = data.nombre?.trim();
+
+    if (!cod || !nom) {
+      throw new BadRequestException('El código y el nombre del servicio son obligatorios.');
+    }
 
     const enConflicto = await this.prisma.servicio.findFirst({
       where: {
@@ -160,7 +192,7 @@ export class ServiciosAdminController {
       },
     });
     if (enConflicto) {
-      throw new Error("El código '" + cod + "' ya está en uso por otro servicio (" + enConflicto.nombre + ").");
+      throw new ConflictException(`El código '${cod}' ya está en uso por otro servicio (${enConflicto.nombre}).`);
     }
 
     return this.prisma.servicio.update({
@@ -168,7 +200,7 @@ export class ServiciosAdminController {
       data: {
         codigo: cod,
         nombre: nom,
-        tipoAsistencia: data.tipoAsistencia,
+        tipoAsistencia: normalizarTipoAsistencia(data.tipoAsistencia),
       },
     });
   }
@@ -190,18 +222,18 @@ export class ServiciosAdminController {
     });
 
     if (!servicio) {
-      throw new Error('El servicio no existe o ya fue eliminado.');
+      throw new NotFoundException('El servicio no existe o ya fue eliminado.');
     }
 
     if (servicio._count.empleadosBase > 0) {
-      throw new Error(
-        "No es posible eliminar el servicio '" + servicio.nombre + "' porque tiene " + servicio._count.empleadosBase + " colaborador(es) adscrito(s). Trasládelos antes de eliminar."
+      throw new ConflictException(
+        `No es posible eliminar el servicio '${servicio.nombre}' porque tiene ${servicio._count.empleadosBase} colaborador(es) adscrito(s). Trasládelos antes de eliminar.`
       );
     }
 
     if (servicio._count.cuadrantes > 0 || servicio._count.asignacionesEjecutadas > 0) {
-      throw new Error(
-        "No es posible eliminar el servicio '" + servicio.nombre + "' porque contiene historial de turnos o cuadrantes generados."
+      throw new ConflictException(
+        `No es posible eliminar el servicio '${servicio.nombre}' porque contiene historial de turnos o cuadrantes generados.`
       );
     }
 

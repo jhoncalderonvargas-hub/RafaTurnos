@@ -21,7 +21,7 @@
     - `G12`: Guardia 12 horas diurna o nocturna
     - `L`: Libre programado
     - `S`: Saliente de guardia
-- **RF-C02**: Cada turno debe clasificar el desglose de horas diurnas y horas con recargo nocturno (21:00 a 06:00).
+- **RF-C02**: Cada turno debe clasificar el desglose de horas diurnas y horas con recargo nocturno (19:00 a 06:00).
 
 ### Módulo D: Planificador Visual de Cuadrantes (Matriz Interactiva)
 - **RF-D01**: El sistema debe presentar una matriz mensual/semanal donde las filas sean los profesionales agrupados por categoría y las columnas los días del mes.

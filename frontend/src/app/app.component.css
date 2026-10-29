@@ -273,23 +273,57 @@
   background: #f1f5f9;
 }
 
-/* TOAST */
+/* TOAST FLOTANTE VIEWPORT-FIJO (SIEMPRE VISIBLE EN PANTALLA) */
 .toast-banner {
-  background: #065f46;
+  position: fixed;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #0f172a;
   color: #ffffff;
-  padding: 8px 20px;
+  padding: 12px 24px;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.15);
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 16px;
   font-weight: 600;
-  font-size: 12.5px;
+  font-size: 13.5px;
+  z-index: 100000;
+  animation: toastPopDown 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  max-width: 90vw;
+  border-left: 4px solid #10b981;
 }
 
 .toast-banner button {
-  background: transparent;
+  background: rgba(255, 255, 255, 0.15);
   border: none;
   color: #fff;
-  font-size: 14px;
+  font-size: 13px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.toast-banner button:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+@keyframes toastPopDown {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -24px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
 }
 
 /* TOOLBAR CONTROLES */
@@ -440,6 +474,17 @@
   color: #0f172a;
 }
 
+.badge-ctrl-tip {
+  display: inline-block;
+  margin-left: 8px;
+  color: #0369a1;
+  font-weight: 600;
+  background: #e0f2fe;
+  padding: 1px 8px;
+  border-radius: 12px;
+  border: 1px solid #bae6fd;
+}
+
 .palette-chips {
   display: flex;
   gap: 8px;
@@ -496,6 +541,21 @@
   background: #ffffff;
   color: #334155;
   border-color: #cbd5e1;
+}
+
+.pointer-chip {
+  background: #f8fafc;
+  color: #0369a1;
+  border-color: #38bdf8;
+  cursor: pointer;
+}
+
+.pointer-chip.selected {
+  background: #e0f2fe;
+  border-color: #0284c7;
+  color: #0369a1;
+  outline: 2px solid #0284c7;
+  box-shadow: 0 0 0 4px rgba(2, 132, 199, 0.25);
 }
 
 /* ALERTAS CLÍNICAS */
@@ -630,6 +690,13 @@ thead .col-sticky-emp {
   color: #b45309 !important;
 }
 
+.col-day.col-focused {
+  background: #bae6fd !important;
+  color: #0369a1 !important;
+  box-shadow: inset 0 -3px 0 #0284c7;
+  font-weight: 800;
+}
+
 .day-number {
   font-size: 13px;
   font-weight: 800;
@@ -761,8 +828,48 @@ thead .col-sticky-emp {
 }
 
 .matrix-cell.cell-focused {
-  box-shadow: inset 0 0 0 2px #0284c7;
-  z-index: 2;
+  box-shadow: inset 0 0 0 2.5px #0284c7, 0 0 0 1px #0284c7 !important;
+  z-index: 5;
+  position: relative;
+  outline: none;
+}
+
+/* GUÍA VISUAL CROSSHAIR (FILA Y COLUMNA RESALTADAS) */
+tr.row-focused td.col-sticky-emp {
+  background-color: #f0fdf4 !important;
+  border-left: 3px solid #0284c7;
+}
+
+tr.row-focused td.matrix-cell:not(.cell-focused) {
+  background-color: rgba(2, 132, 199, 0.05);
+}
+
+.matrix-cell.cell-col-guide:not(.cell-focused) {
+  background-color: rgba(2, 132, 199, 0.06);
+}
+
+/* CLONACIÓN RÁPIDA CON CTRL (ESTILO EXCEL) */
+.grid-container.ctrl-pressed .matrix-cell,
+.grid-container.is-cloning .matrix-cell {
+  cursor: copy !important;
+}
+
+.floating-clone-badge {
+  position: fixed;
+  bottom: 24px;
+  right: 28px;
+  background: #0f172a;
+  color: #ffffff;
+  padding: 8px 18px;
+  border-radius: 24px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 1200;
+  border: 1.5px solid #38bdf8;
+  pointer-events: none;
 }
 
 .matrix-cell.cell-conflict {
@@ -996,6 +1103,7 @@ thead .col-sticky-emp {
   border-radius: 10px;
   padding: 18px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  min-width: 0;
 }
 
 .panel-header {
@@ -1174,24 +1282,85 @@ thead .col-sticky-emp {
   border-radius: 6px;
 }
 
-/* MODALES */
+/* MODALES CENTRADOS EN VIEWPORT (SIEMPRE VISIBLES SIN IMPORTAR EL SCROLL) */
 .modal-backdrop {
   position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.55);
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(2px);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: 99999;
+  padding: 20px;
+  box-sizing: border-box;
 }
 
 .modal-box {
   background: #ffffff;
-  width: 90%;
+  width: 100%;
   max-width: 560px;
+  max-height: calc(100vh - 40px);
+  display: flex;
+  flex-direction: column;
   border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.4);
+  animation: modalScaleIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  margin: auto;
+}
+
+.modal-box-confirm {
+  max-width: 480px;
+}
+
+.modal-header-danger {
+  background: #991b1b !important;
+}
+
+.confirm-message-text {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: #334155;
+  white-space: pre-line;
+}
+
+.modal-footer-confirm {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  padding-top: 10px;
+}
+
+.btn-danger {
+  background: #dc2626;
+  color: #ffffff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-danger:hover {
+  background: #b91c1c;
+}
+
+@keyframes modalScaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .modal-header {
@@ -1891,6 +2060,191 @@ thead .col-sticky-emp {
   background: #f0fdf4;
   border-color: #86efac;
   color: #166534;
+}
+
+/* ========================================================================= */
+/* TABLAS RESPONSIVAS Y MAQUETACIÓN CATÁLOGO DE TURNOS                      */
+/* ========================================================================= */
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.catalogo-turnos-grid {
+  display: grid;
+  grid-template-columns: minmax(430px, 470px) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+  margin-bottom: 24px;
+}
+
+.catalogo-form-card {
+  position: sticky;
+  top: 80px;
+  z-index: 10;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+}
+
+.catalogo-table-card {
+  min-width: 0;
+  width: 100%;
+}
+
+.catalogo-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.catalogo-table th {
+  background: #f8fafc;
+  font-weight: 700;
+  color: #334155;
+  padding: 10px 12px;
+  border-bottom: 2px solid #e2e8f0;
+  white-space: nowrap;
+}
+
+.catalogo-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: middle;
+}
+
+.catalogo-table tbody tr:hover td {
+  background-color: #f8fafc;
+}
+
+/* Columna 1: Turno (Ficha + Nombre) */
+.col-turno {
+  min-width: 150px;
+}
+
+.turno-cell-cluster {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.turno-info-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.turno-title {
+  font-weight: 700;
+  color: #1e293b;
+  font-size: 12.5px;
+}
+
+.badge-custom-sm {
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid #cbd5e1;
+  width: fit-content;
+}
+
+/* Columna 2: Horario */
+.col-horario {
+  white-space: nowrap;
+  font-family: monospace;
+  font-size: 12px;
+  color: #475569;
+}
+
+/* Columna 3: Horas */
+.col-horas {
+  white-space: nowrap;
+}
+
+.horas-metric-cluster {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.horas-total-num {
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.horas-pill-row {
+  display: flex;
+  gap: 4px;
+}
+
+.badge-sub-day {
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  color: #0284c7;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.badge-sub-night {
+  background: #f5f3ff;
+  border: 1px solid #ddd6fe;
+  color: #7c3aed;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+/* Columna 4: Reglas */
+.col-reglas {
+  white-space: nowrap;
+}
+
+.reglas-tags-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.badge-banco-mini {
+  background: #ecfeff;
+  border: 1px solid #a5f3fc;
+  color: #0e7490;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.text-muted-sm {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+/* Columna 5: Gestión */
+.col-gestion {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.gestion-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+@media (max-width: 1120px) {
+  .catalogo-turnos-grid {
+    grid-template-columns: 1fr;
+  }
+  .catalogo-form-card {
+    position: static;
+  }
 }
 
 /* ========================================================================= */

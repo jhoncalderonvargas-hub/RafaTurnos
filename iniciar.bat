@@ -10,7 +10,7 @@ docker compose up -d
 echo.
 
 echo [2/3] Iniciando Backend NestJS (http://localhost:3000)...
-start "Rafa Turnos - Backend" cmd /k "cd /d "%~dp0backend" && npm start"
+start "Rafa Turnos - Backend" cmd /k "cd /d "%~dp0backend" && npm run start:dev"
 echo.
 
 echo [3/3] Iniciando Frontend Angular (http://localhost:4200)...

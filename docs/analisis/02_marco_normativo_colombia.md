@@ -12,10 +12,10 @@ El aplicativo incorpora las reglas estipuladas en el **Código Sustantivo del Tr
   - Desde julio 2026 en adelante: 42 horas semanales.
 - El sistema debe ser parametrizable para definir el tope de horas semanales/mensuales de cada contrato según el año en curso.
 
-### B. Trabajo Nocturno y Diurno (Art. 160 CST)
-- **Jornada Diurna**: Comprendida entre las 06:00 y las 21:00 horas (a la espera de reformas que pudieran ampliar el horario nocturno a partir de las 19:00).
-- **Jornada Nocturna**: Comprendida entre las 21:00 y las 06:00 horas.
-- **Recargo Nocturno Ordinario**: 35% sobre el valor de la hora diurna ordinaria.
+### B. Trabajo Nocturno y Diurno (Art. 160 CST - Ley de Reforma Laboral)
+- **Jornada Diurna**: Comprendida entre las 06:00 y las 19:00 horas (6:00 a.m. a 7:00 p.m.).
+- **Jornada Nocturna**: Comprendida entre las 19:00 y las 06:00 horas (7:00 p.m. a 6:00 a.m.).
+- **Recargo Nocturno Ordinario**: 35% sobre el valor de la hora diurna ordinaria por toda labor ejecutada a partir de las 19:00.
 
 ### C. Descanso Dominical y Festivo (Art. 172 - 181 CST)
 - **Recargo Dominical/Festivo**: 75% sobre la hora ordinaria por laborar en domingos o días feriados.
@@ -37,7 +37,7 @@ El aplicativo incorpora las reglas estipuladas en el **Código Sustantivo del Tr
 |---|---|---|---|
 | **Límite Horas Semanales** | 42 - 46 h (según vigencia) | Sí | Ley 2101 de 2021 |
 | **Descanso Mínimo entre Turnos** | 12 horas | Sí | Salud laboral y seguridad del paciente |
-| **Horario Inicio Nocturno** | 21:00 | Sí | Art. 160 CST |
+| **Horario Inicio Nocturno** | 19:00 | Sí | Art. 160 CST (Reforma Laboral) |
 | **Horario Fin Nocturno** | 06:00 | Sí | Art. 160 CST |
 | **Descanso Post-Guardia (12h/24h)** | Día Saliente (`S`) obligatorio | Sí | Prevención de fatiga en personal médico/enfermería |
 | **Máximo Noches Consecutivas** | 2 a 3 noches | Sí | Buenas prácticas de bioseguridad clínica |

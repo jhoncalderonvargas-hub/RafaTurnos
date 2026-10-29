@@ -16,7 +16,7 @@ Sistema web integral para la **programación, gestión y optimización de turnos
 Toda la fase de análisis de requisitos, reglas de negocio y arquitectura se encuentra documentada en la carpeta [`docs/analisis/`](./docs/analisis/):
 
 1. **[01. Definición del Problema, Benchmark y Alcance](./docs/analisis/01_definicion_problema_y_alcance.md)**: Justificación del sistema, características clave inspiradas en Thurni y delimitación del MVP vs fases futuras.
-2. **[02. Marco Normativo Laboral Colombiano](./docs/analisis/02_marco_normativo_colombia.md)**: Ley 2101 de 2021 (reducción de jornada), recargos nocturnos (21:00-06:00), recargos dominicales/festivos, descansos compensatorios y descansos entre turnos (12h).
+2. **[02. Marco Normativo Laboral Colombiano](./docs/analisis/02_marco_normativo_colombia.md)**: Ley 2101 de 2021 (reducción de jornada a 42h), recargos nocturnos vigentes (19:00-06:00), recargos dominicales/festivos, descansos compensatorios y descansos entre turnos (12h).
 3. **[03. Requisitos Funcionales y No Funcionales](./docs/analisis/03_requisitos_funcionales_y_no_funcionales.md)**: Catálogo detallado de RFs (organización, personal, catálogo de turnos, planificador interactivo, validaciones, portal de empleados) y RNFs.
 4. **[04. Modelo Conceptual y Reglas de Negocio](./docs/analisis/04_modelo_conceptual_y_reglas_negocio.md)**: Diagrama ER conceptual, entidades del dominio hospitalario y matriz de reglas de validación (descansos, post-guardias, coberturas mínimas).
 5. **[05. Arquitectura Técnica Propuesta](./docs/analisis/05_arquitectura_tecnica_propuesta.md)**: Estructura del repositorio, diseño modular de NestJS, componentes reactivos con Angular Signals y estrategia de cuadrante de alto rendimiento.

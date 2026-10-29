@@ -1,4 +1,4 @@
-import { Component, computed, OnInit, signal } from '@angular/core';
+import { Component, computed, HostListener, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
@@ -7,6 +7,7 @@ import {
   CodigoTurno,
   EmpleadoHospital,
   FestivoEntry,
+  ModalConfirmacionConfig,
   PermutaItem,
   RegistroAuditoria,
   ServicioHospitalario,
@@ -80,6 +81,23 @@ export class AppComponent implements OnInit {
   // Modales
   modalRotacionAbierto = signal<boolean>(false);
   modalIcalAbierto = signal<boolean>(false);
+  modalConfirmacion = signal<ModalConfirmacionConfig | null>(null);
+
+  abrirConfirmacion(config: ModalConfirmacionConfig): void {
+    this.modalConfirmacion.set(config);
+  }
+
+  cerrarConfirmacion(): void {
+    this.modalConfirmacion.set(null);
+  }
+
+  ejecutarConfirmacion(): void {
+    const conf = this.modalConfirmacion();
+    if (conf) {
+      this.modalConfirmacion.set(null);
+      conf.onConfirmar();
+    }
+  }
 
   // Formulario Nuevo Festivo / Día Cívico
   nuevoFestivoFecha = signal<string>('2026-11-20');
@@ -138,7 +156,7 @@ export class AppComponent implements OnInit {
     { key: 'GRIS_ADMIN', nombre: 'Gris Neutro', bgHex: '#F3F4F6', textHex: '#374151', borderHex: '#D1D5DB' },
   ];
 
-  // Cálculo automático de horas Ordinarias, Diurnas (06:00-21:00) y Nocturnas (21:00-06:00)
+  // Cálculo automático de horas Ordinarias, Diurnas (06:00-19:00) y Nocturnas (19:00-06:00) - Ley 2466 / CST Art. 160
   calculoAutomaticoHorasTurno = computed<{
     ordinarias: number;
     diurnas: number;
@@ -158,8 +176,8 @@ export class AppComponent implements OnInit {
       const ini = this.turnoFormHoraInicio() || '07:00';
       return {
         ordinarias: 24,
-        diurnas: 15,
-        nocturnas: 9,
+        diurnas: 13,
+        nocturnas: 11,
         horarioTexto: `${ini} - ${ini} (+1)`,
       };
     }
@@ -179,8 +197,8 @@ export class AppComponent implements OnInit {
     let minNocturnos = 0;
     for (let m = minInicio; m < minFin; m++) {
       const minDia = m % 1440;
-      // Franja diurna en Colombia: 06:00 (360) a 21:00 (1260)
-      if (minDia >= 360 && minDia < 1260) {
+      // Franja diurna en Colombia (Ley 2466 / CST Art. 160): 06:00 (360) a 19:00 (1140)
+      if (minDia >= 360 && minDia < 1140) {
         minDiurnos++;
       } else {
         minNocturnos++;
@@ -207,10 +225,16 @@ export class AppComponent implements OnInit {
     { valor: 12, nombre: 'Diciembre' },
   ];
 
-  // Herramienta Pincel / Drag & Drop estilo Thurni
-  turnoPincelActivo = signal<CodigoTurno>('M8');
+  // Herramienta Pincel / Selector y Navegación
+  turnoPincelActivo = signal<string>('POINTER');
+  autoAvanzarAlTeclear = signal<boolean>(true);
   pintandoConRaton = signal<boolean>(false);
   celdaEnfocada = signal<{ empId: string; dia: number } | null>(null);
+
+  // Modalidad Clonador Rápido con Ctrl (Estilo Excel)
+  teclaCtrlPresionada = signal<boolean>(false);
+  clonandoConCtrl = signal<boolean>(false);
+  turnoClonandoConCtrl = signal<CodigoTurno | null>(null);
 
   // Estado Reactivo de Asignaciones en Memoria (independiente por Año-Mes)
   asignacionesPorPeriodo = signal<Record<string, Record<string, Record<number, CeldaAsignacion>>>>({});
@@ -1045,43 +1069,223 @@ export class AppComponent implements OnInit {
   onDropCelda(event: DragEvent, empId: string, dia: number): void {
     event.preventDefault();
     const cod = (event.dataTransfer?.getData('text/plain') as CodigoTurno) ?? this.turnoPincelActivo();
+    if (cod === 'POINTER') return;
     this.aplicarTurnoEnCelda(empId, dia, cod, 'Arrastre Drag & Drop');
   }
 
-  iniciarPintadoCelda(empId: string, dia: number): void {
-    this.celdaEnfocada.set({ empId, dia });
+  @HostListener('window:keydown', ['$event'])
+  onWindowKeyDown(event: KeyboardEvent): void {
+    if (event.key === 'Control' || event.key === 'Meta') {
+      this.teclaCtrlPresionada.set(true);
+    }
+  }
+
+  @HostListener('window:keyup', ['$event'])
+  onWindowKeyUp(event: KeyboardEvent): void {
+    if (event.key === 'Control' || event.key === 'Meta') {
+      this.teclaCtrlPresionada.set(false);
+      if (this.clonandoConCtrl()) {
+        this.finalizarPintadoRaton();
+      }
+    }
+  }
+
+  @HostListener('window:mouseup')
+  onWindowMouseUp(): void {
+    if (this.pintandoConRaton() || this.clonandoConCtrl()) {
+      this.finalizarPintadoRaton();
+    }
+  }
+
+  iniciarPintadoCelda(empId: string, dia: number, event?: MouseEvent): void {
+    this.enfocarCeldaPorId(empId, dia);
+
+    const esCtrl = !!(event?.ctrlKey || event?.metaKey || this.teclaCtrlPresionada());
+
+    if (esCtrl) {
+      // Modalidad Clonador Rápido con Ctrl (Estilo Excel):
+      // Lee el turno actual de la celda origen y lo propaga a las celdas por donde se arrastre
+      const celdaActual = this.asignaciones()[empId]?.[dia]?.codigo || '';
+      this.clonandoConCtrl.set(true);
+      this.turnoClonandoConCtrl.set(celdaActual);
+      this.pintandoConRaton.set(true);
+      return;
+    }
+
+    if (this.turnoPincelActivo() === 'POINTER') {
+      // Modo puntero/inspección sin Ctrl: enfoca la celda sin alterar su turno
+      return;
+    }
+
+    // Modo brocha activa normal: aplica el turno seleccionado de la paleta
     this.pintandoConRaton.set(true);
     this.aplicarTurnoEnCelda(empId, dia, this.turnoPincelActivo(), 'Asignación manual');
   }
 
   continuarPintadoCelda(empId: string, dia: number): void {
     if (!this.pintandoConRaton()) return;
+
+    if (this.clonandoConCtrl()) {
+      const turnoClonar = this.turnoClonandoConCtrl();
+      if (turnoClonar !== null) {
+        this.aplicarTurnoEnCelda(empId, dia, turnoClonar, 'Clonación rápida Ctrl');
+      }
+      return;
+    }
+
+    if (this.turnoPincelActivo() === 'POINTER') return;
     this.aplicarTurnoEnCelda(empId, dia, this.turnoPincelActivo(), 'Arrastre continuo');
   }
 
   finalizarPintadoRaton(): void {
     this.pintandoConRaton.set(false);
+    this.clonandoConCtrl.set(false);
+    this.turnoClonandoConCtrl.set(null);
+  }
+
+  enfocarCeldaPorId(empId: string, dia: number): void {
+    this.celdaEnfocada.set({ empId, dia });
+    setTimeout(() => {
+      const el = document.getElementById(`celda-${empId}-${dia}`);
+      if (el) {
+        el.focus();
+      }
+    }, 0);
+  }
+
+  navegarCelda(empId: string, dia: number, deltaFila: number, deltaDia: number, wrapTab = false): void {
+    const filas = this.filasCuadrante();
+    if (filas.length === 0) return;
+
+    const totalDias = this.diasDelMes().length;
+    const idxFila = filas.findIndex((f) => f.empleado.id === empId);
+    if (idxFila === -1) return;
+
+    let nuevaFila = idxFila;
+    let nuevoDia = dia;
+
+    if (wrapTab) {
+      if (deltaDia > 0) {
+        // Tab (avance continuo)
+        if (dia < totalDias) {
+          nuevoDia = dia + 1;
+        } else if (idxFila < filas.length - 1) {
+          nuevaFila = idxFila + 1;
+          nuevoDia = 1;
+        } else {
+          nuevaFila = 0;
+          nuevoDia = 1;
+        }
+      } else if (deltaDia < 0) {
+        // Shift + Tab (retroceso continuo)
+        if (dia > 1) {
+          nuevoDia = dia - 1;
+        } else if (idxFila > 0) {
+          nuevaFila = idxFila - 1;
+          nuevoDia = totalDias;
+        } else {
+          nuevaFila = filas.length - 1;
+          nuevoDia = totalDias;
+        }
+      }
+    } else {
+      // Flechas de dirección y Enter
+      nuevaFila = Math.max(0, Math.min(filas.length - 1, idxFila + deltaFila));
+      nuevoDia = Math.max(1, Math.min(totalDias, dia + deltaDia));
+    }
+
+    const destinoEmpId = filas[nuevaFila].empleado.id;
+    this.enfocarCeldaPorId(destinoEmpId, nuevoDia);
   }
 
   onKeyDownCelda(event: KeyboardEvent, empId: string, dia: number): void {
-    const key = event.key.toUpperCase();
+    const key = event.key;
+    const keyUpper = key.toUpperCase();
+
+    // 1. Teclas de Navegación
+    if (key === 'ArrowRight') {
+      event.preventDefault();
+      this.navegarCelda(empId, dia, 0, 1);
+      return;
+    }
+    if (key === 'ArrowLeft') {
+      event.preventDefault();
+      this.navegarCelda(empId, dia, 0, -1);
+      return;
+    }
+    if (key === 'ArrowDown') {
+      event.preventDefault();
+      this.navegarCelda(empId, dia, 1, 0);
+      return;
+    }
+    if (key === 'ArrowUp') {
+      event.preventDefault();
+      this.navegarCelda(empId, dia, -1, 0);
+      return;
+    }
+    if (key === 'Tab') {
+      event.preventDefault();
+      this.navegarCelda(empId, dia, 0, event.shiftKey ? -1 : 1, true);
+      return;
+    }
+    if (key === 'Enter') {
+      event.preventDefault();
+      this.navegarCelda(empId, dia, event.shiftKey ? -1 : 1, 0);
+      return;
+    }
+    if (key === 'Home') {
+      event.preventDefault();
+      this.enfocarCeldaPorId(empId, 1);
+      return;
+    }
+    if (key === 'End') {
+      event.preventDefault();
+      this.enfocarCeldaPorId(empId, this.diasDelMes().length);
+      return;
+    }
+    if (key === 'Escape') {
+      this.celdaEnfocada.set(null);
+      return;
+    }
+
+    // 2. Teclas de Asignación Rápida
     const mapaTeclas: Record<string, CodigoTurno> = {
+      // Numéricos
+      '1': 'M8',
+      '2': 'T8',
+      '3': 'N12',
+      '4': 'D12',
+      '5': 'G24',
+      '6': 'M6',
+      '7': 'T6',
+      '8': 'N8',
+      '0': 'L',
+      // Letras mnemotécnicas
       M: 'M8',
       T: 'T8',
-      N: 'N8',
-      G: 'D12',
+      N: 'N12',
+      D: 'D12',
+      G: 'G24',
       S: 'S',
       L: 'L',
       C: 'COMP',
       V: 'VAC',
       I: 'INC',
+      // Borrado
       DELETE: '',
       BACKSPACE: '',
+      ' ': '',
     };
 
-    if (key in mapaTeclas) {
+    if (keyUpper in mapaTeclas || key in mapaTeclas) {
       event.preventDefault();
-      this.aplicarTurnoEnCelda(empId, dia, mapaTeclas[key], `Atajo de teclado (${key})`);
+      const codigoAsignar = mapaTeclas[keyUpper] ?? mapaTeclas[key];
+      this.aplicarTurnoEnCelda(empId, dia, codigoAsignar, `Atajo de teclado (${key})`);
+
+      // Auto-avance horizontal al siguiente día si está habilitado
+      if (this.autoAvanzarAlTeclear()) {
+        this.navegarCelda(empId, dia, 0, 1);
+      }
     }
   }
 
@@ -1194,13 +1398,19 @@ export class AppComponent implements OnInit {
     }
 
     const srvNombre = this.servicioActual().nombre;
-    const confirmado = window.confirm(
-      `¿Dejar en blanco TODO el cuadro de turnos de "${srvNombre}"?\n\n` +
-        'Se borrarán los turnos asignados (incluida la sugerencia automática). ' +
-        'Las vacaciones e incapacidades oficiales se conservan.'
-    );
-    if (!confirmado) return;
+    this.abrirConfirmacion({
+      titulo: '🧹 Dejar en Blanco el Cuadro de Turnos',
+      mensaje: `¿Deseas dejar en blanco todo el cuadro de turnos de "${srvNombre}"?\n\nSe borrarán los turnos asignados pero se conservarán las novedades oficiales (Vacaciones e Incapacidades).`,
+      textoBotonConfirmar: 'Sí, Dejar en Blanco',
+      esPeligroso: true,
+      onConfirmar: () => {
+        this.ejecutarLimpiezaCuadranteCompleto();
+      },
+    });
+  }
 
+  private ejecutarLimpiezaCuadranteCompleto(): void {
+    const srvNombre = this.servicioActual().nombre;
     const actualMap = { ...this.asignaciones() };
     let celdasLimpiadas = 0;
     const loteParaDb: {
@@ -1389,49 +1599,28 @@ export class AppComponent implements OnInit {
         .actualizarServicio(editandoId, { codigo: cod, nombre: nom, tipoAsistencia: tipo })
         .subscribe({
           next: () => {
-            this.mostrarNotificacion(`Servicio "${nom}" actualizado correctamente.`);
+            this.mostrarNotificacion(`Servicio "${nom}" actualizado en PostgreSQL.`);
             this.cancelarEdicionServicio();
             this.recargarServicios();
           },
           error: (err) => {
-            // Fallback en memoria local
-            this.servicios.update((lista) =>
-              lista.map((s) =>
-                s.id === editandoId
-                  ? { ...s, codigo: cod, nombre: nom, tipoAsistencia: tipo as any }
-                  : s
-              )
-            );
-            this.mostrarNotificacion(`Servicio "${nom}" actualizado correctamente.`);
-            this.cancelarEdicionServicio();
+            const msg = err?.error?.message || err?.message || 'Error de conexión con el backend';
+            this.mostrarNotificacion(`❌ Error al actualizar servicio: ${msg}`);
           },
         });
     } else {
-      // Crear nuevo servicio
+      // Crear nuevo servicio en PostgreSQL
       this.api
         .crearServicio({ codigo: cod, nombre: nom, tipoAsistencia: tipo })
         .subscribe({
           next: () => {
-            this.mostrarNotificacion(`Servicio "${nom}" creado correctamente.`);
+            this.mostrarNotificacion(`Servicio "${nom}" creado y persistido en PostgreSQL.`);
             this.cancelarEdicionServicio();
             this.recargarServicios();
           },
-          error: () => {
-            // Fallback local
-            const nuevoSrv: ServicioHospitalario = {
-              id: 'srv-' + cod.toLowerCase(),
-              codigo: cod,
-              nombre: nom,
-              tipoAsistencia: tipo as any,
-              reqManana: 4,
-              reqTarde: 4,
-              reqNoche: 2,
-              empleadosCount: 0,
-              hermanos: [],
-            };
-            this.servicios.set([...this.servicios(), nuevoSrv]);
-            this.mostrarNotificacion(`Servicio "${nom}" creado correctamente.`);
-            this.cancelarEdicionServicio();
+          error: (err) => {
+            const msg = err?.error?.message || err?.message || 'Error de conexión con el backend';
+            this.mostrarNotificacion(`❌ Error al crear servicio: ${msg}`);
           },
         });
     }
@@ -1445,27 +1634,23 @@ export class AppComponent implements OnInit {
       return;
     }
 
-    const confirmar = confirm(`¿Seguro que deseas eliminar el servicio "${srv.nombre}" (${srv.codigo})?`);
-    if (!confirmar) return;
-
-    this.api.eliminarServicio(srv.id).subscribe({
-      next: () => {
-        this.mostrarNotificacion(`Servicio "${srv.nombre}" eliminado correctamente.`);
-        if (this.servicioEditandoId() === srv.id) this.cancelarEdicionServicio();
-        this.recargarServicios();
-      },
-      error: (err) => {
-        // Fallback en memoria local si no hay colabs
-        this.servicios.update((lista) =>
-          lista
-            .filter((s) => s.id !== srv.id)
-            .map((s) => ({
-              ...s,
-              hermanos: (s.hermanos || []).filter((h) => h.id !== srv.id),
-            }))
-        );
-        this.mostrarNotificacion(`Servicio "${srv.nombre}" eliminado.`);
-        if (this.servicioEditandoId() === srv.id) this.cancelarEdicionServicio();
+    this.abrirConfirmacion({
+      titulo: '🗑️ Eliminar Servicio Hospitalario',
+      mensaje: `¿Seguro que deseas eliminar el servicio "${srv.nombre}" (${srv.codigo}) de forma permanente en PostgreSQL?`,
+      textoBotonConfirmar: 'Sí, Eliminar Servicio',
+      esPeligroso: true,
+      onConfirmar: () => {
+        this.api.eliminarServicio(srv.id).subscribe({
+          next: () => {
+            this.mostrarNotificacion(`Servicio "${srv.nombre}" eliminado de PostgreSQL.`);
+            if (this.servicioEditandoId() === srv.id) this.cancelarEdicionServicio();
+            this.recargarServicios();
+          },
+          error: (err) => {
+            const msg = err?.error?.message || err?.message || 'Error al eliminar servicio en base de datos';
+            this.mostrarNotificacion(`❌ ${msg}`);
+          },
+        });
       },
     });
   }
@@ -1918,7 +2103,7 @@ export class AppComponent implements OnInit {
   }
 
   enfocarCelda(empId: string, dia: number): void {
-    this.celdaEnfocada.set({ empId, dia });
+    this.enfocarCeldaPorId(empId, dia);
   }
 
   copiarEnlaceIcal(): void {
