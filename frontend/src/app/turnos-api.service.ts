@@ -197,6 +197,8 @@ export class TurnosApiService {
     solicitanteId: string;
     receptorId: string;
     servicioId: string;
+    anio: number;
+    mes: number;
     diaOrigen: number;
     turnoOrigen: string;
     diaDestino: number;

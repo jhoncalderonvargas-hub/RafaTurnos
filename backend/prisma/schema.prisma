@@ -257,6 +257,8 @@ model SolicitudPermuta {
   receptor         Empleado      @relation("PermutasRecibidas", fields: [receptorId], references: [id])
   servicioId       String
   servicio         Servicio      @relation(fields: [servicioId], references: [id])
+  anio             Int?          // Periodo del cuadrante sobre el que se solicita el cambio
+  mes              Int?
   diaOrigen        Int
   turnoOrigen      String
   diaDestino       Int

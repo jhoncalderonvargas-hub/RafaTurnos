@@ -71,17 +71,24 @@ export class CuadrantesReglasService {
       );
     }
 
+    const codigosDescansoOAusencia = ['L', 'S', 'COMP', 'VAC', 'INC', 'DISP', 'BLANCO', ''];
+    const turnosNocturnos = ['N', 'N8', 'N12'];
     if (
-      (dto.turnoPrevioDiaAnterior === 'N' ||
-        dto.turnoPrevioDiaAnterior === 'N8' ||
-        dto.turnoPrevioDiaAnterior === 'N12' ||
-        dto.turnoPrevioDiaAnterior === 'G24') &&
-      ['M', 'M8', 'M6', 'T', 'T8', 'T6', 'N', 'N8', 'N12', 'D12', 'G12', 'G24'].includes(
-        dto.turnoPropuesto
-      )
+      dto.turnoPrevioDiaAnterior === 'G24' &&
+      dto.turnoPropuesto &&
+      !codigosDescansoOAusencia.includes(dto.turnoPropuesto)
     ) {
       alertas.push(
-        `RN-01 / RN-02 Bloqueante: Infracción Post-Guardia y descanso < 12h. El día previo finalizó en ${dto.turnoPrevioDiaAnterior}, requiere Saliente (S) o Libre (L).`
+        `RN-01 Bloqueante: Infracción Post-Guardia 24h. El día previo fue G24, requiere Saliente (S) o Libre (L).`
+      );
+    } else if (
+      turnosNocturnos.includes(dto.turnoPrevioDiaAnterior) &&
+      dto.turnoPropuesto &&
+      !codigosDescansoOAusencia.includes(dto.turnoPropuesto) &&
+      !turnosNocturnos.includes(dto.turnoPropuesto)
+    ) {
+      alertas.push(
+        `RN-02 Bloqueante: Descanso insuficiente (< 12h) tras turno nocturno (${dto.turnoPrevioDiaAnterior} → ${dto.turnoPropuesto}).`
       );
     }
 
@@ -183,7 +190,9 @@ export class CuadrantesController {
         },
       }),
       this.prisma.bancoHorasSaldo.findMany({
-        where: { anio },
+        where: {
+          OR: [{ anio }, { anio: anio - 1, mes: 12 }],
+        },
       }),
     ]);
 

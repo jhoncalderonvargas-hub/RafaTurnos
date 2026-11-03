@@ -1,5 +1,12 @@
-import { BadRequestException, Body, Controller, Get, Header, Injectable, Module, NotFoundException, Param, Patch, Post } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Get, Header, Injectable, Module, NotFoundException, Param, Patch, Post } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+
+/** Marcador usado en tipos_turno para una celda explícitamente en blanco (ver CuadrantesController). */
+const CODIGO_CELDA_VACIA_DB = 'BLANCO';
+
+/** Normaliza un código de turno para comparar: vacío / BLANCO / null se tratan como Libre (L), igual que el frontend. */
+const normalizarCodigo = (cod?: string | null): string =>
+  !cod || cod === CODIGO_CELDA_VACIA_DB ? 'L' : cod;
 
 export interface SolicitudPermutaDto {
   solicitanteId: string;
@@ -7,6 +14,8 @@ export interface SolicitudPermutaDto {
   receptorId: string;
   receptorCategoria?: string;
   servicioId: string;
+  anio?: number;
+  mes?: number;
   fechaIso?: string;
   turnoSolicitante?: string;
   turnoReceptor?: string;
@@ -49,6 +58,8 @@ export class PermutasController {
       receptorNombre: p.receptor?.nombre || 'Receptor',
       categoria: p.solicitante?.categoria?.nombre || 'Asistencial',
       servicioId: p.servicioId,
+      anio: p.anio,
+      mes: p.mes,
       diaOrigen: p.diaOrigen,
       turnoOrigen: p.turnoOrigen,
       diaDestino: p.diaDestino,
@@ -91,11 +102,20 @@ export class PermutasController {
       throw new BadRequestException(`Servicio hospitalario "${dto.servicioId}" no encontrado.`);
     }
 
+    // El periodo es obligatorio: sin él no es posible ubicar las celdas a intercambiar al aprobar.
+    const anio = Number(dto.anio);
+    const mes = Number(dto.mes);
+    if (!Number.isInteger(anio) || !Number.isInteger(mes) || mes < 1 || mes > 12) {
+      throw new BadRequestException('La solicitud de permuta debe indicar el periodo (anio y mes) del cuadrante.');
+    }
+
     const permuta = await this.prisma.solicitudPermuta.create({
       data: {
         solicitanteId: solicitante.id,
         receptorId: receptor.id,
         servicioId: servicio.id,
+        anio,
+        mes,
         diaOrigen: dto.diaOrigen,
         turnoOrigen: dto.turnoOrigen,
         diaDestino: dto.diaDestino,
@@ -118,6 +138,8 @@ export class PermutasController {
       receptorNombre: permuta.receptor?.nombre || 'Receptor',
       categoria: permuta.solicitante?.categoria?.nombre || 'Asistencial',
       servicioId: permuta.servicioId,
+      anio: permuta.anio,
+      mes: permuta.mes,
       diaOrigen: permuta.diaOrigen,
       turnoOrigen: permuta.turnoOrigen,
       diaDestino: permuta.diaDestino,
@@ -165,19 +187,131 @@ export class PermutasController {
 
   /**
    * Paso 3 del Flujo: La supervisora aprueba la permuta ya concertada por ambos colaboradores.
+   *
+   * En una única transacción:
+   *  1. Verifica que el cuadrante del periodo no esté cerrado para nómina.
+   *  2. Verifica que los turnos actuales en BD sigan siendo los acordados (evita aprobar sobre datos obsoletos).
+   *  3. Intercambia los turnos en `asignaciones_turno` dentro del servicio de la permuta (no el que esté viendo la supervisora).
+   *  4. Registra la auditoría de ambos cambios y marca la solicitud como APROBADA.
    */
   @Patch(':id/aprobar')
   async aprobarPermuta(@Param('id') id: string) {
-    const permuta = await this.prisma.solicitudPermuta.findUnique({ where: { id } });
+    const permuta = await this.prisma.solicitudPermuta.findUnique({
+      where: { id },
+      include: { solicitante: true, receptor: true },
+    });
     if (!permuta) throw new NotFoundException('Solicitud de permuta no encontrada');
     if (permuta.estado !== 'PENDIENTE_SUPERVISOR') {
       throw new BadRequestException('Solo se pueden aprobar solicitudes en estado PENDIENTE_SUPERVISOR.');
     }
+    if (!permuta.anio || !permuta.mes) {
+      throw new BadRequestException(
+        'La solicitud no tiene periodo (año/mes) registrado. Recházala y pide al colaborador que la vuelva a enviar.'
+      );
+    }
 
-    return this.prisma.solicitudPermuta.update({
-      where: { id },
-      data: { estado: 'APROBADA' },
+    const anio = permuta.anio;
+    const mes = permuta.mes;
+    const fechaOrigen = new Date(Date.UTC(anio, mes - 1, permuta.diaOrigen));
+    const fechaDestino = new Date(Date.UTC(anio, mes - 1, permuta.diaDestino));
+
+    const resultado = await this.prisma.$transaction(async (tx) => {
+      // 1. Cuadrante del servicio de la permuta y bloqueo por cierre de nómina
+      const cuadrante = await tx.cuadrante.upsert({
+        where: { anio_mes_servicioId: { anio, mes, servicioId: permuta.servicioId } },
+        update: {},
+        create: { anio, mes, servicioId: permuta.servicioId, estado: 'BORRADOR' },
+      });
+      if (cuadrante.estado === 'CERRADO_NOMINA') {
+        throw new ConflictException('El cuadrante de este periodo está CERRADO para nómina. Reábrelo para aprobar la permuta.');
+      }
+
+      // 2. Estado actual de ambas celdas
+      const [asigSolicitante, asigReceptor] = await Promise.all([
+        tx.asignacionTurno.findUnique({
+          where: { empleadoId_fecha: { empleadoId: permuta.solicitanteId, fecha: fechaOrigen } },
+          include: { tipoTurno: true },
+        }),
+        tx.asignacionTurno.findUnique({
+          where: { empleadoId_fecha: { empleadoId: permuta.receptorId, fecha: fechaDestino } },
+          include: { tipoTurno: true },
+        }),
+      ]);
+
+      const actualSolicitante = normalizarCodigo(asigSolicitante?.tipoTurno.codigo);
+      const actualReceptor = normalizarCodigo(asigReceptor?.tipoTurno.codigo);
+      if (
+        actualSolicitante !== normalizarCodigo(permuta.turnoOrigen) ||
+        actualReceptor !== normalizarCodigo(permuta.turnoDestino)
+      ) {
+        throw new ConflictException(
+          `El cuadrante cambió desde que se solicitó la permuta (actual: ${permuta.solicitante.nombre} ${actualSolicitante}, ` +
+            `${permuta.receptor.nombre} ${actualReceptor}). Recházala y solicítala de nuevo.`
+        );
+      }
+
+      // 3. Resolver tipos de turno a intercambiar
+      const resolverTipo = async (cod: string) => {
+        const codigoDb = normalizarCodigo(cod);
+        const tipo = await tx.tipoTurno.findUnique({ where: { codigo: codigoDb } });
+        if (!tipo) throw new BadRequestException(`El código de turno "${codigoDb}" no existe en el catálogo.`);
+        return tipo.id;
+      };
+      const tipoParaSolicitante = await resolverTipo(permuta.turnoDestino);
+      const tipoParaReceptor = await resolverTipo(permuta.turnoOrigen);
+
+      const aplicar = (empleadoId: string, fecha: Date, tipoTurnoId: string, anterior: string) =>
+        tx.asignacionTurno.upsert({
+          where: { empleadoId_fecha: { empleadoId, fecha } },
+          // Se conserva codigoPrevisto (lo planeado) para que el comparador Previsto vs Real refleje la permuta
+          update: { tipoTurnoId, cuadranteId: cuadrante.id, servicioEjecutorId: permuta.servicioId },
+          create: {
+            cuadranteId: cuadrante.id,
+            empleadoId,
+            tipoTurnoId,
+            servicioEjecutorId: permuta.servicioId,
+            fecha,
+            esRotacion: false,
+            codigoPrevisto: anterior,
+          },
+        });
+
+      const nuevaSolicitante = await aplicar(permuta.solicitanteId, fechaOrigen, tipoParaSolicitante, actualSolicitante);
+      const nuevaReceptor = await aplicar(permuta.receptorId, fechaDestino, tipoParaReceptor, actualReceptor);
+
+      // 4. Auditoría y cierre de la solicitud
+      await tx.auditoriaCambio.createMany({
+        data: [
+          {
+            asignacionTurnoId: nuevaSolicitante.id,
+            actorId: 'SUPERVISOR',
+            turnoAnterior: actualSolicitante,
+            turnoNuevo: normalizarCodigo(permuta.turnoDestino),
+            justificacion: `Permuta ${permuta.id} aprobada con ${permuta.receptor.nombre}`,
+          },
+          {
+            asignacionTurnoId: nuevaReceptor.id,
+            actorId: 'SUPERVISOR',
+            turnoAnterior: actualReceptor,
+            turnoNuevo: normalizarCodigo(permuta.turnoOrigen),
+            justificacion: `Permuta ${permuta.id} aprobada con ${permuta.solicitante.nombre}`,
+          },
+        ],
+      });
+
+      return tx.solicitudPermuta.update({
+        where: { id },
+        data: { estado: 'APROBADA' },
+      });
     });
+
+    return {
+      ...resultado,
+      cambiosAplicados: [
+        { empleadoId: permuta.solicitanteId, anio, mes, dia: permuta.diaOrigen, codigo: permuta.turnoDestino },
+        { empleadoId: permuta.receptorId, anio, mes, dia: permuta.diaDestino, codigo: permuta.turnoOrigen },
+      ],
+    };
   }
 
   /**

@@ -73,6 +73,8 @@ export interface PermutaItem {
   receptorNombre: string;
   categoria: string;
   servicioId: string;
+  anio?: number | null;
+  mes?: number | null;
   diaOrigen: number;
   turnoOrigen: CodigoTurno;
   diaDestino: number;
@@ -152,17 +154,17 @@ export interface ValidacionTurnoDto {
 export const CATALOGO_TURNOS: Record<string, TipoTurnoConfig> = {
   M8: { codigo: 'M8', nombre: 'Mañana 8h', horario: '07:00 - 15:00', horaInicio: '07:00', horaFin: '15:00', horasOrdinarias: 8, horasDiurnas: 8, horasNocturnas: 0, bgHex: '#E0F2FE', textHex: '#0369A1', borderHex: '#7DD3FC', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
   T8: { codigo: 'T8', nombre: 'Tarde 8h', horario: '15:00 - 23:00', horaInicio: '15:00', horaFin: '23:00', horasOrdinarias: 8, horasDiurnas: 4, horasNocturnas: 4, bgHex: '#FEF3C7', textHex: '#B45309', borderHex: '#FCD34D', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
-  N8: { codigo: 'N8', nombre: 'Noche 8h', horario: '23:00 - 07:00', horaInicio: '23:00', horaFin: '07:00', horasOrdinarias: 8, horasDiurnas: 1, horasNocturnas: 7, bgHex: '#EDE9FE', textHex: '#6D28D9', borderHex: '#C4B5FD', esAusencia: false, esNocturnoPesado: true, descuentaBancoHoras: false, visibleEnPaleta: true },
+  N8: { codigo: 'N8', nombre: 'Noche 8h', horario: '23:00 - 07:00', horaInicio: '23:00', horaFin: '07:00', horasOrdinarias: 8, horasDiurnas: 1, horasNocturnas: 7, bgHex: '#EDE9FE', textHex: '#6D28D9', borderHex: '#C4B5FD', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
 
   // Alias históricos ocultos en la paleta para evitar duplicados visuales
   M: { codigo: 'M', nombre: 'Mañana 8h', horario: '07:00 - 15:00', horaInicio: '07:00', horaFin: '15:00', horasOrdinarias: 8, horasDiurnas: 8, horasNocturnas: 0, bgHex: '#E0F2FE', textHex: '#0369A1', borderHex: '#7DD3FC', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: false },
   T: { codigo: 'T', nombre: 'Tarde 8h', horario: '15:00 - 23:00', horaInicio: '15:00', horaFin: '23:00', horasOrdinarias: 8, horasDiurnas: 4, horasNocturnas: 4, bgHex: '#FEF3C7', textHex: '#B45309', borderHex: '#FCD34D', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: false },
-  N: { codigo: 'N', nombre: 'Noche 8h', horario: '23:00 - 07:00', horaInicio: '23:00', horaFin: '07:00', horasOrdinarias: 8, horasDiurnas: 1, horasNocturnas: 7, bgHex: '#EDE9FE', textHex: '#6D28D9', borderHex: '#C4B5FD', esAusencia: false, esNocturnoPesado: true, descuentaBancoHoras: false, visibleEnPaleta: false },
+  N: { codigo: 'N', nombre: 'Noche 8h', horario: '23:00 - 07:00', horaInicio: '23:00', horaFin: '07:00', horasOrdinarias: 8, horasDiurnas: 1, horasNocturnas: 7, bgHex: '#EDE9FE', textHex: '#6D28D9', borderHex: '#C4B5FD', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: false },
   G12: { codigo: 'G12', nombre: 'Guardia Diurna 12h', horario: '07:00 - 19:00', horaInicio: '07:00', horaFin: '19:00', horasOrdinarias: 12, horasDiurnas: 12, horasNocturnas: 0, bgHex: '#FFEDD5', textHex: '#C2410C', borderHex: '#FDBA74', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: false },
 
   M6: { codigo: 'M6', nombre: 'Mañana 6h', horario: '07:00 - 13:00', horaInicio: '07:00', horaFin: '13:00', horasOrdinarias: 6, horasDiurnas: 6, horasNocturnas: 0, bgHex: '#BAE6FD', textHex: '#0284C7', borderHex: '#38BDF8', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
   T6: { codigo: 'T6', nombre: 'Tarde 6h', horario: '13:00 - 19:00', horaInicio: '13:00', horaFin: '19:00', horasOrdinarias: 6, horasDiurnas: 6, horasNocturnas: 0, bgHex: '#FDE68A', textHex: '#D97706', borderHex: '#FBBF24', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
-  N12: { codigo: 'N12', nombre: 'Noche 12h', horario: '19:00 - 07:00', horaInicio: '19:00', horaFin: '07:00', horasOrdinarias: 12, horasDiurnas: 1, horasNocturnas: 11, bgHex: '#DDD6FE', textHex: '#7C3AED', borderHex: '#A78BFA', esAusencia: false, esNocturnoPesado: true, descuentaBancoHoras: false, visibleEnPaleta: true },
+  N12: { codigo: 'N12', nombre: 'Noche 12h', horario: '19:00 - 07:00', horaInicio: '19:00', horaFin: '07:00', horasOrdinarias: 12, horasDiurnas: 1, horasNocturnas: 11, bgHex: '#DDD6FE', textHex: '#7C3AED', borderHex: '#A78BFA', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
 
   D12: { codigo: 'D12', nombre: 'Guardia Diurna 12h', horario: '07:00 - 19:00', horaInicio: '07:00', horaFin: '19:00', horasOrdinarias: 12, horasDiurnas: 12, horasNocturnas: 0, bgHex: '#FFEDD5', textHex: '#C2410C', borderHex: '#FDBA74', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
   G24: { codigo: 'G24', nombre: 'Guardia Médica 24h', horario: '07:00 - 07:00 (+1)', horaInicio: '07:00', horaFin: '07:00', horasOrdinarias: 24, horasDiurnas: 13, horasNocturnas: 11, bgHex: '#FEE2E2', textHex: '#B91C1C', borderHex: '#FCA5A5', esAusencia: false, esNocturnoPesado: true, descuentaBancoHoras: false, visibleEnPaleta: true },

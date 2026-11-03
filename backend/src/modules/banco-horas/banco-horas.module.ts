@@ -9,7 +9,7 @@ export interface CalculoBancoHorasInput {
   saldoInicialMesAnterior: number;
   horasContratoMes: number;
   horasRealesTrabajadas: number;
-  turnosCompensatoriosTomados: number; // Cada turno COMP amortiza 6h u 8h
+  turnosCompensatoriosTomados: number; // Cada turno COMP amortiza HORAS_AMORTIZADAS_POR_COMP (8h)
   hod: number;
   hon: number;
   hdfd: number;
@@ -43,6 +43,9 @@ export interface ResultadoBancoYNominaDto {
   };
 }
 
+/** Horas que amortiza cada turno COMP del Banco de Horas (jornada estándar, igual que el frontend). */
+export const HORAS_AMORTIZADAS_POR_COMP = 8;
+
 @Injectable()
 export class BancoHorasNominaService {
   /**
@@ -52,7 +55,7 @@ export class BancoHorasNominaService {
   calcularCierreMensualColaborador(
     input: CalculoBancoHorasInput
   ): ResultadoBancoYNominaDto {
-    const horasAmortizadas = input.turnosCompensatoriosTomados * 6;
+    const horasAmortizadas = input.turnosCompensatoriosTomados * HORAS_AMORTIZADAS_POR_COMP;
     const diferenciaMes =
       input.horasRealesTrabajadas - input.horasContratoMes - horasAmortizadas;
     const nuevoSaldo = input.saldoInicialMesAnterior + diferenciaMes;
