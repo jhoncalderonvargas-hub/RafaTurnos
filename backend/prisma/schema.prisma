@@ -41,6 +41,7 @@ model Servicio {
   asignacionesEjecutadas AsignacionTurno[]        @relation("ServicioEjecutor")
   coberturas             RequerimientoCobertura[]
   turnosHabilitados      ServicioTurnoHabilitado[]
+  permutas               SolicitudPermuta[]
 
   // Relación de Servicios Hermanos (Afinidad clínica para rotación)
   serviciosHermanosOrigen ServicioHermano[]       @relation("ServicioOrigen")
@@ -97,9 +98,11 @@ model Empleado {
   categoriaId       String
   categoria         CategoriaProfesional @relation(fields: [categoriaId], references: [id])
   asignaciones      AsignacionTurno[]
-  saldosBancoHoras  BancoHorasSaldo[]
-  novedades         NovedadAusencia[]
-  tokensCalendario  TokenCalendario[]
+  saldosBancoHoras    BancoHorasSaldo[]
+  novedades           NovedadAusencia[]
+  tokensCalendario    TokenCalendario[]
+  permutasSolicitadas SolicitudPermuta[]   @relation("PermutasSolicitadas")
+  permutasRecibidas   SolicitudPermuta[]   @relation("PermutasRecibidas")
 
   @@index([servicioBaseId])
   @@map("empleados")
@@ -243,4 +246,29 @@ model TokenCalendario {
   creadoEn   DateTime @default(now())
 
   @@map("tokens_calendario")
+}
+
+model SolicitudPermuta {
+  id               String        @id @default(uuid())
+  fechaSolicitud   DateTime      @default(now())
+  solicitanteId    String
+  solicitante      Empleado      @relation("PermutasSolicitadas", fields: [solicitanteId], references: [id])
+  receptorId       String
+  receptor         Empleado      @relation("PermutasRecibidas", fields: [receptorId], references: [id])
+  servicioId       String
+  servicio         Servicio      @relation(fields: [servicioId], references: [id])
+  diaOrigen        Int
+  turnoOrigen      String
+  diaDestino       Int
+  turnoDestino     String
+  estado           EstadoPermuta @default(PENDIENTE_SUPERVISOR)
+  validacionReglas String
+  motivoRechazo    String?
+  creadoEn         DateTime      @default(now())
+  actualizadoEn    DateTime      @updatedAt
+
+  @@index([servicioId])
+  @@index([solicitanteId])
+  @@index([receptorId])
+  @@map("solicitudes_permuta")
 }

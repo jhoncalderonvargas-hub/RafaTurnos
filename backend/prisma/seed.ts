@@ -149,12 +149,36 @@ async function main() {
   // 6. Generación de Plantilla Solvente (~150 Empleados reales con Banco de Horas)
   console.log('👥 Generando plantilla solvente de ~150 colaboradores hospitalarios...');
 
-  const nombresHombres = ['Carlos', 'Andrés', 'Jorge', 'Mateo', 'Alejandro', 'Julián', 'Felipe', 'Santiago', 'David', 'Gabriel', 'Daniel', 'Camilo', 'Mauricio', 'Fernando', 'Ricardo'];
-  const nombresMujeres = ['Diana', 'Laura', 'Paola', 'Valentina', 'Sofía', 'Natalia', 'Marcela', 'Carolina', 'Daniela', 'Mariana', 'Claudia', 'Sandra', 'Adriana', 'Lucía', 'Patricia'];
-  const apellidos = ['Mora', 'López', 'Ruiz', 'Vargas', 'Gómez', 'Pineda', 'Castro', 'Mejía', 'Ríos', 'Aristizábal', 'Jiménez', 'Salazar', 'Mendoza', 'Patiño', 'Restrepo', 'Ospina', 'Cardona', 'Montoya', 'Giraldo', 'Zapata'];
+  const nombresHombres = [
+    'Carlos', 'Andrés', 'Jorge', 'Mateo', 'Alejandro', 'Julián', 'Felipe', 'Santiago', 
+    'David', 'Gabriel', 'Daniel', 'Camilo', 'Mauricio', 'Fernando', 'Ricardo', 'Esteban',
+    'Sebastián', 'Nicolás', 'Diego', 'Álvaro', 'Rodrigo', 'Gustavo', 'Héctor', 'Iván',
+    'Javier', 'Leonardo', 'Manuel', 'Óscar', 'Pablo', 'Raúl', 'Alfonso', 'Bernardo',
+    'César', 'Edgar', 'Fabio', 'Germán', 'Hugo', 'Jaime', 'Mario', 'Orlando'
+  ];
+  const nombresMujeres = [
+    'Diana', 'Laura', 'Paola', 'Valentina', 'Sofía', 'Natalia', 'Marcela', 'Carolina', 
+    'Daniela', 'Mariana', 'Claudia', 'Sandra', 'Adriana', 'Lucía', 'Patricia', 'Andrea',
+    'Camila', 'Esperanza', 'Gloria', 'Helena', 'Isabel', 'Juana', 'Lina', 'Mónica',
+    'Olga', 'Pilar', 'Rosa', 'Silvia', 'Teresa', 'Yolanda', 'Beatriz', 'Carmen',
+    'Clara', 'Consuelo', 'Elena', 'Inés', 'Ligia', 'Luz', 'Mercedes', 'Rocío'
+  ];
+  const apellidos = [
+    'Mora', 'López', 'Ruiz', 'Vargas', 'Gómez', 'Pineda', 'Castro', 'Mejía', 'Ríos', 
+    'Aristizábal', 'Jiménez', 'Salazar', 'Mendoza', 'Patiño', 'Restrepo', 'Ospina', 
+    'Cardona', 'Montoya', 'Giraldo', 'Zapata', 'Herrera', 'Gutiérrez', 'Cárdenas', 
+    'Duque', 'Flórez', 'Valencia', 'Botero', 'Muñoz', 'Guerrero', 'Navarro', 'Aguilar',
+    'Bedoya', 'Buitrago', 'Castillo', 'Echeverri', 'Franco', 'Henao', 'Londoño', 'Marín',
+    'Ocampo', 'Quintero', 'Ramírez', 'Sánchez', 'Torres', 'Uribe', 'Vélez', 'Villegas'
+  ];
 
   let cedulaBase = 1010001001;
   let contadorTotal = 0;
+  const nombresUsados = new Set<string>();
+  let mIdx = 0;
+  let hIdx = 0;
+  let a1Idx = 0;
+  let a2Idx = 1;
 
   // Plan de dotación solvente por servicio
   const dotaciones = [
@@ -211,22 +235,41 @@ async function main() {
     for (let i = 0; i < dot.cantidad; i++) {
       contadorTotal++;
       const esMujer = (contadorTotal % 2 === 0);
-      const nombrePila = esMujer
-        ? nombresMujeres[(contadorTotal * 3) % nombresMujeres.length]
-        : nombresHombres[(contadorTotal * 7) % nombresHombres.length];
-      const apellido1 = apellidos[(contadorTotal * 5) % apellidos.length];
-      const apellido2 = apellidos[(contadorTotal * 11) % apellidos.length];
-      const prefijo = dot.cargo.includes('Médico') ? (esMujer ? 'Dra. ' : 'Dr. ') : (dot.cargo.includes('Jefe') ? 'Enf. ' : '');
+      let nombreCompleto = '';
+      let nombrePila = '';
+      let apellido1 = '';
 
-      const nombreCompleto = `${prefijo}${nombrePila} ${apellido1} ${apellido2}`;
+      while (true) {
+        nombrePila = esMujer
+          ? nombresMujeres[mIdx % nombresMujeres.length]
+          : nombresHombres[hIdx % nombresHombres.length];
+        apellido1 = apellidos[a1Idx % apellidos.length];
+        const apellido2 = apellidos[a2Idx % apellidos.length];
+
+        if (esMujer) mIdx++; else hIdx++;
+        a1Idx = (a1Idx + 3) % apellidos.length;
+        a2Idx = (a2Idx + 7) % apellidos.length;
+        if (a1Idx === a2Idx) a2Idx = (a2Idx + 1) % apellidos.length;
+
+        const prefijo = dot.cargo.includes('Médico') ? (esMujer ? 'Dra. ' : 'Dr. ') : (dot.cargo.includes('Jefe') ? 'Enf. ' : '');
+        nombreCompleto = `${prefijo}${nombrePila} ${apellido1} ${apellido2}`;
+
+        if (!nombresUsados.has(nombreCompleto)) {
+          nombresUsados.add(nombreCompleto);
+          break;
+        }
+      }
+
       const doc = String(cedulaBase++);
       const saldoBanco = saldosBancoVariados[contadorTotal % saldosBancoVariados.length];
+      const slugPila = nombrePila.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      const slugAp = apellido1.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
       const emp = await prisma.empleado.create({
         data: {
           documento: doc,
           nombre: nombreCompleto,
-          correo: `${nombrePila.toLowerCase()}.${apellido1.toLowerCase()}${contadorTotal}@hospital.gov.co`,
+          correo: `${slugPila}.${slugAp}${contadorTotal}@hospital.gov.co`,
           horasSemanalesLey: 42,
           horasContratoMes: 168,
           servicioBaseId: dot.srvId,

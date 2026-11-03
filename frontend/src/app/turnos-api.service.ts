@@ -188,7 +188,40 @@ export class TurnosApiService {
     return this.http.post(`${this.baseUrl}/cuadrantes/validar-celda`, dto);
   }
 
-  // 5. Permutas 1-a-1
+  // 5. Permutas 1-a-1 en PostgreSQL
+  getPermutas(): Observable<PermutaItem[]> {
+    return this.http.get<PermutaItem[]>(`${this.baseUrl}/permutas`);
+  }
+
+  crearPermuta(dto: {
+    solicitanteId: string;
+    receptorId: string;
+    servicioId: string;
+    diaOrigen: number;
+    turnoOrigen: string;
+    diaDestino: number;
+    turnoDestino: string;
+    validacionReglas?: string;
+  }): Observable<PermutaItem> {
+    return this.http.post<PermutaItem>(`${this.baseUrl}/permutas`, dto);
+  }
+
+  aceptarPermutaPar(id: string): Observable<any> {
+    return this.http.patch(`${this.baseUrl}/permutas/${id}/aceptar-par`, {});
+  }
+
+  rechazarPermutaPar(id: string, motivo?: string): Observable<any> {
+    return this.http.patch(`${this.baseUrl}/permutas/${id}/rechazar-par`, { motivo });
+  }
+
+  aprobarPermuta(id: string): Observable<any> {
+    return this.http.patch(`${this.baseUrl}/permutas/${id}/aprobar`, {});
+  }
+
+  rechazarPermuta(id: string, motivo?: string): Observable<any> {
+    return this.http.patch(`${this.baseUrl}/permutas/${id}/rechazar`, { motivo });
+  }
+
   simularPermuta(dto: any): Observable<any> {
     return this.http.post(`${this.baseUrl}/permutas/simular`, dto);
   }

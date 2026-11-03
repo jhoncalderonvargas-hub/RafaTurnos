@@ -77,8 +77,9 @@ export interface PermutaItem {
   turnoOrigen: CodigoTurno;
   diaDestino: number;
   turnoDestino: CodigoTurno;
-  estado: 'PENDIENTE_SUPERVISOR' | 'APROBADA' | 'RECHAZADA';
+  estado: 'PENDIENTE_PAR' | 'PENDIENTE_SUPERVISOR' | 'APROBADA' | 'RECHAZADA';
   validacionReglas: string;
+  motivoRechazo?: string;
 }
 
 export interface RegistroAuditoria {

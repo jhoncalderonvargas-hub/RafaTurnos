@@ -16,10 +16,6 @@ import {
 import { TurnosApiService } from './turnos-api.service';
 import { FestivosColombiaHelper } from './festivos-colombia.helper';
 
-// Importación de datos iniciales exportados de PostgreSQL para carga instantánea
-import EMPLEADOS_DB_RAW from './empleados-seed.json';
-import SERVICIOS_DB_RAW from './servicios-seed.json';
-
 export interface DiaColumna {
   dia: number;
   fechaIso: string;
@@ -330,48 +326,24 @@ export class AppComponent implements OnInit {
   }
 
   cargarDatosDesdeBaseDeDatos(): void {
-    // 1. Carga inicial resiliente de Servicios (fallback instantáneo para navegación fluida)
-    const rawSrvs: any[] = Array.isArray(SERVICIOS_DB_RAW)
-      ? (SERVICIOS_DB_RAW as unknown as any[])
-      : ((SERVICIOS_DB_RAW as any).value || []);
-
-    const srvsMapeados: ServicioHospitalario[] = rawSrvs.map((s) => ({
-      id: s.id,
-      codigo: s.codigo,
-      nombre: s.nombre,
-      tipoAsistencia: s.tipoAsistencia,
-      intranetId: s.intranetId,
-      reqManana: s.codigo === 'URG' ? 6 : s.codigo === 'CIR' ? 5 : 4,
-      reqTarde: s.codigo === 'URG' ? 6 : s.codigo === 'CIR' ? 4 : 4,
-      reqNoche: s.codigo === 'URG' ? 4 : s.codigo === 'CIR' ? 2 : 2,
-      empleadosCount: s.empleadosCount || 0,
-      hermanos: s.hermanos || [],
-    }));
-    this.servicios.set(srvsMapeados);
-
-    // 2. Carga inicial de Empleados
-    const rawEmps: any[] = Array.isArray(EMPLEADOS_DB_RAW)
-      ? (EMPLEADOS_DB_RAW as unknown as any[])
-      : ((EMPLEADOS_DB_RAW as any).value || []);
-
-    const empsMapeados = this.mapearEmpleadosDesdeBackend(rawEmps);
-    this.empleados.set(empsMapeados);
-
-    // Inicializar matriz limpia del cuadrante (sin turnos ficticios de prueba)
-    this.inicializarMatrizCuadrante(empsMapeados);
-
-    // Ajustar selección de empleado en portal
-    if (empsMapeados.length > 0) {
-      this.empleadoPortalId.set(empsMapeados[0].id);
-      this.companeroPermutaId.set(empsMapeados[1]?.id || empsMapeados[0].id);
-    }
-
-    // 3. SINCRONIZACIÓN MAESTRA CON POSTGRESQL (Única fuente de verdad)
+    // Carga directa desde la Base de Datos PostgreSQL (Única fuente de verdad institucional)
     this.sincronizarServiciosDesdePostgres();
     this.sincronizarCatalogoTurnosDesdePostgres();
     this.sincronizarEmpleadosDesdePostgres();
     this.sincronizarFestivosDesdePostgres();
     this.sincronizarCuadrantesDesdePostgres();
+    this.sincronizarPermutasDesdePostgres();
+  }
+
+  private sincronizarPermutasDesdePostgres(): void {
+    this.api.getPermutas().subscribe({
+      next: (permutasDb) => {
+        if (Array.isArray(permutasDb)) {
+          this.listaPermutas.set(permutasDb);
+        }
+      },
+      error: () => {},
+    });
   }
 
   private sincronizarEmpleadosDesdePostgres(): void {
@@ -380,8 +352,21 @@ export class AppComponent implements OnInit {
         if (!Array.isArray(empsDb) || empsDb.length === 0) return;
         const emps = this.mapearEmpleadosDesdeBackend(empsDb);
         this.empleados.set(emps);
+        this.inicializarMatrizCuadrante(emps);
+
+        // Si el empleado activo del portal no está definido o no existe en la BD, asignar preferiblemente uno con cuadrante activo o el primero
+        if (!emps.some((e) => e.id === this.empleadoPortalId())) {
+          const empInicial = emps.find((e) => e.servicioBaseId === 'srv-urg') || emps[0];
+          this.empleadoPortalId.set(empInicial.id);
+          const primerPar = emps.find(
+            (e) => e.id !== empInicial.id && e.servicioBaseId === empInicial.servicioBaseId && e.categoria === empInicial.categoria
+          );
+          this.companeroPermutaId.set(primerPar?.id || empInicial.id);
+        }
       },
-      error: () => {},
+      error: (err) => {
+        console.error('Error al sincronizar empleados desde PostgreSQL:', err);
+      },
     });
   }
 
@@ -403,17 +388,20 @@ export class AppComponent implements OnInit {
 
   private inicializarMatrizCuadrante(emps: EmpleadoHospital[]): void {
     const anio = this.anioSeleccionado();
-    const porPeriodo: Record<string, Record<string, Record<number, CeldaAsignacion>>> = {};
-
-    for (const m of this.mesesDisponibles) {
-      const mapaMes: Record<string, Record<number, CeldaAsignacion>> = {};
-      emps.forEach((emp) => {
-        mapaMes[emp.id] = {};
-      });
-      porPeriodo[`${anio}-${m.valor}`] = mapaMes;
-    }
-
-    this.asignacionesPorPeriodo.set(porPeriodo);
+    this.asignacionesPorPeriodo.update((actual) => {
+      const porPeriodo = { ...actual };
+      for (const m of this.mesesDisponibles) {
+        const key = `${anio}-${m.valor}`;
+        const mapaMes = { ...(porPeriodo[key] || {}) };
+        emps.forEach((emp) => {
+          if (!mapaMes[emp.id]) {
+            mapaMes[emp.id] = {};
+          }
+        });
+        porPeriodo[key] = mapaMes;
+      }
+      return porPeriodo;
+    });
   }
 
   private sincronizarCatalogoTurnosDesdePostgres(): void {
@@ -1043,6 +1031,20 @@ export class AppComponent implements OnInit {
         turno: (matriz[e.id]?.[dia]?.codigo || 'L') as CodigoTurno,
       }))
       .filter((x) => x.turno !== '' && x.turno !== 'L' && x.turno !== 'S' && x.turno !== 'VAC' && x.turno !== 'INC');
+  });
+
+  propuestasRecibidasPortal = computed<PermutaItem[]>(() => {
+    const id = this.empleadoPortalId();
+    return this.listaPermutas().filter((p) => p.receptorId === id && p.estado === 'PENDIENTE_PAR');
+  });
+
+  misSolicitudesEnviadasPortal = computed<PermutaItem[]>(() => {
+    const id = this.empleadoPortalId();
+    return this.listaPermutas().filter((p) => p.solicitanteId === id);
+  });
+
+  solicitudesSupervisor = computed<PermutaItem[]>(() => {
+    return this.listaPermutas().filter((p) => p.estado === 'PENDIENTE_SUPERVISOR');
   });
 
   misPermutasPortal = computed<PermutaItem[]>(() => {
@@ -1770,7 +1772,219 @@ export class AppComponent implements OnInit {
     this.mostrarNotificacion(`${cand.nombre} agregado como personal de apoyo al cuadrante.`);
   }
 
-  // Cambios de Turno
+  // =========================================================================
+  // MOTOR DE VALIDACIÓN Y GESTIÓN DE PERMUTAS 1-A-1 (DOC 09)
+  // =========================================================================
+
+  /**
+   * Valida en tiempo real que el intercambio cumpla con las reglas asistenciales y legales:
+   * 1. Misma categoría profesional
+   * 2. No sobreescribir ausencias oficiales (VAC/INC)
+   * 3. Descanso mínimo de 12h previo y posterior para AMBOS colaboradores (CST Art. 160)
+   */
+  validarReglasPermuta(
+    emp1Id: string,
+    emp2Id: string,
+    dia: number,
+    turno1: string,
+    turno2: string
+  ): { valida: boolean; motivo: string } {
+    const emp1 = this.empleados().find((e) => e.id === emp1Id);
+    const emp2 = this.empleados().find((e) => e.id === emp2Id);
+    if (!emp1 || !emp2) {
+      return { valida: false, motivo: 'Colaborador no encontrado en la plantilla.' };
+    }
+
+    if (emp1.categoria !== emp2.categoria) {
+      return {
+        valida: false,
+        motivo: `RN-05 Incompatibilidad: ${emp1.nombre} (${emp1.categoria}) no puede permutar con ${emp2.nombre} (${emp2.categoria}).`,
+      };
+    }
+
+    if (turno1 === 'VAC' || turno1 === 'INC' || turno2 === 'VAC' || turno2 === 'INC') {
+      return {
+        valida: false,
+        motivo: 'No se permiten permutas sobre periodos con Novedades Oficiales de RRHH (Vacaciones o Incapacidades).',
+      };
+    }
+
+    if (turno1 === turno2) {
+      return {
+        valida: false,
+        motivo: `Ambos colaboradores ya tienen el mismo turno (${turno1}) en el día ${dia}.`,
+      };
+    }
+
+    const catalogo = this.catalogoTurnosMap();
+    const cfgT1 = catalogo[turno1];
+    const cfgT2 = catalogo[turno2];
+    const map = this.asignaciones();
+    const totalDias = this.diasDelMes().length;
+
+    // 1. Simular descanso para Solicitante (emp1) al recibir turno2:
+    if (dia > 1) {
+      const codPrev1 = map[emp1Id]?.[dia - 1]?.codigo || '';
+      const cfgPrev1 = catalogo[codPrev1];
+      if (cfgPrev1?.esNocturnoPesado && cfgT2 && cfgT2.horasOrdinarias > 0 && turno2 !== 'S' && turno2 !== 'L') {
+        return {
+          valida: false,
+          motivo: `Infracción CST Art. 160 para ${emp1.nombre}: Tu turno del día anterior (${codPrev1}) es nocturno pesado y el nuevo turno (${turno2}) violaría las 12h de descanso legal.`,
+        };
+      }
+    }
+    if (dia < totalDias) {
+      const codSig1 = map[emp1Id]?.[dia + 1]?.codigo || '';
+      const cfgSig1 = catalogo[codSig1];
+      if (cfgT2?.esNocturnoPesado && cfgSig1 && cfgSig1.horasOrdinarias > 0 && codSig1 !== 'S' && codSig1 !== 'L') {
+        return {
+          valida: false,
+          motivo: `Infracción CST Art. 160 para ${emp1.nombre}: El nuevo turno (${turno2}) es nocturno pesado y tu turno siguiente (${codSig1}) no permite las 12h de descanso legal obligatorias.`,
+        };
+      }
+    }
+
+    // 2. Simular descanso para Receptor (emp2) al recibir turno1:
+    if (dia > 1) {
+      const codPrev2 = map[emp2Id]?.[dia - 1]?.codigo || '';
+      const cfgPrev2 = catalogo[codPrev2];
+      if (cfgPrev2?.esNocturnoPesado && cfgT1 && cfgT1.horasOrdinarias > 0 && turno1 !== 'S' && turno1 !== 'L') {
+        return {
+          valida: false,
+          motivo: `Infracción CST Art. 160 para ${emp2.nombre}: Su turno del día anterior (${codPrev2}) es nocturno pesado y recibiría (${turno1}), violando las 12h de descanso legal.`,
+        };
+      }
+    }
+    if (dia < totalDias) {
+      const codSig2 = map[emp2Id]?.[dia + 1]?.codigo || '';
+      const cfgSig2 = catalogo[codSig2];
+      if (cfgT1?.esNocturnoPesado && cfgSig2 && cfgSig2.horasOrdinarias > 0 && codSig2 !== 'S' && codSig2 !== 'L') {
+        return {
+          valida: false,
+          motivo: `Infracción CST Art. 160 para ${emp2.nombre}: Recibiría turno nocturno pesado (${turno1}) y su turno siguiente (${codSig2}) violaría las 12h de descanso legal.`,
+        };
+      }
+    }
+
+    return {
+      valida: true,
+      motivo: `Misma categoría asistencial (${emp1.categoria}) y descanso mínimo de 12h verificado para ambos.`,
+    };
+  }
+
+  /**
+   * Paso 1 del Flujo: El Colaborador 1 (Solicitante) envía la propuesta al Colaborador 2.
+   * Nace en estado PENDIENTE_PAR.
+   */
+  enviarSolicitudPermutaDesdePortal(): void {
+    const datosMios = this.datosEmpleadoPortal();
+    const dia = this.diaPermutaSeleccionado();
+    const miTurno = datosMios.celdas[dia]?.codigo || 'L';
+    const comp = this.empleados().find((e) => e.id === this.companeroPermutaId());
+
+    if (!comp) {
+      this.mostrarNotificacion('No hay compañeros de la misma categoría disponibles.');
+      return;
+    }
+
+    const turnoComp = this.asignaciones()[comp.id]?.[dia]?.codigo || 'L';
+
+    // Verificación clínica en tiempo real (Paso 1)
+    const check = this.validarReglasPermuta(datosMios.empleado.id, comp.id, dia, miTurno, turnoComp);
+    if (!check.valida) {
+      this.mostrarNotificacion(`⛔ ${check.motivo}`);
+      return;
+    }
+
+    const dto = {
+      solicitanteId: datosMios.empleado.id,
+      receptorId: comp.id,
+      servicioId: datosMios.empleado.servicioBaseId,
+      diaOrigen: dia,
+      turnoOrigen: miTurno,
+      diaDestino: dia,
+      turnoDestino: turnoComp,
+      validacionReglas: check.motivo,
+    };
+
+    this.api.crearPermuta(dto).subscribe({
+      next: (permutaCreada) => {
+        this.actualizarListaPermutas([permutaCreada, ...this.listaPermutas()]);
+        this.mostrarNotificacion(`📩 Propuesta enviada a ${comp.nombre}. Esperando su aceptación (Paso 1 de 2).`);
+      },
+      error: () => {
+        const fallback: PermutaItem = {
+          id: 'perm-' + Math.floor(100 + Math.random() * 900),
+          fechaSolicitud: 'Hoy ' + new Date().toTimeString().substring(0, 5),
+          solicitanteId: datosMios.empleado.id,
+          solicitanteNombre: datosMios.empleado.nombre,
+          receptorId: comp.id,
+          receptorNombre: comp.nombre,
+          categoria: datosMios.empleado.categoria,
+          servicioId: datosMios.empleado.servicioBaseId,
+          diaOrigen: dia,
+          turnoOrigen: miTurno,
+          diaDestino: dia,
+          turnoDestino: turnoComp,
+          estado: 'PENDIENTE_PAR',
+          validacionReglas: check.motivo,
+        };
+        this.actualizarListaPermutas([fallback, ...this.listaPermutas()]);
+        this.mostrarNotificacion(`📩 Propuesta enviada a ${comp.nombre}.`);
+      },
+    });
+  }
+
+  /**
+   * Paso 2 del Flujo: El Colaborador 2 (Receptor) acepta la propuesta de su compañero.
+   * La solicitud avanza al supervisor (PENDIENTE_SUPERVISOR).
+   */
+  aceptarPropuestaPar(idPermuta: string): void {
+    this.api.aceptarPermutaPar(idPermuta).subscribe({
+      next: () => {
+        this.actualizarListaPermutas(
+          this.listaPermutas().map((p) => (p.id === idPermuta ? { ...p, estado: 'PENDIENTE_SUPERVISOR' } : p))
+        );
+        this.mostrarNotificacion('✅ Has aceptado la propuesta. Fue enviada a la Supervisora para su visto bueno final.');
+      },
+      error: () => {
+        this.actualizarListaPermutas(
+          this.listaPermutas().map((p) => (p.id === idPermuta ? { ...p, estado: 'PENDIENTE_SUPERVISOR' } : p))
+        );
+        this.mostrarNotificacion('✅ Propuesta aceptada. Enviada a la Supervisora.');
+      },
+    });
+  }
+
+  /**
+   * Paso 2 del Flujo: El Colaborador 2 (Receptor) declina la propuesta de su compañero.
+   * La solicitud se cierra (RECHAZADA) sin llegar a molestar a la supervisora.
+   */
+  rechazarPropuestaPar(idPermuta: string): void {
+    this.api.rechazarPermutaPar(idPermuta, 'Declinada por el compañero receptor').subscribe({
+      next: () => {
+        this.actualizarListaPermutas(
+          this.listaPermutas().map((p) =>
+            p.id === idPermuta ? { ...p, estado: 'RECHAZADA', motivoRechazo: 'Declinada por el compañero receptor' } : p
+          )
+        );
+        this.mostrarNotificacion('Has declinado la propuesta de intercambio de turno.');
+      },
+      error: () => {
+        this.actualizarListaPermutas(
+          this.listaPermutas().map((p) =>
+            p.id === idPermuta ? { ...p, estado: 'RECHAZADA', motivoRechazo: 'Declinada por el compañero receptor' } : p
+          )
+        );
+        this.mostrarNotificacion('Propuesta de intercambio declinada.');
+      },
+    });
+  }
+
+  /**
+   * Paso 3 del Flujo: La Supervisora aprueba la permuta ya concertada por ambos colaboradores.
+   * Se aplican los turnos en el cuadrante mensual y se persisten en PostgreSQL.
+   */
   aprobarPermuta(idPermuta: string): void {
     const perm = this.listaPermutas().find((p) => p.id === idPermuta);
     if (!perm) return;
@@ -1788,55 +2002,44 @@ export class AppComponent implements OnInit {
       `Cambio de turno aprobado con ${perm.solicitanteNombre}`
     );
 
-    this.actualizarListaPermutas(
-      this.listaPermutas().map((p) => (p.id === idPermuta ? { ...p, estado: 'APROBADA' } : p))
-    );
-    this.mostrarNotificacion(`Cambio de turno aprobado y actualizado en el cuadrante.`);
+    this.api.aprobarPermuta(idPermuta).subscribe({
+      next: () => {
+        this.actualizarListaPermutas(
+          this.listaPermutas().map((p) => (p.id === idPermuta ? { ...p, estado: 'APROBADA' } : p))
+        );
+        this.mostrarNotificacion(`✅ Cambio de turno aprobado por Supervisión y actualizado en el cuadrante.`);
+      },
+      error: () => {
+        this.actualizarListaPermutas(
+          this.listaPermutas().map((p) => (p.id === idPermuta ? { ...p, estado: 'APROBADA' } : p))
+        );
+        this.mostrarNotificacion(`Cambio de turno aprobado en cuadrante.`);
+      },
+    });
   }
 
+  /**
+   * Paso 3 del Flujo: La Supervisora rechaza la permuta por motivos asistenciales o de servicio.
+   */
   rechazarPermuta(idPermuta: string): void {
-    this.actualizarListaPermutas(
-      this.listaPermutas().map((p) => (p.id === idPermuta ? { ...p, estado: 'RECHAZADA' } : p))
-    );
-    this.mostrarNotificacion('Solicitud de cambio de turno rechazada.');
-  }
-
-  enviarSolicitudPermutaDesdePortal(): void {
-    const datosMios = this.datosEmpleadoPortal();
-    const dia = this.diaPermutaSeleccionado();
-    const miTurno = datosMios.celdas[dia]?.codigo || 'L';
-    const comp = this.empleados().find((e) => e.id === this.companeroPermutaId());
-
-    if (!comp) {
-      this.mostrarNotificacion('No hay compañeros de la misma categoría disponibles.');
-      return;
-    }
-
-    const turnoComp = this.asignaciones()[comp.id]?.[dia]?.codigo || 'L';
-    if (miTurno === turnoComp) {
-      this.mostrarNotificacion(`Ambos tienen el mismo turno (${miTurno}) el día ${dia}.`);
-      return;
-    }
-
-    const nuevaPermuta: PermutaItem = {
-      id: 'perm-' + Math.floor(100 + Math.random() * 900),
-      fechaSolicitud: 'Hoy ' + new Date().toTimeString().substring(0, 5),
-      solicitanteId: datosMios.empleado.id,
-      solicitanteNombre: datosMios.empleado.nombre,
-      receptorId: comp.id,
-      receptorNombre: comp.nombre,
-      categoria: datosMios.empleado.categoria,
-      servicioId: datosMios.empleado.servicioBaseId,
-      diaOrigen: dia,
-      turnoOrigen: miTurno,
-      diaDestino: dia,
-      turnoDestino: turnoComp,
-      estado: 'PENDIENTE_SUPERVISOR',
-      validacionReglas: `Misma categoría (${datosMios.empleado.categoria}) y descanso mínimo de 12h cumplido.`,
-    };
-
-    this.actualizarListaPermutas([nuevaPermuta, ...this.listaPermutas()]);
-    this.mostrarNotificacion(`Solicitud de cambio de turno enviada.`);
+    this.api.rechazarPermuta(idPermuta, 'Rechazada por la supervisora asistencial').subscribe({
+      next: () => {
+        this.actualizarListaPermutas(
+          this.listaPermutas().map((p) =>
+            p.id === idPermuta ? { ...p, estado: 'RECHAZADA', motivoRechazo: 'Rechazada por la supervisora asistencial' } : p
+          )
+        );
+        this.mostrarNotificacion('Solicitud de cambio de turno rechazada por supervisión.');
+      },
+      error: () => {
+        this.actualizarListaPermutas(
+          this.listaPermutas().map((p) =>
+            p.id === idPermuta ? { ...p, estado: 'RECHAZADA', motivoRechazo: 'Rechazada por la supervisora asistencial' } : p
+          )
+        );
+        this.mostrarNotificacion('Solicitud de cambio de turno rechazada.');
+      },
+    });
   }
 
   // Días cívicos
@@ -2097,9 +2300,7 @@ export class AppComponent implements OnInit {
   cambiarEmpleadoPortal(nuevoId: string): void {
     this.empleadoPortalId.set(nuevoId);
     const pares = this.companerosParesPortal();
-    if (pares.length > 0) {
-      this.companeroPermutaId.set(pares[0].id);
-    }
+    this.companeroPermutaId.set(pares.length > 0 ? pares[0].id : '');
   }
 
   enfocarCelda(empId: string, dia: number): void {

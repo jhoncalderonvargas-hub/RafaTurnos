@@ -538,11 +538,11 @@
         <!-- Panel de Cambios de Turno entre compañeros -->
         <div class="panel-card">
           <div class="panel-header">
-            <h3>🔄 Solicitudes de Cambio de Turno</h3>
+            <h3>🔄 Solicitudes de Cambio de Turno (Permutas)</h3>
           </div>
           <div class="permutas-list">
             @for (p of listaPermutas(); track p.id) {
-              <div class="permuta-item">
+              <div class="permuta-item" [class.permuta-ready]="p.estado === 'PENDIENTE_SUPERVISOR'">
                 <div class="permuta-main">
                   <div class="permuta-title">
                     <strong>{{ p.solicitanteNombre }}</strong> (Día {{ p.diaOrigen }}: <code>{{ p.turnoOrigen }}</code>)
@@ -554,16 +554,30 @@
                   <div class="permuta-validation">
                     ✅ {{ p.validacionReglas }}
                   </div>
+                  @if (p.motivoRechazo) {
+                    <div class="permuta-reject-reason">⚠️ {{ p.motivoRechazo }}</div>
+                  }
                 </div>
                 <div class="permuta-actions">
                   @if (p.estado === 'PENDIENTE_SUPERVISOR') {
-                    <button class="btn-approve" (click)="aprobarPermuta(p.id)">✔ Aprobar Cambio</button>
-                    <button class="btn-reject" (click)="rechazarPermuta(p.id)">✕ Rechazar</button>
+                    <div class="supervisor-approval-group">
+                      <span class="badge-concertada">🤝 Acuerdo mutuo confirmado</span>
+                      <div class="btn-group-h">
+                        <button class="btn-approve" (click)="aprobarPermuta(p.id)">✔ Aprobar Cambio</button>
+                        <button class="btn-reject" (click)="rechazarPermuta(p.id)">✕ Rechazar</button>
+                      </div>
+                    </div>
+                  } @else if (p.estado === 'PENDIENTE_PAR') {
+                    <span class="status-tag status-tag-par">⏳ Esperando respuesta de {{ p.receptorNombre }}</span>
+                  } @else if (p.estado === 'APROBADA') {
+                    <span class="status-tag status-tag-ok">✅ Aprobada en Cuadrante</span>
                   } @else {
-                    <span class="status-tag" [attr.data-status]="p.estado">{{ p.estado }}</span>
+                    <span class="status-tag status-tag-no">❌ Rechazada</span>
                   }
                 </div>
               </div>
+            } @empty {
+              <div class="text-muted" style="padding: 16px;">No hay solicitudes de permuta registradas.</div>
             }
           </div>
         </div>
@@ -1006,7 +1020,7 @@
       <div class="kpi-grid">
         <div class="kpi-card">
           <div class="kpi-label">Servicio y Categoría</div>
-          <div class="kpi-value" style="font-size: 20px;">{{ portal.servicioBase.nombre }}</div>
+          <div class="kpi-value" style="font-size: 20px;">{{ portal.servicioBase?.nombre || 'Servicio Asistencial' }}</div>
           <div class="kpi-sub">{{ portal.empleado.categoria }} • C.C. {{ portal.empleado.documento }}</div>
         </div>
 
@@ -1108,48 +1122,103 @@
 
       <!-- Bloque 3 y 4: Solicitar Cambio de Turno y Ver Equipo de Guardia -->
       <div class="two-col-panels">
+        <!-- Intercambio de turnos entre compañeros (Doc 09) -->
         <div class="panel-card">
           <div class="panel-header">
             <h3>🔄 Solicitar Cambio de Turno — Día {{ diaPermutaSeleccionado() }}</h3>
             <span class="badge-law">{{ portal.empleado.categoria }}</span>
           </div>
-          <p class="panel-desc">
+
+          <!-- 1. BLOQUE DE PROPUESTAS RECIBIDAS (ACCIÓN REQUERIDA DEL COMPAÑERO RECEPTOR) -->
+          @if (propuestasRecibidasPortal().length > 0) {
+            <div class="propuestas-recibidas-alert">
+              <div class="alert-incoming-header">
+                <strong>📬 Propuestas de Cambio Recibidas:</strong>
+                <span class="badge-count-pending">{{ propuestasRecibidasPortal().length }} por responder</span>
+              </div>
+              <div class="permutas-list" style="margin-top: 8px;">
+                @for (pr of propuestasRecibidasPortal(); track pr.id) {
+                  <div class="permuta-item permuta-item-incoming">
+                    <div class="permuta-main">
+                      <div class="permuta-title">
+                        <strong>{{ pr.solicitanteNombre }}</strong> te propone intercambiar:
+                      </div>
+                      <div class="permuta-meta">
+                        Día {{ pr.diaOrigen }}: Su turno <code>{{ pr.turnoOrigen }}</code> por tu turno <code>{{ pr.turnoDestino }}</code>
+                      </div>
+                      <div class="permuta-validation">
+                        ✅ {{ pr.validacionReglas }}
+                      </div>
+                    </div>
+                    <div class="permuta-actions">
+                      <button class="btn-approve" (click)="aceptarPropuestaPar(pr.id)">
+                        ✅ Aceptar Propuesta
+                      </button>
+                      <button class="btn-reject" (click)="rechazarPropuestaPar(pr.id)">
+                        ❌ Declinar
+                      </button>
+                    </div>
+                  </div>
+                }
+              </div>
+            </div>
+          }
+
+          <p class="panel-desc" style="margin-top: 12px;">
             Tu turno el <strong>Día {{ diaPermutaSeleccionado() }}</strong>:
-            <span class="mini-shift">{{ portal.celdas[diaPermutaSeleccionado()].codigo || 'L' }}</span>
+            <span class="mini-shift">{{ portal.celdas[diaPermutaSeleccionado()]?.codigo || 'L' }}</span>
           </p>
 
           <div class="form-stack">
-            <label>Compañero para intercambiar el Día {{ diaPermutaSeleccionado() }}:</label>
-            <select [ngModel]="companeroPermutaId()" (ngModelChange)="companeroPermutaId.set($event)" style="padding: 8px; border-radius: 6px; border: 1px solid #cbd5e1; font-weight: 600;">
-              @for (par of companerosParesPortal(); track par.id) {
-                @let turnoPar = asignaciones()[par.id][diaPermutaSeleccionado()].codigo || 'L';
-                <option [value]="par.id">
-                  {{ par.nombre }} — Turno [{{ turnoPar }}] el Día {{ diaPermutaSeleccionado() }}
-                </option>
-              }
-            </select>
+            <label>Proponer cambio de turno a un compañero el Día {{ diaPermutaSeleccionado() }}:</label>
+            @if (companerosParesPortal().length > 0) {
+              <select [ngModel]="companeroPermutaId()" (ngModelChange)="companeroPermutaId.set($event)" style="padding: 8px; border-radius: 6px; border: 1px solid #cbd5e1; font-weight: 600;">
+                @for (par of companerosParesPortal(); track par.id) {
+                  @let turnoPar = asignaciones()[par.id]?.[diaPermutaSeleccionado()]?.codigo || 'L';
+                  <option [value]="par.id">
+                    {{ par.nombre }} — Turno [{{ turnoPar }}] el Día {{ diaPermutaSeleccionado() }}
+                  </option>
+                }
+              </select>
 
-            <button class="btn-primary" (click)="enviarSolicitudPermutaDesdePortal()">
-              📨 Enviar Solicitud de Cambio
-            </button>
+              <button class="btn-primary" (click)="enviarSolicitudPermutaDesdePortal()">
+                📨 Enviar Propuesta a Compañero (Paso 1)
+              </button>
+            } @else {
+              <div class="text-muted" style="padding: 8px; font-style: italic;">
+                No hay otros compañeros con la misma categoría asistencial en este servicio para realizar permutas.
+              </div>
+            }
           </div>
 
-          <div style="margin-top: 16px;">
-            <h4 style="margin-bottom: 8px; font-size: 12.5px; color: #334155;">Mis Solicitudes de Cambio de Turno:</h4>
+          <div style="margin-top: 20px;">
+            <h4 style="margin-bottom: 8px; font-size: 12.5px; color: #334155;">Estado de Mis Solicitudes Enviadas:</h4>
             <div class="permutas-list">
-              @for (mp of misPermutasPortal(); track mp.id) {
+              @for (mp of misSolicitudesEnviadasPortal(); track mp.id) {
                 <div class="permuta-item">
                   <div>
                     <div class="permuta-title">
-                      Día {{ mp.diaOrigen }}: <strong>{{ mp.solicitanteNombre }}</strong> (<code>{{ mp.turnoOrigen }}</code>)
-                      ⇄ <strong>{{ mp.receptorNombre }}</strong> (<code>{{ mp.turnoDestino }}</code>)
+                      Día {{ mp.diaOrigen }}: Tu turno <code>{{ mp.turnoOrigen }}</code> ⇄ Turno <code>{{ mp.turnoDestino }}</code> con <strong>{{ mp.receptorNombre }}</strong>
                     </div>
                     <div class="permuta-validation">{{ mp.validacionReglas }}</div>
+                    @if (mp.motivoRechazo) {
+                      <div class="permuta-reject-reason">Motivo: {{ mp.motivoRechazo }}</div>
+                    }
                   </div>
-                  <span class="status-tag" [attr.data-status]="mp.estado">{{ mp.estado }}</span>
+                  <div>
+                    @if (mp.estado === 'PENDIENTE_PAR') {
+                      <span class="status-tag status-tag-par" title="Esperando que tu compañero acepte la propuesta">⏳ Esperando a {{ mp.receptorNombre }}</span>
+                    } @else if (mp.estado === 'PENDIENTE_SUPERVISOR') {
+                      <span class="status-tag status-tag-sup" title="Aceptada por tu compañero; esperando aprobación de la Supervisora">📋 En revisión Jefatura</span>
+                    } @else if (mp.estado === 'APROBADA') {
+                      <span class="status-tag status-tag-ok" title="Aprobada y aplicada en el cuadrante">✅ Aprobada</span>
+                    } @else {
+                      <span class="status-tag status-tag-no" title="Rechazada">❌ Rechazada</span>
+                    }
+                  </div>
                 </div>
               } @empty {
-                <div class="text-muted">No tienes solicitudes registradas en este periodo.</div>
+                <div class="text-muted">No has enviado propuestas de cambio en este periodo.</div>
               }
             </div>
           </div>
@@ -1158,7 +1227,7 @@
         <!-- ¿Quién está de turno conmigo ese día? -->
         <div class="panel-card">
           <div class="panel-header">
-            <h3>🏥 Compañeros de Turno — Día {{ diaPermutaSeleccionado() }} ({{ portal.servicioBase.nombre }})</h3>
+            <h3>🏥 Compañeros de Turno — Día {{ diaPermutaSeleccionado() }} ({{ portal.servicioBase?.nombre || 'Mi Servicio' }})</h3>
           </div>
 
           <table class="data-table">
