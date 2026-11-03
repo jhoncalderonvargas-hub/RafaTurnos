@@ -909,6 +909,20 @@ tr.row-focused td.matrix-cell:not(.cell-focused) {
   font-size: 8.5px;
 }
 
+.lock-mini-tag {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  font-size: 8px;
+  opacity: 0.85;
+}
+
+.matrix-cell.cell-locked {
+  cursor: not-allowed !important;
+  opacity: 0.95;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
 .diff-triangle {
   position: absolute;
   top: 0;

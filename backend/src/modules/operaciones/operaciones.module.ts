@@ -1,5 +1,7 @@
-import { BadRequestException, Body, ConflictException, Controller, Get, Header, Injectable, Module, NotFoundException, Param, Patch, Post } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Get, Header, Headers, Injectable, Module, NotFoundException, Param, Patch, Post, Query, Req, UnauthorizedException } from '@nestjs/common';
+import { randomBytes } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
+import { firmarJwtHmac, PayloadTokenSsoIntranet, RolUsuarioSso, verificarJwtHmac } from './jwt-sso.util';
 
 /** Marcador usado en tipos_turno para una celda explícitamente en blanco (ver CuadrantesController). */
 const CODIGO_CELDA_VACIA_DB = 'BLANCO';
@@ -351,12 +353,161 @@ export class PermutasController {
 
 @Controller('api/v1/intranet')
 export class IntranetIntegrationController {
+  constructor(private readonly prisma: PrismaService) {}
+
+  private obtenerSecretSso(): string {
+    return (
+      process.env.INTRANET_JWT_SECRET ||
+      'clave_secreta_compartida_con_intranet_hospitalaria'
+    );
+  }
+
+  private obtenerUrlRetornoIntranet(): string {
+    return process.env.INTRANET_RETURN_URL || 'http://localhost:4300';
+  }
+
+  private async construirPerfilUsuarioSso(
+    documento: string,
+    rolSolicitado?: RolUsuarioSso,
+    serviciosExtraIds?: string[]
+  ) {
+    const emp = await this.prisma.empleado.findFirst({
+      where: {
+        OR: [{ documento }, { intranetId: documento }, { id: documento }],
+      },
+      include: {
+        categoria: true,
+        servicioBase: {
+          include: {
+            serviciosHermanosOrigen: {
+              include: { servicioHermano: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!emp) {
+      throw new NotFoundException(
+        `El documento/identificador "${documento}" del token SSO no corresponde a ningún colaborador activo en Rafa Turnos.`
+      );
+    }
+
+    const rolValido: RolUsuarioSso =
+      rolSolicitado === 'ADMIN_TH' ||
+      rolSolicitado === 'COORDINADOR' ||
+      rolSolicitado === 'COLABORADOR'
+        ? rolSolicitado
+        : 'COLABORADOR';
+
+    let serviciosPermitidosIds: string[] = [emp.servicioBaseId];
+    if (rolValido === 'ADMIN_TH') {
+      const todosSrvs = await this.prisma.servicio.findMany({ select: { id: true } });
+      serviciosPermitidosIds = todosSrvs.map((s) => s.id);
+    } else if (rolValido === 'COORDINADOR') {
+      const hermanosIds = emp.servicioBase.serviciosHermanosOrigen.map(
+        (sh) => sh.servicioHermanoId
+      );
+      serviciosPermitidosIds = Array.from(
+        new Set([emp.servicioBaseId, ...hermanosIds, ...(serviciosExtraIds || [])])
+      );
+    }
+
+    return {
+      empleadoId: emp.id,
+      documento: emp.documento,
+      nombre: emp.nombre,
+      correo: emp.correo || undefined,
+      categoria: emp.categoria?.nombre || 'Personal Asistencial',
+      rol: rolValido,
+      servicioBaseId: emp.servicioBaseId,
+      servicioBaseNombre: emp.servicioBase.nombre,
+      serviciosPermitidosIds,
+      intranetReturnUrl: this.obtenerUrlRetornoIntranet(),
+    };
+  }
+
+  /**
+   * Intercambia el Token SSO firmado por la Intranet Hospitalaria (?sso_token=...)
+   * por una sesión validada contra PostgreSQL.
+   */
+  @Post('sso-login')
+  async intercambiarTokenSso(@Body() body: { ssoToken: string }) {
+    if (!body?.ssoToken) {
+      throw new BadRequestException('Se requiere el campo ssoToken.');
+    }
+
+    const payload = verificarJwtHmac<PayloadTokenSsoIntranet>(
+      body.ssoToken,
+      this.obtenerSecretSso()
+    );
+
+    if (!payload.documento) {
+      throw new UnauthorizedException('El token SSO no contiene el documento del colaborador.');
+    }
+
+    const usuario = await this.construirPerfilUsuarioSso(
+      String(payload.documento),
+      payload.rol,
+      payload.serviciosCoordinados
+    );
+
+    const sessionToken = firmarJwtHmac(
+      {
+        documento: usuario.documento,
+        empleadoId: usuario.empleadoId,
+        rol: usuario.rol,
+        serviciosCoordinados: usuario.serviciosPermitidosIds,
+      },
+      this.obtenerSecretSso(),
+      28800 // 8 horas de sesión
+    );
+
+    return {
+      sessionToken,
+      usuario,
+      intranetReturnUrl: this.obtenerUrlRetornoIntranet(),
+    };
+  }
+
+  /**
+   * Verifica la sesión activa enviada en Authorization: Bearer <token>.
+   */
+  @Get('sesion')
+  async verificarSesionActiva(@Headers('authorization') authHeader?: string) {
+    const token = authHeader?.startsWith('Bearer ')
+      ? authHeader.slice(7).trim()
+      : '';
+    if (!token) {
+      throw new UnauthorizedException('No se encontró cabecera Authorization Bearer.');
+    }
+
+    const payload = verificarJwtHmac<PayloadTokenSsoIntranet>(
+      token,
+      this.obtenerSecretSso()
+    );
+
+    const usuario = await this.construirPerfilUsuarioSso(
+      String(payload.documento),
+      payload.rol,
+      payload.serviciosCoordinados
+    );
+
+    return {
+      usuario,
+      intranetReturnUrl: this.obtenerUrlRetornoIntranet(),
+    };
+  }
+
   @Get('status')
   estadoIntegracionSatelite() {
     return {
       arquitectura: 'Servicio Satélite con Réplica Local (intranetId)',
       sso: 'JWT Bearer Token compartido (Sin doble login)',
+      intranetReturnUrl: this.obtenerUrlRetornoIntranet(),
       endpointsMaestros: [
+        'POST /api/v1/intranet/sso-login (Intercambio de Token SSO HMAC-SHA256)',
+        'GET /api/v1/intranet/sesion (Validación de sesión activa y rol)',
         'GET /api/v1/dependencias (Servicios Asistenciales)',
         'GET /api/v1/empleados (Personal activo)',
         'POST /api/v1/notificaciones (Campana unificada Intranet)',
@@ -377,33 +528,218 @@ export class IntranetIntegrationController {
 
 @Controller('api/v1/calendario')
 export class CalendarioIcalController {
+  constructor(private readonly prisma: PrismaService) {}
+
+  private formatearFechaYmd(dateUtc: Date): string {
+    const y = dateUtc.getUTCFullYear();
+    const m = String(dateUtc.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(dateUtc.getUTCDate()).padStart(2, '0');
+    return `${y}${m}${d}`;
+  }
+
+  private formatearHoraHms(hhmm?: string, fallback = '070000'): string {
+    if (!hhmm || !hhmm.includes(':')) return fallback;
+    const [hStr, mStr] = hhmm.split(':');
+    const h = String(Math.max(0, Math.min(23, Number(hStr) || 0))).padStart(2, '0');
+    const m = String(Math.max(0, Math.min(59, Number(mStr) || 0))).padStart(2, '0');
+    return `${h}${m}00`;
+  }
+
   /**
-   * Genera el feed dinámico RFC 5545 (.ics) para suscripción móvil (webcal://)
-   * en Google Calendar, Apple Calendar (iOS) y Outlook (Doc 14).
+   * Obtiene o genera el token personal de suscripción iCal (.ics) en PostgreSQL
+   * para el colaborador indicado o el usuario autenticado en la sesión SSO.
+   */
+  @Get('mi-enlace')
+  async obtenerMiEnlaceCalendario(
+    @Query('empleadoId') empleadoIdQuery?: string,
+    @Req() req?: any
+  ) {
+    const targetId = empleadoIdQuery || req?.usuarioSso?.empleadoId;
+    let empleado = targetId
+      ? await this.prisma.empleado.findFirst({
+          where: { OR: [{ id: targetId }, { documento: targetId }] },
+          include: { servicioBase: true },
+        })
+      : null;
+
+    if (!empleado) {
+      empleado = await this.prisma.empleado.findFirst({
+        include: { servicioBase: true },
+        orderBy: { documento: 'asc' },
+      });
+    }
+
+    if (!empleado) {
+      throw new NotFoundException('No se encontró colaborador para generar enlace de calendario.');
+    }
+
+    let tokenRecord = await this.prisma.tokenCalendario.findFirst({
+      where: { empleadoId: empleado.id, activo: true },
+      orderBy: { creadoEn: 'desc' },
+    });
+
+    if (!tokenRecord) {
+      const sufijo = randomBytes(6).toString('hex');
+      const tokenHash = `cal_${empleado.documento}_${sufijo}`;
+      tokenRecord = await this.prisma.tokenCalendario.create({
+        data: {
+          empleadoId: empleado.id,
+          tokenHash,
+          activo: true,
+        },
+      });
+    }
+
+    const host = req?.headers?.host || 'localhost:3000';
+    const httpUrl = `http://${host}/api/v1/calendario/feed/${tokenRecord.tokenHash}.ics`;
+    const webcalUrl = `webcal://${host}/api/v1/calendario/feed/${tokenRecord.tokenHash}.ics`;
+
+    return {
+      empleadoId: empleado.id,
+      empleadoNombre: empleado.nombre,
+      documento: empleado.documento,
+      servicioNombre: empleado.servicioBase.nombre,
+      token: tokenRecord.tokenHash,
+      httpUrl,
+      webcalUrl,
+    };
+  }
+
+  /**
+   * Genera el feed dinámico RFC 5545 (.ics) consultando en vivo las asignaciones reales
+   * en PostgreSQL (`asignaciones_turno`) para Google Calendar, Apple Calendar (iOS) y Outlook.
    */
   @Get('feed/:token.ics')
   @Header('Content-Type', 'text/calendar; charset=utf-8')
   @Header('Content-Disposition', 'inline; filename="mis_turnos_hospital.ics"')
-  generarFeedIcs(@Param('token') token: string): string {
-    return [
+  async generarFeedIcs(@Param('token') rawToken: string): Promise<string> {
+    const tokenLimpio = (rawToken || '').replace(/\.ics$/i, '').trim();
+
+    let tokenRecord = await this.prisma.tokenCalendario.findUnique({
+      where: { tokenHash: tokenLimpio },
+      include: {
+        empleado: {
+          include: {
+            servicioBase: true,
+            categoria: true,
+          },
+        },
+      },
+    });
+
+    let empleado = tokenRecord?.activo ? tokenRecord.empleado : null;
+
+    if (!empleado) {
+      // Permitir resolución por documento si el token tiene formato cal_<documento>_...
+      const matchDoc = tokenLimpio.match(/^cal_(\d+)_/);
+      const docBuscar = matchDoc ? matchDoc[1] : tokenLimpio;
+      empleado = await this.prisma.empleado.findFirst({
+        where: { OR: [{ documento: docBuscar }, { id: docBuscar }] },
+        include: {
+          servicioBase: true,
+          categoria: true,
+        },
+      });
+    }
+
+    const dtstamp = new Date()
+      .toISOString()
+      .replace(/[-:]/g, '')
+      .replace(/\.\d{3}Z$/, 'Z');
+
+    const nombreCalendario = empleado
+      ? `Turnos — ${empleado.nombre} (${empleado.servicioBase.codigo})`
+      : 'Mis Turnos Hospitalarios (Rafa Turnos)';
+
+    const lineas: string[] = [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
       'PRODID:-//Hospital//Rafa Turnos v2.0//ES',
       'CALSCALE:GREGORIAN',
       'METHOD:PUBLISH',
-      'X-WR-CALNAME:Mis Turnos Hospitalarios (Rafa Turnos)',
+      `X-WR-CALNAME:${nombreCalendario}`,
       'X-WR-TIMEZONE:America/Bogota',
-      'BEGIN:VEVENT',
-      `UID:turno-demo-1-${token}@hospital.gov.co`,
-      'DTSTAMP:20261101T070000Z',
-      'DTSTART;TZID=America/Bogota:20261102T070000',
-      'DTEND;TZID=America/Bogota:20261102T130000',
-      'SUMMARY:[M] Turno Mañana - UCI Adultos',
-      'DESCRIPTION:Turno asistencial programado en Rafa Turnos. Actualizado automáticamente.',
-      'LOCATION:UCI Adultos',
-      'END:VEVENT',
-      'END:VCALENDAR',
-    ].join('\r\n');
+    ];
+
+    if (empleado) {
+      const asignaciones = await this.prisma.asignacionTurno.findMany({
+        where: {
+          empleadoId: empleado.id,
+          cuadrante: {
+            estado: {
+              in: ['PUBLICADO', 'VALIDADO', 'CERRADO_NOMINA'],
+            },
+          },
+        },
+        include: {
+          tipoTurno: true,
+          servicioEjecutor: true,
+        },
+        orderBy: { fecha: 'asc' },
+      });
+
+      const codigosOmitidos = new Set(['L', 'S', 'BLANCO', '']);
+
+      for (const a of asignaciones) {
+        const cod = a.tipoTurno?.codigo || '';
+        if (codigosOmitidos.has(cod)) continue;
+
+        const fechaInicioUtc = new Date(a.fecha);
+        const ymdInicio = this.formatearFechaYmd(fechaInicioUtc);
+        const fechaDiaSigUtc = new Date(fechaInicioUtc.getTime() + 86400000);
+        const ymdDiaSig = this.formatearFechaYmd(fechaDiaSigUtc);
+
+        const srvNombre = a.servicioEjecutor?.nombre || empleado.servicioBase.nombre;
+        const catNombre = empleado.categoria?.nombre || 'Personal Asistencial';
+
+        if (a.tipoTurno.horasOrdinarias <= 0) {
+          // Evento de día completo para Novedades / Compensatorios (VAC, INC, COMP, DISP)
+          lineas.push(
+            'BEGIN:VEVENT',
+            `UID:turno-${a.id}@hospital.gov.co`,
+            `DTSTAMP:${dtstamp}`,
+            `DTSTART;VALUE=DATE:${ymdInicio}`,
+            `DTEND;VALUE=DATE:${ymdDiaSig}`,
+            `SUMMARY:[${cod}] ${a.tipoTurno.nombre} - ${srvNombre}`,
+            `DESCRIPTION:Colaborador: ${empleado.nombre} (${catNombre})\\nNovedad / Estado: ${a.tipoTurno.nombre}\\nServicio: ${srvNombre}`,
+            `LOCATION:${srvNombre}`,
+            'END:VEVENT'
+          );
+        } else {
+          // Turno operativo con hora exacta de entrada y salida
+          const [hIni = 7, mIni = 0] = (a.tipoTurno.horaInicio || '07:00')
+            .split(':')
+            .map(Number);
+          const [hFin = 15, mFin = 0] = (a.tipoTurno.horaFin || '15:00')
+            .split(':')
+            .map(Number);
+          const minInicio = hIni * 60 + mIni;
+          const minFin = hFin * 60 + mFin;
+
+          const cruzaMedianoche =
+            a.tipoTurno.horasOrdinarias >= 24 || minFin <= minInicio;
+          const ymdFin = cruzaMedianoche ? ymdDiaSig : ymdInicio;
+
+          const hmsInicio = this.formatearHoraHms(a.tipoTurno.horaInicio, '070000');
+          const hmsFin = this.formatearHoraHms(a.tipoTurno.horaFin, '150000');
+
+          lineas.push(
+            'BEGIN:VEVENT',
+            `UID:turno-${a.id}@hospital.gov.co`,
+            `DTSTAMP:${dtstamp}`,
+            `DTSTART;TZID=America/Bogota:${ymdInicio}T${hmsInicio}`,
+            `DTEND;TZID=America/Bogota:${ymdFin}T${hmsFin}`,
+            `SUMMARY:[${cod}] ${a.tipoTurno.nombre} (${a.tipoTurno.horaInicio}-${a.tipoTurno.horaFin}) - ${srvNombre}`,
+            `DESCRIPTION:Colaborador: ${empleado.nombre} (${catNombre})\\nTurno: ${cod} - ${a.tipoTurno.nombre} (${a.tipoTurno.horasOrdinarias}h)\\nServicio: ${srvNombre}`,
+            `LOCATION:${srvNombre}`,
+            'END:VEVENT'
+          );
+        }
+      }
+    }
+
+    lineas.push('END:VCALENDAR');
+    return lineas.join('\r\n');
   }
 }
 

@@ -1,9 +1,11 @@
 import { Controller, Get, Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { PrismaModule } from './prisma/prisma.service';
 import { FestivosModule } from './modules/festivos/festivos.module';
 import { BancoHorasNominaModule } from './modules/banco-horas/banco-horas.module';
 import { CuadrantesModule } from './modules/cuadrantes/cuadrantes.module';
 import { OperacionesHospitalModule } from './modules/operaciones/operaciones.module';
+import { SsoRoleGuard } from './modules/operaciones/sso-role.guard';
 import { ServiciosAdminModule } from './modules/servicios-admin/servicios-admin.module';
 
 @Controller('api/v1')
@@ -36,5 +38,11 @@ export class HealthController {
     ServiciosAdminModule,
   ],
   controllers: [HealthController],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: SsoRoleGuard,
+    },
+  ],
 })
 export class AppModule {}

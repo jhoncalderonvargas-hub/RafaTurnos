@@ -1,3 +1,32 @@
+@if (!sesionActual()) {
+  <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #0f172a; color: #f8fafc; font-family: 'Segoe UI', system-ui, sans-serif; padding: 24px;">
+    <div style="max-width: 460px; width: 100%; background: #1e293b; border: 1px solid #334155; border-radius: 16px; padding: 32px; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.35);">
+      <div style="font-size: 42px; margin-bottom: 12px;">🏥</div>
+      <h2 style="font-size: 20px; font-weight: 700; margin-bottom: 8px; color: #f8fafc;">
+        @if (verificandoSesionSso()) {
+          Verificando credencial SSO...
+        } @else {
+          Acceso Exclusivo desde la Intranet Hospitalaria
+        }
+      </h2>
+      <p style="font-size: 13.5px; color: #94a3b8; line-height: 1.5; margin-bottom: 22px;">
+        @if (verificandoSesionSso()) {
+          Validando firma criptográfica del token con el servidor...
+        } @else {
+          Rafa Turnos opera como módulo satélite autenticado. Ingresa desde el portal de la Intranet para cargar tu perfil y permisos.
+        }
+      </p>
+      @if (!verificandoSesionSso()) {
+        <button
+          class="btn-primary"
+          style="width: 100%; padding: 12px 18px; font-size: 14px; font-weight: 600; justify-content: center;"
+          (click)="notificarIntranet()">
+          🔐 Ir al Portal de la Intranet Hospitalaria
+        </button>
+      }
+    </div>
+  </div>
+} @else {
 <div class="app-shell" (mouseup)="finalizarPintadoRaton()">
   <!-- MENÚ LATERAL IZQUIERDO COLAPSABLE AUTOMÁTICAMENTE POR HOVER (ESTILO THURNI) -->
   <div class="side-nav-rail" [class.is-pinned]="sidebarFijo()">
@@ -26,19 +55,21 @@
       </div>
 
       <nav class="side-menu">
-        @if (!sidebarContraido()) {
-          <div class="side-section-label">OPERACIÓN</div>
-        }
-        <button
-          class="side-item"
-          [class.active]="vistaActual() === 'PLANIFICADOR'"
-          (click)="onItemNavegacionClick('PLANIFICADOR')"
-          title="Cuadro de Turnos">
-          <span class="side-icon">📅</span>
+        @if (!esColaborador()) {
           @if (!sidebarContraido()) {
-            <span class="side-label">Cuadro de Turnos</span>
+            <div class="side-section-label">OPERACIÓN</div>
           }
-        </button>
+          <button
+            class="side-item"
+            [class.active]="vistaActual() === 'PLANIFICADOR'"
+            (click)="onItemNavegacionClick('PLANIFICADOR')"
+            title="Cuadro de Turnos">
+            <span class="side-icon">📅</span>
+            @if (!sidebarContraido()) {
+              <span class="side-label">Cuadro de Turnos</span>
+            }
+          </button>
+        }
 
         <button
           class="side-item"
@@ -49,21 +80,23 @@
           @if (!sidebarContraido()) {
             <span class="side-label">Solicitudes y Historial</span>
           }
-          @if (permutasPendientesCount() > 0) {
+          @if (permutasPendientesCount() > 0 && !esColaborador()) {
             <span class="pill-count">{{ permutasPendientesCount() }}</span>
           }
         </button>
 
-        <button
-          class="side-item"
-          [class.active]="vistaActual() === 'REPORTES'"
-          (click)="onItemNavegacionClick('REPORTES')"
-          title="Reportes y Analítica">
-          <span class="side-icon">📊</span>
-          @if (!sidebarContraido()) {
-            <span class="side-label">Reportes</span>
-          }
-        </button>
+        @if (!esColaborador()) {
+          <button
+            class="side-item"
+            [class.active]="vistaActual() === 'REPORTES'"
+            (click)="onItemNavegacionClick('REPORTES')"
+            title="Reportes y Analítica">
+            <span class="side-icon">📊</span>
+            @if (!sidebarContraido()) {
+              <span class="side-label">Reportes</span>
+            }
+          </button>
+        }
 
         @if (!sidebarContraido()) {
           <div class="side-section-label">COLABORADOR</div>
@@ -82,28 +115,44 @@
           }
         </button>
 
-        @if (!sidebarContraido()) {
-          <div class="side-section-label">CONFIGURACIÓN</div>
-        } @else {
-          <div class="side-divider"></div>
-        }
-
-        <button
-          class="side-item"
-          [class.active]="vistaActual() === 'CONFIGURACION'"
-          (click)="onItemNavegacionClick('CONFIGURACION')"
-          title="Configuración (Servicios, Catálogo de Turnos y Festivos)">
-          <span class="side-icon">⚙️</span>
+        @if (esAdminTh()) {
           @if (!sidebarContraido()) {
-            <span class="side-label">Configuración</span>
+            <div class="side-section-label">CONFIGURACIÓN</div>
+          } @else {
+            <div class="side-divider"></div>
           }
-        </button>
+
+          <button
+            class="side-item"
+            [class.active]="vistaActual() === 'CONFIGURACION'"
+            (click)="onItemNavegacionClick('CONFIGURACION')"
+            title="Configuración (Servicios, Catálogo de Turnos y Festivos)">
+            <span class="side-icon">⚙️</span>
+            @if (!sidebarContraido()) {
+              <span class="side-label">Configuración</span>
+            }
+          </button>
+        }
       </nav>
 
       <div class="side-footer">
+        @if (sesionActual(); as sesion) {
+          <div
+            class="side-footer-btn"
+            style="cursor: default; background: rgba(14, 165, 233, 0.12); border: 1px solid rgba(14, 165, 233, 0.3);"
+            [title]="sesion.nombre + ' • ' + etiquetaRol(sesion.rol) + ' • C.C. ' + sesion.documento">
+            <span class="side-icon">🔐</span>
+            @if (!sidebarContraido()) {
+              <div style="display: flex; flex-direction: column; line-height: 1.2; overflow: hidden;">
+                <strong style="font-size: 11px; white-space: nowrap; text-overflow: ellipsis; overflow: hidden;">{{ sesion.nombre }}</strong>
+                <span style="font-size: 10px; opacity: 0.85;">{{ etiquetaRol(sesion.rol) }}</span>
+              </div>
+            }
+          </div>
+        }
         <button
           class="side-footer-btn"
-          (click)="modalIcalAbierto.set(true)"
+          (click)="abrirModalIcal()"
           title="Vincular calendario con el teléfono">
           <span class="side-icon">📲</span>
           @if (!sidebarContraido()) {
@@ -143,7 +192,7 @@
         <div class="control-item">
           <label>Servicio:</label>
           <select [ngModel]="servicioSeleccionadoId()" (ngModelChange)="cambiarServicio($event)">
-            @for (srv of servicios(); track srv.id) {
+            @for (srv of serviciosVisibles(); track srv.id) {
               <option [value]="srv.id">{{ srv.nombre }}</option>
             }
           </select>
@@ -184,6 +233,10 @@
           <span>🔍 Ver cambios frente al original</span>
         </label>
 
+        <button class="btn-secondary" (click)="sincronizarNovedadesIntranet()" [disabled]="sincronizandoNovedades()" title="Consultar e importar ausencias oficiales (Vacaciones / Incapacidades / Licencias) desde la Intranet">
+          🔄 {{ sincronizandoNovedades() ? 'Sincronizando...' : 'Sincronizar Novedades Intranet' }}
+        </button>
+
         <button class="btn-secondary" (click)="abrirModalRotacion()">
           🔄 Traer Personal de Apoyo
         </button>
@@ -196,7 +249,11 @@
           🧹 Dejar en Blanco
         </button>
 
-        <button class="btn-primary" (click)="cambiarEstadoCuadrante()">
+        <button
+          class="btn-primary"
+          (click)="cambiarEstadoCuadrante()"
+          [disabled]="esCoordinador() && estadoCuadrante() !== 'BORRADOR'"
+          [title]="esCoordinador() && estadoCuadrante() !== 'BORRADOR' ? 'Solo Talento Humano / Nómina puede cerrar o reabrir meses publicados' : ''">
           @if (estadoCuadrante() === 'BORRADOR') {
             🚀 Publicar Cuadro de Turnos
           } @else if (estadoCuadrante() === 'PUBLICADO') {
@@ -372,6 +429,7 @@
                   [class.cell-sunday]="d.esDomingo"
                   [class.cell-holiday]="!!d.festivo"
                   [class.cell-conflict]="!!conflicto"
+                  [class.cell-locked]="celda?.codigo === 'VAC' || celda?.codigo === 'INC' || celda?.codigo === 'LIC'"
                   [style.background-color]="cfg ? cfg.bgHex : ''"
                   [style.color]="cfg ? cfg.textHex : ''"
                   (mousedown)="iniciarPintadoCelda(fila.empleado.id, d.dia, $event)"
@@ -383,6 +441,9 @@
 
                   <div class="cell-inner">
                     <span class="cell-code">{{ celda?.codigo || '' }}</span>
+                    @if (celda?.codigo === 'VAC' || celda?.codigo === 'INC' || celda?.codigo === 'LIC') {
+                      <span class="lock-mini-tag" title="Bloqueado por novedad oficial Intranet">🔒</span>
+                    }
                     @if (celda?.esRotacion) {
                       <span class="rotacion-mini-tag">🔄</span>
                     }
@@ -457,45 +518,76 @@
 
         <!-- FOOTER REACTIVO DE COBERTURAS MÍNIMAS POR TURNO -->
         <tfoot>
+          @let reglaFiltroFoot = reglaCargoActivaEnCuadrante();
           <tr class="coverage-row">
             <td colspan="2" class="col-sticky-emp coverage-label">
-              ☀️ Cobertura Mañana • <strong>Mín: {{ servicioActual().reqManana }}</strong>
+              ☀️ Cobertura Mañana • <strong>Mín: {{ reglaFiltroFoot ? reglaFiltroFoot.reqManana : servicioActual().reqManana }}</strong>
+              @if (filtroCategoriaActiva() !== 'TODAS') {
+                <span style="font-size: 10.5px; color: #0284c7; font-weight: 700;">({{ filtroCategoriaActiva() }})</span>
+              }
             </td>
             @for (d of diasDelMes(); track d.dia) {
               @let cob = coberturaPorDia()[d.dia];
-              <td class="coverage-cell" [class.cov-ok]="cob.manana >= servicioActual().reqManana" [class.cov-deficit]="cob.manana < servicioActual().reqManana">
-                {{ cob.manana }}/{{ servicioActual().reqManana }}
-              </td>
+              @let metas = obtenerMetasDiaServicio(servicioActual(), d);
+              @if (metas.cerrado || metas.reqManana === 0) {
+                <td class="coverage-cell" style="color: #94a3b8; background: #f8fafc;" title="Servicio sin requerimiento en esta franja / día">
+                  —
+                </td>
+              } @else {
+                <td class="coverage-cell" [class.cov-ok]="cob.manana >= metas.reqManana" [class.cov-deficit]="cob.manana < metas.reqManana">
+                  {{ cob.manana }}/{{ metas.reqManana }}
+                </td>
+              }
             }
             <td colspan="9" class="coverage-summary-note">
-              Programados / Mínimo requerido
+              Programados / Mínimo requerido ({{ etiquetaModalidadDias(servicioActual().modalidadDias) }})
             </td>
           </tr>
 
           <tr class="coverage-row">
             <td colspan="2" class="col-sticky-emp coverage-label">
-              🌤️ Cobertura Tarde • <strong>Mín: {{ servicioActual().reqTarde }}</strong>
+              🌤️ Cobertura Tarde • <strong>Mín: {{ reglaFiltroFoot ? reglaFiltroFoot.reqTarde : servicioActual().reqTarde }}</strong>
+              @if (filtroCategoriaActiva() !== 'TODAS') {
+                <span style="font-size: 10.5px; color: #0284c7; font-weight: 700;">({{ filtroCategoriaActiva() }})</span>
+              }
             </td>
             @for (d of diasDelMes(); track d.dia) {
               @let cob = coberturaPorDia()[d.dia];
-              <td class="coverage-cell" [class.cov-ok]="cob.tarde >= servicioActual().reqTarde" [class.cov-deficit]="cob.tarde < servicioActual().reqTarde">
-                {{ cob.tarde }}/{{ servicioActual().reqTarde }}
-              </td>
+              @let metas = obtenerMetasDiaServicio(servicioActual(), d);
+              @if (metas.cerrado || metas.reqTarde === 0) {
+                <td class="coverage-cell" style="color: #94a3b8; background: #f8fafc;" title="Servicio sin requerimiento en esta franja / día">
+                  —
+                </td>
+              } @else {
+                <td class="coverage-cell" [class.cov-ok]="cob.tarde >= metas.reqTarde" [class.cov-deficit]="cob.tarde < metas.reqTarde">
+                  {{ cob.tarde }}/{{ metas.reqTarde }}
+                </td>
+              }
             }
             <td colspan="9" class="coverage-summary-note">
-              Verde = Cobertura completa
+              Verde = Cobertura completa • (—) = Franja/día no operativo
             </td>
           </tr>
 
           <tr class="coverage-row">
             <td colspan="2" class="col-sticky-emp coverage-label">
-              🌙 Cobertura Noche • <strong>Mín: {{ servicioActual().reqNoche }}</strong>
+              🌙 Cobertura Noche • <strong>Mín: {{ reglaFiltroFoot ? reglaFiltroFoot.reqNoche : servicioActual().reqNoche }}</strong>
+              @if (filtroCategoriaActiva() !== 'TODAS') {
+                <span style="font-size: 10.5px; color: #0284c7; font-weight: 700;">({{ filtroCategoriaActiva() }})</span>
+              }
             </td>
             @for (d of diasDelMes(); track d.dia) {
               @let cob = coberturaPorDia()[d.dia];
-              <td class="coverage-cell" [class.cov-ok]="cob.noche >= servicioActual().reqNoche" [class.cov-deficit]="cob.noche < servicioActual().reqNoche">
-                {{ cob.noche }}/{{ servicioActual().reqNoche }}
-              </td>
+              @let metas = obtenerMetasDiaServicio(servicioActual(), d);
+              @if (metas.cerrado || metas.reqNoche === 0) {
+                <td class="coverage-cell" style="color: #94a3b8; background: #f8fafc;" title="Servicio sin requerimiento en esta franja / día">
+                  —
+                </td>
+              } @else {
+                <td class="coverage-cell" [class.cov-ok]="cob.noche >= metas.reqNoche" [class.cov-deficit]="cob.noche < metas.reqNoche">
+                  {{ cob.noche }}/{{ metas.reqNoche }}
+                </td>
+              }
             }
             <td colspan="9" class="coverage-summary-note">
               Rojo = Falta personal en el turno
@@ -541,7 +633,7 @@
             <h3>🔄 Solicitudes de Cambio de Turno (Permutas)</h3>
           </div>
           <div class="permutas-list">
-            @for (p of listaPermutas(); track p.id) {
+            @for (p of permutasVisiblesDashboard(); track p.id) {
               <div class="permuta-item" [class.permuta-ready]="p.estado === 'PENDIENTE_SUPERVISOR'">
                 <div class="permuta-main">
                   <div class="permuta-title">
@@ -560,13 +652,17 @@
                 </div>
                 <div class="permuta-actions">
                   @if (p.estado === 'PENDIENTE_SUPERVISOR') {
-                    <div class="supervisor-approval-group">
-                      <span class="badge-concertada">🤝 Acuerdo mutuo confirmado</span>
-                      <div class="btn-group-h">
-                        <button class="btn-approve" (click)="aprobarPermuta(p.id)">✔ Aprobar Cambio</button>
-                        <button class="btn-reject" (click)="rechazarPermuta(p.id)">✕ Rechazar</button>
+                    @if (!esColaborador()) {
+                      <div class="supervisor-approval-group">
+                        <span class="badge-concertada">🤝 Acuerdo mutuo confirmado</span>
+                        <div class="btn-group-h">
+                          <button class="btn-approve" (click)="aprobarPermuta(p.id)">✔ Aprobar Cambio</button>
+                          <button class="btn-reject" (click)="rechazarPermuta(p.id)">✕ Rechazar</button>
+                        </div>
                       </div>
-                    </div>
+                    } @else {
+                      <span class="status-tag status-tag-par">⏳ En revisión por Coordinador de Servicio</span>
+                    }
                   } @else if (p.estado === 'PENDIENTE_PAR') {
                     <span class="status-tag status-tag-par">⏳ Esperando respuesta de {{ p.receptorNombre }}</span>
                   } @else if (p.estado === 'APROBADA') {
@@ -1006,14 +1102,22 @@
           </div>
         </div>
 
-        <div class="control-item">
-          <label>Ver calendario de:</label>
-          <select [ngModel]="empleadoPortalId()" (ngModelChange)="cambiarEmpleadoPortal($event)">
-            @for (e of empleados(); track e.id) {
-              <option [value]="e.id">{{ e.nombre }} ({{ e.categoria }})</option>
-            }
-          </select>
-        </div>
+        @if (esAdminTh()) {
+          <div class="control-item">
+            <label>Ver calendario de:</label>
+            <select [ngModel]="empleadoPortalId()" (ngModelChange)="cambiarEmpleadoPortal($event)">
+              @for (e of empleados(); track e.id) {
+                <option [value]="e.id">{{ e.nombre }} ({{ e.categoria }})</option>
+              }
+            </select>
+          </div>
+        } @else {
+          <div class="control-item">
+            <span class="badge-personal" style="padding: 8px 14px; font-size: 13px;">
+              🔐 Sesión Intranet: <strong>{{ portal.empleado.nombre }}</strong> ({{ etiquetaRol(rolActual()) }})
+            </span>
+          </div>
+        }
       </div>
 
       <!-- Bloque 1: Tarjetas de Resumen Personal y Mi Banco de Horas -->
@@ -1043,7 +1147,7 @@
         <div class="kpi-card">
           <div class="kpi-label">Calendario en el Celular</div>
           <div style="margin: 8px 0;">
-            <button class="btn-primary" (click)="modalIcalAbierto.set(true)">📲 Vincular a Google / iPhone</button>
+            <button class="btn-primary" (click)="abrirModalIcal()">📲 Vincular a Google / iPhone</button>
           </div>
           <div class="kpi-sub">Se actualiza automáticamente</div>
         </div>
@@ -1342,7 +1446,7 @@
         <!-- Formularios de Administración -->
         <div class="admin-forms-grid">
           <!-- Tarjeta Crear / Editar Servicio -->
-          <div class="panel-card">
+          <div class="panel-card" id="panel-edicion-servicio">
             <div class="panel-header">
               <h3>
                 @if (servicioEditandoId()) {
@@ -1359,6 +1463,7 @@
               <div class="form-row">
                 <label>Código (3-6 letras):</label>
                 <input
+                  id="input-codigo-servicio"
                   type="text"
                   placeholder="Ej: HEM, UCIP, NEO"
                   [ngModel]="nuevoServicioCodigo()"
@@ -1389,6 +1494,259 @@
                   <option value="CONSULTA_EXTERNA">CONSULTA EXTERNA / AMBULATORIO</option>
                 </select>
               </div>
+              <div class="form-row">
+                <label>Modalidad de Días Operativos del Servicio:</label>
+                <select
+                  [ngModel]="nuevoServicioModalidadDias()"
+                  (ngModelChange)="nuevoServicioModalidadDias.set($event)"
+                >
+                  <option value="TODOS_24_7">🕒 Todos los días 24/7 — Mismas metas de Lunes a Domingo y Festivos</option>
+                  <option value="TODOS_GUARDIA_FDS">🏥 Todos los días 24/7 — Con metas reducidas en Sábados, Domingos y Festivos</option>
+                  <option value="LUN_SAB_SIN_FESTIVOS">📅 Lunes a Sábado — Cierra Domingos y Festivos (permite meta distinta el Sábado)</option>
+                  <option value="LUN_VIE_HABILES">🏢 Lunes a Viernes Hábiles — Cierra Sábados, Domingos y Festivos</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label>
+                  @if (nuevoServicioModalidadDias() === 'TODOS_24_7') {
+                    Metas de Cobertura Mínima Diaria (Lunes a Domingo y Festivos):
+                  } @else {
+                    Metas de Cobertura Mínima — Lunes a Viernes (Días Hábiles):
+                  }
+                </label>
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
+                  <div>
+                    <small class="text-muted">☀️ Mañana</small>
+                    <input
+                      type="number"
+                      min="0"
+                      max="50"
+                      [ngModel]="nuevoServicioReqManana()"
+                      (ngModelChange)="nuevoServicioReqManana.set($event)"
+                    />
+                  </div>
+                  <div>
+                    <small class="text-muted">🌤️ Tarde</small>
+                    <input
+                      type="number"
+                      min="0"
+                      max="50"
+                      [ngModel]="nuevoServicioReqTarde()"
+                      (ngModelChange)="nuevoServicioReqTarde.set($event)"
+                    />
+                  </div>
+                  <div>
+                    <small class="text-muted">🌙 Noche</small>
+                    <input
+                      type="number"
+                      min="0"
+                      max="50"
+                      [ngModel]="nuevoServicioReqNoche()"
+                      (ngModelChange)="nuevoServicioReqNoche.set($event)"
+                    />
+                  </div>
+                </div>
+              </div>
+              @if (nuevoServicioModalidadDias() === 'TODOS_GUARDIA_FDS' || nuevoServicioModalidadDias() === 'LUN_SAB_SIN_FESTIVOS') {
+                <div class="form-row" style="padding: 10px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;">
+                  <label style="color: #92400e;">
+                    @if (nuevoServicioModalidadDias() === 'TODOS_GUARDIA_FDS') {
+                      🌤️ Metas de Cobertura en Sábados, Domingos y Festivos (Guardia Fin de Semana):
+                    } @else {
+                      🌤️ Metas de Cobertura el Día Sábado (Domingos y Festivos cierra en 0):
+                    }
+                  </label>
+                  <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
+                    <div>
+                      <small class="text-muted">☀️ Mañana FDS</small>
+                      <input
+                        type="number"
+                        min="0"
+                        max="50"
+                        [ngModel]="nuevoServicioReqMananaFds()"
+                        (ngModelChange)="nuevoServicioReqMananaFds.set($event)"
+                      />
+                    </div>
+                    <div>
+                      <small class="text-muted">🌤️ Tarde FDS</small>
+                      <input
+                        type="number"
+                        min="0"
+                        max="50"
+                        [ngModel]="nuevoServicioReqTardeFds()"
+                        (ngModelChange)="nuevoServicioReqTardeFds.set($event)"
+                      />
+                    </div>
+                    <div>
+                      <small class="text-muted">🌙 Noche FDS</small>
+                      <input
+                        type="number"
+                        min="0"
+                        max="50"
+                        [ngModel]="nuevoServicioReqNocheFds()"
+                        (ngModelChange)="nuevoServicioReqNocheFds.set($event)"
+                      />
+                    </div>
+                  </div>
+                </div>
+              }
+              @if (nuevoServicioModalidadDias() === 'LUN_VIE_HABILES') {
+                <div style="padding: 8px 10px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; font-size: 12px; color: #166534;">
+                  ✅ En Sábados, Domingos y Festivos la meta requerida será <strong>0 / 0 / 0</strong> y el Autocompletado asignará automáticamente <strong>Libre (L)</strong>.
+                </div>
+              }
+              <div class="form-row">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 4px;">
+                  <label style="margin: 0;">Turnos Habilitados en este Servicio (Paleta y Autocompletar):</label>
+                  <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+                    <button type="button" class="btn-outline" style="padding: 2px 7px; font-size: 11px;" (click)="aplicarPlantillaTurnosServicio('ROTATIVO_8H')">
+                      Rotativo 8h
+                    </button>
+                    <button type="button" class="btn-outline" style="padding: 2px 7px; font-size: 11px;" (click)="aplicarPlantillaTurnosServicio('GUARDIAS_12_24')">
+                      Guardias 12h/24h
+                    </button>
+                    <button type="button" class="btn-outline" style="padding: 2px 7px; font-size: 11px;" (click)="aplicarPlantillaTurnosServicio('ADMINISTRATIVO')">
+                      Administrativo
+                    </button>
+                    <button type="button" class="btn-outline" style="padding: 2px 7px; font-size: 11px;" (click)="aplicarPlantillaTurnosServicio('TODOS')">
+                      Todos
+                    </button>
+                  </div>
+                </div>
+                <div style="display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;">
+                  @for (t of listaTurnosCatalogo(); track t.codigo) {
+                    @let activo = esTurnoHabilitadoEnServicioForm(t.codigo);
+                    <button
+                      type="button"
+                      (click)="alternarTurnoEnServicioForm(t.codigo)"
+                      [title]="t.nombre + ' (' + t.horario + ')'"
+                      [style.background-color]="activo ? t.bgHex : '#ffffff'"
+                      [style.color]="activo ? t.textHex : '#94a3b8'"
+                      [style.border-color]="activo ? t.borderHex : '#cbd5e1'"
+                      [style.opacity]="activo ? '1' : '0.6'"
+                      style="display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 6px; border: 1.5px solid; font-size: 11.5px; font-weight: 700; cursor: pointer; transition: all 0.15s ease;">
+                      <span>{{ activo ? '✓' : '+' }}</span>
+                      <span>{{ t.codigo }}</span>
+                      <span style="font-weight: 500; font-size: 10.5px;">{{ t.nombre }}</span>
+                    </button>
+                  }
+                </div>
+              </div>
+
+              @if (nuevoServicioReglasPorCargo().length > 0) {
+                <div class="form-row" style="background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 10px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <label style="margin: 0; color: #0369a1; font-weight: 700;">
+                      👥 Desglose de Metas y Turnos por Cargo (Plantilla del Servicio):
+                    </label>
+                    <small style="color: #0284c7; font-size: 11px;">
+                      La suma actualiza automáticamente el total del servicio
+                    </small>
+                  </div>
+                  <div style="display: flex; flex-direction: column; gap: 8px;">
+                    @for (regla of nuevoServicioReglasPorCargo(); track regla.categoriaNombre) {
+                      <div style="background: #ffffff; border: 1px solid #e0f2fe; border-radius: 6px; padding: 8px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                          <strong style="font-size: 12px; color: #0f172a;">{{ regla.categoriaNombre }}</strong>
+                          <span style="font-size: 11px; color: #64748b; font-weight: 600;">
+                            {{ regla.empleadosCount || 0 }} en plantilla
+                          </span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 6px;">
+                          <div style="display: flex; align-items: center; gap: 4px;">
+                            <span style="font-size: 11px; color: #475569; min-width: 56px;">☀️ Mañana:</span>
+                            <input
+                              type="number"
+                              min="0"
+                              max="30"
+                              style="padding: 3px 6px; font-size: 12px; width: 100%;"
+                              [ngModel]="regla.reqManana"
+                              (ngModelChange)="actualizarMetaCargoForm(regla.categoriaNombre, 'reqManana', +$event)"
+                            />
+                          </div>
+                          <div style="display: flex; align-items: center; gap: 4px;">
+                            <span style="font-size: 11px; color: #475569; min-width: 56px;">🌤️ Tarde:</span>
+                            <input
+                              type="number"
+                              min="0"
+                              max="30"
+                              style="padding: 3px 6px; font-size: 12px; width: 100%;"
+                              [ngModel]="regla.reqTarde"
+                              (ngModelChange)="actualizarMetaCargoForm(regla.categoriaNombre, 'reqTarde', +$event)"
+                            />
+                          </div>
+                          <div style="display: flex; align-items: center; gap: 4px;">
+                            <span style="font-size: 11px; color: #475569; min-width: 56px;">🌙 Noche:</span>
+                            <input
+                              type="number"
+                              min="0"
+                              max="30"
+                              style="padding: 3px 6px; font-size: 12px; width: 100%;"
+                              [ngModel]="regla.reqNoche"
+                              (ngModelChange)="actualizarMetaCargoForm(regla.categoriaNombre, 'reqNoche', +$event)"
+                            />
+                          </div>
+                        </div>
+
+                        @if (nuevoServicioModalidadDias() === 'TODOS_GUARDIA_FDS' || nuevoServicioModalidadDias() === 'LUN_SAB_SIN_FESTIVOS') {
+                          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 6px; padding-top: 4px; border-top: 1px dashed #e2e8f0;">
+                            <div style="display: flex; align-items: center; gap: 4px;">
+                              <span style="font-size: 10.5px; color: #0369a1; min-width: 56px;">📅 M FDS:</span>
+                              <input
+                                type="number"
+                                min="0"
+                                max="30"
+                                style="padding: 2px 6px; font-size: 11.5px; width: 100%;"
+                                [ngModel]="regla.reqMananaFds"
+                                (ngModelChange)="actualizarMetaCargoForm(regla.categoriaNombre, 'reqMananaFds', +$event)"
+                              />
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 4px;">
+                              <span style="font-size: 10.5px; color: #0369a1; min-width: 56px;">📅 T FDS:</span>
+                              <input
+                                type="number"
+                                min="0"
+                                max="30"
+                                style="padding: 2px 6px; font-size: 11.5px; width: 100%;"
+                                [ngModel]="regla.reqTardeFds"
+                                (ngModelChange)="actualizarMetaCargoForm(regla.categoriaNombre, 'reqTardeFds', +$event)"
+                              />
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 4px;">
+                              <span style="font-size: 10.5px; color: #0369a1; min-width: 56px;">📅 N FDS:</span>
+                              <input
+                                type="number"
+                                min="0"
+                                max="30"
+                                style="padding: 2px 6px; font-size: 11.5px; width: 100%;"
+                                [ngModel]="regla.reqNocheFds"
+                                (ngModelChange)="actualizarMetaCargoForm(regla.categoriaNombre, 'reqNocheFds', +$event)"
+                              />
+                            </div>
+                          </div>
+                        }
+
+                        <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding-top: 4px;">
+                          <span style="font-size: 10.5px; color: #64748b; margin-right: 4px;">Turnos del cargo:</span>
+                          @for (tOp of turnosOperativosHabilitadosEnForm(); track tOp.codigo) {
+                            @let actCargo = esTurnoHabilitadoEnCargoForm(regla.categoriaNombre, tOp.codigo);
+                            <button
+                              type="button"
+                              (click)="alternarTurnoEnCargoForm(regla.categoriaNombre, tOp.codigo)"
+                              [title]="tOp.nombre + ' (' + tOp.horario + ')'"
+                              [style.background-color]="actCargo ? tOp.bgHex : '#f8fafc'"
+                              [style.color]="actCargo ? tOp.textHex : '#94a3b8'"
+                              [style.border-color]="actCargo ? tOp.borderHex : '#cbd5e1'"
+                              style="padding: 1px 6px; border-radius: 4px; border: 1px solid; font-size: 10.5px; font-weight: 700; cursor: pointer;">
+                              {{ actCargo ? '✓ ' : '' }}{{ tOp.codigo }}
+                            </button>
+                          }
+                        </div>
+                      </div>
+                    }
+                  </div>
+                </div>
+              }
               <div class="form-actions" style="display: flex; gap: 8px;">
                 <button class="btn-primary" (click)="guardarServicioAutonomo()">
                   💾 {{ servicioEditandoId() ? 'Guardar Cambios' : 'Crear Servicio' }}
@@ -1452,6 +1810,8 @@
                   <th>Código</th>
                   <th>Nombre del Servicio</th>
                   <th>Área</th>
+                  <th>Metas (M / T / N)</th>
+                  <th>Turnos Operativos</th>
                   <th>Personal</th>
                   <th>Servicios de Apoyo Vinculados</th>
                   <th>Acciones</th>
@@ -1466,6 +1826,42 @@
                     </td>
                     <td>
                       <span class="badge-tipo-asistencia">{{ srv.tipoAsistencia }}</span>
+                    </td>
+                    <td class="font-mono">
+                      <div style="display: flex; flex-direction: column; gap: 3px;">
+                        <span class="badge-personal" title="Mínimo requerido Lunes a Viernes: Mañana / Tarde / Noche">
+                          ☀️{{ srv.reqManana }} • 🌤️{{ srv.reqTarde }} • 🌙{{ srv.reqNoche }}
+                        </span>
+                        <small style="font-size: 10.5px; color: #64748b; font-weight: 600;">
+                          {{ etiquetaModalidadDias(srv.modalidadDias) }}
+                          @if (srv.modalidadDias === 'TODOS_GUARDIA_FDS' || srv.modalidadDias === 'LUN_SAB_SIN_FESTIVOS') {
+                            ({{ srv.reqMananaFds ?? srv.reqManana }}/{{ srv.reqTardeFds ?? srv.reqTarde }}/{{ srv.reqNocheFds ?? srv.reqNoche }})
+                          }
+                        </small>
+                        @if (srv.reglasPorCargo && srv.reglasPorCargo.length > 0) {
+                          <div style="display: flex; flex-direction: column; gap: 2px; margin-top: 2px; border-top: 1px dashed #e2e8f0; padding-top: 2px;">
+                            @for (rc of srv.reglasPorCargo; track rc.categoriaNombre) {
+                              <small style="font-size: 10px; color: #475569;">
+                                <strong>{{ rc.categoriaNombre }}:</strong> {{ rc.reqManana }}/{{ rc.reqTarde }}/{{ rc.reqNoche }}
+                              </small>
+                            }
+                          </div>
+                        }
+                      </div>
+                    </td>
+                    <td>
+                      <div style="display: flex; flex-wrap: wrap; gap: 4px; max-width: 240px;">
+                        @for (tOp of obtenerTurnosOperativosServicio(srv); track tOp.codigo) {
+                          <span
+                            class="mini-shift"
+                            [style.background-color]="tOp.bgHex"
+                            [style.color]="tOp.textHex"
+                            [title]="tOp.nombre + ' (' + tOp.horario + ')'"
+                            style="padding: 1px 6px; font-size: 10.5px;">
+                            {{ tOp.codigo }}
+                          </span>
+                        }
+                      </div>
                     </td>
                     <td>
                       <span class="badge-personal">{{ srv.empleadosCount || 0 }} colaboradores</span>
@@ -1597,13 +1993,29 @@
                     </div>
                   }
                 </div>
+
+                @if (turnoFormModoJornada() === 'HORARIO') {
+                  <div class="form-row">
+                    <label>🍽️ Tiempo de Almuerzo / Descanso Intermedio (No computable - Art. 167 CST):</label>
+                    <select
+                      [ngModel]="turnoFormMinutosAlmuerzo()"
+                      (ngModelChange)="turnoFormMinutosAlmuerzo.set(+$event)"
+                    >
+                      <option [ngValue]="0">0 min — Sin descuento (Turno asistencial continuo / Relevo interno)</option>
+                      <option [ngValue]="30">30 min (0.5 h descontadas de la jornada)</option>
+                      <option [ngValue]="60">60 min (1.0 h descontada — Jornada partida / Administrativo)</option>
+                      <option [ngValue]="90">90 min (1.5 h descontadas de la jornada)</option>
+                      <option [ngValue]="120">120 min (2.0 h descontadas de la jornada)</option>
+                    </select>
+                  </div>
+                }
               }
 
               <!-- Resumen del cálculo automático de horas -->
               <div class="auto-calc-banner">
                 <div>
-                  <strong>⏱️ Total: {{ calc.ordinarias }}h</strong>
-                  <span class="calc-sub">({{ calc.horarioTexto }})</span>
+                  <strong>⏱️ Total Computable: {{ calc.ordinarias }}h</strong>
+                  <span class="calc-sub">({{ calc.horarioTexto }}@if (calc.minutosAlmuerzo > 0) { • 🍽️ -{{ calc.minutosAlmuerzo }} min almuerzo })</span>
                 </div>
                 <div class="calc-pills">
                   <span class="calc-pill-day">☀️ Diurnas (06:00-19:00): <strong>{{ calc.diurnas }}h</strong></span>
@@ -1711,14 +2123,19 @@
                       </td>
                       <td class="col-reglas">
                         <div class="reglas-tags-wrap">
+                          @if (t.minutosAlmuerzo && t.minutosAlmuerzo > 0) {
+                            <span class="badge-custom-sm" title="Tiempo de almuerzo no computable descontado de la jornada (Art. 167 CST)">
+                              🍽️ -{{ t.minutosAlmuerzo }}m Almuerzo
+                            </span>
+                          }
                           @if (t.esNocturnoPesado) {
                             <span class="badge-nuevo" title="Exige descanso Saliente o Libre al día siguiente">🌙 Post-Turno</span>
                           }
                           @if (t.descuentaBancoHoras) {
                             <span class="badge-banco-mini" title="Amortiza 8h del Banco de Horas">🏦 -8h Banco</span>
                           }
-                          @if (!t.esNocturnoPesado && !t.descuentaBancoHoras && !t.esAusencia) {
-                            <span class="text-muted-sm">Estándar</span>
+                          @if (!t.esNocturnoPesado && !t.descuentaBancoHoras && !t.esAusencia && (!t.minutosAlmuerzo || t.minutosAlmuerzo === 0)) {
+                            <span class="text-muted-sm">Continuo</span>
                           }
                         </div>
                       </td>
@@ -1845,22 +2262,24 @@
     <div class="modal-backdrop" (click)="modalIcalAbierto.set(false)">
       <div class="modal-box" (click)="$event.stopPropagation()">
         <div class="modal-header">
-          <h3>📲 Vincular Calendario con el Celular</h3>
+          <h3>📲 Vincular Calendario — {{ enlaceIcalEmpleadoNombre() }}</h3>
           <button (click)="modalIcalAbierto.set(false)">✕</button>
         </div>
         <div class="modal-body">
           <p>
-            Copia este enlace en tu aplicación de calendario (Google Calendar, iPhone o Outlook) para ver tus turnos en el teléfono:
+            Copia tu enlace personal único en tu aplicación de calendario (<strong>Google Calendar → Añadir desde URL</strong>, <strong>iPhone</strong> o <strong>Outlook</strong>):
           </p>
-          <div class="ical-box">
-            <code>webcal://intranet.hospital.gov.co/turnos/api/v1/calendario/feed/9f8e7d6c-5b4a-4321-890a-bcdef1234567.ics</code>
+          <div class="ical-box" style="word-break: break-all;">
+            <code>{{ enlaceIcalHttp() || 'Generando enlace único en PostgreSQL...' }}</code>
           </div>
           <ul class="ical-features">
-            <li>✅ Se actualiza automáticamente cuando se aprueba un cambio de turno.</li>
-            <li>✅ Consulta tus horarios desde el celular en cualquier momento.</li>
+            <li>✅ Sincroniza automáticamente todos los meses en estado <strong>PUBLICADO</strong> o <strong>CERRADO</strong> (oculta borradores en construcción).</li>
+            <li>✅ Se actualiza solo cuando se publica un mes nuevo o se aprueba una permuta.</li>
+            <li>✅ Incluye horarios exactos de entrada y salida (y novedades VAC / INC / COMP).</li>
           </ul>
-          <div class="modal-footer">
-            <button class="btn-primary" (click)="copiarEnlaceIcal()">📋 Copiar Enlace</button>
+          <div class="modal-footer" style="display: flex; gap: 10px; justify-content: flex-end;">
+            <button class="btn-outline" (click)="descargarArchivoIcal()">⬇️ Descargar archivo .ics</button>
+            <button class="btn-primary" (click)="copiarEnlaceIcal()">📋 Copiar Enlace al Portapapeles</button>
           </div>
         </div>
       </div>
@@ -1892,3 +2311,4 @@
   }
   </main>
 </div>
+}

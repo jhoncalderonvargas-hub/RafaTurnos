@@ -10,6 +10,7 @@ async function bootstrap() {
   app.enableCors({
     origin: '*',
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    exposedHeaders: ['x-renewed-token'],
   });
 
   const port = process.env.PORT || 3000;

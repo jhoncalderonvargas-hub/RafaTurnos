@@ -29,13 +29,22 @@ function normalizarTipoAsistencia(tipo: any): any {
 export class ServiciosAdminController {
   constructor(private readonly prisma: PrismaService) {}
 
-  // 1. Listar todos los servicios con sus servicios hermanos enlazados
+  // 1. Listar todos los servicios con sus servicios hermanos enlazados y desglose por cargo
   @Get()
   async listarServicios() {
     const servicios = await this.prisma.servicio.findMany({
       include: {
         serviciosHermanosOrigen: {
           include: { servicioHermano: true },
+        },
+        coberturas: {
+          include: { categoria: true },
+        },
+        turnosHabilitados: {
+          include: { categoria: true, tipoTurno: true },
+        },
+        empleadosBase: {
+          include: { categoria: true },
         },
         _count: {
           select: { empleadosBase: true },
@@ -44,22 +53,91 @@ export class ServiciosAdminController {
       orderBy: { nombre: 'asc' },
     });
 
-    return servicios.map((s) => ({
-      id: s.id,
-      codigo: s.codigo,
-      nombre: s.nombre,
-      tipoAsistencia: s.tipoAsistencia,
-      intranetId: s.intranetId,
-      reqManana: 4,
-      reqTarde: 4,
-      reqNoche: 2,
-      empleadosCount: s._count.empleadosBase,
-      hermanos: s.serviciosHermanosOrigen.map((sh) => ({
-        id: sh.servicioHermano.id,
-        codigo: sh.servicioHermano.codigo,
-        nombre: sh.servicioHermano.nombre,
-      })),
-    }));
+    return servicios.map((s) => {
+      const turnosSrv =
+        Array.isArray((s as any).turnosHabilitadosCodigos) && (s as any).turnosHabilitadosCodigos.length > 0
+          ? (s as any).turnosHabilitadosCodigos
+          : ['M8', 'T8', 'N8', 'M6', 'T6', 'N12', 'D12', 'G24', 'ADM', 'MD', 'AP', 'DISP', 'S', 'L', 'COMP', 'VAC', 'INC'];
+
+      // Agrupar turnos habilitados por categoría desde la tabla servicios_turnos_habilitados
+      const mapaTurnosPorCat = new Map<string, string[]>();
+      for (const th of s.turnosHabilitados || []) {
+        if (!th.habilitado || !th.categoria || !th.tipoTurno) continue;
+        const catNombre = th.categoria.nombre;
+        const lista = mapaTurnosPorCat.get(catNombre) || [];
+        if (!lista.includes(th.tipoTurno.codigo)) {
+          lista.push(th.tipoTurno.codigo);
+        }
+        mapaTurnosPorCat.set(catNombre, lista);
+      }
+
+      // Contar empleados por categoría en este servicio
+      const conteoPorCat = new Map<string, { id: string; nombre: string; count: number }>();
+      for (const emp of s.empleadosBase || []) {
+        if (!emp.categoria) continue;
+        const prev = conteoPorCat.get(emp.categoria.nombre);
+        conteoPorCat.set(emp.categoria.nombre, {
+          id: emp.categoria.id,
+          nombre: emp.categoria.nombre,
+          count: (prev?.count || 0) + 1,
+        });
+      }
+
+      // Construir reglasPorCargo combinando requerimientos_cobertura y las categorías reales del servicio
+      const mapaCoberturas = new Map<string, any>();
+      for (const cob of s.coberturas || []) {
+        if (!cob.categoria) continue;
+        mapaCoberturas.set(cob.categoria.nombre, cob);
+      }
+
+      const nombresCategorias = Array.from(
+        new Set([...Array.from(conteoPorCat.keys()), ...Array.from(mapaCoberturas.keys())])
+      );
+
+      const reglasPorCargo = nombresCategorias.map((catNombre) => {
+        const cob = mapaCoberturas.get(catNombre);
+        const infoCat = conteoPorCat.get(catNombre);
+        const turnosCat = mapaTurnosPorCat.get(catNombre);
+        const reqM = (cob as any)?.reqManana ?? 1;
+        const reqT = (cob as any)?.reqTarde ?? 1;
+        const reqN = (cob as any)?.reqNoche ?? 0;
+        return {
+          categoriaId: cob?.categoriaId || infoCat?.id,
+          categoriaNombre: catNombre,
+          empleadosCount: infoCat?.count || 0,
+          reqManana: reqM,
+          reqTarde: reqT,
+          reqNoche: reqN,
+          reqMananaFds: (cob as any)?.reqMananaFds ?? reqM,
+          reqTardeFds: (cob as any)?.reqTardeFds ?? reqT,
+          reqNocheFds: (cob as any)?.reqNocheFds ?? reqN,
+          turnosHabilitados: turnosCat && turnosCat.length > 0 ? turnosCat : turnosSrv,
+        };
+      });
+
+      return {
+        id: s.id,
+        codigo: s.codigo,
+        nombre: s.nombre,
+        tipoAsistencia: s.tipoAsistencia,
+        intranetId: s.intranetId,
+        reqManana: s.reqManana ?? 4,
+        reqTarde: s.reqTarde ?? 4,
+        reqNoche: s.reqNoche ?? 2,
+        modalidadDias: (s as any).modalidadDias || 'TODOS_24_7',
+        reqMananaFds: (s as any).reqMananaFds ?? s.reqManana ?? 4,
+        reqTardeFds: (s as any).reqTardeFds ?? s.reqTarde ?? 4,
+        reqNocheFds: (s as any).reqNocheFds ?? s.reqNoche ?? 2,
+        turnosHabilitados: turnosSrv,
+        reglasPorCargo,
+        empleadosCount: s._count.empleadosBase,
+        hermanos: s.serviciosHermanosOrigen.map((sh) => ({
+          id: sh.servicioHermano.id,
+          codigo: sh.servicioHermano.codigo,
+          nombre: sh.servicioHermano.nombre,
+        })),
+      };
+    });
   }
 
   // 1.1 Listar todos los empleados con sus categorías y saldos
@@ -98,12 +176,15 @@ export class ServiciosAdminController {
       horasOrdinarias: number;
       horasDiurnas: number;
       horasNocturnas: number;
+      minutosAlmuerzo?: number;
       colorHex: string;
       descuentaBancoHoras?: boolean;
       esNocturnoPesado?: boolean;
+      visibleEnPaleta?: boolean;
     }
   ) {
     const cod = data.codigo.trim().toUpperCase();
+    const minAlmuerzo = data.minutosAlmuerzo !== undefined ? Math.max(0, Number(data.minutosAlmuerzo) || 0) : 0;
     return this.prisma.tipoTurno.upsert({
       where: { codigo: cod },
       create: {
@@ -114,10 +195,12 @@ export class ServiciosAdminController {
         horasOrdinarias: Number(data.horasOrdinarias) || 0,
         horasDiurnas: Number(data.horasDiurnas) || 0,
         horasNocturnas: Number(data.horasNocturnas) || 0,
+        minutosAlmuerzo: minAlmuerzo,
         colorHex: data.colorHex || '#E0F2FE',
         descuentaBancoHoras: !!data.descuentaBancoHoras,
         esNocturnoPesado: !!data.esNocturnoPesado,
-      },
+        visibleEnPaleta: data.visibleEnPaleta !== undefined ? !!data.visibleEnPaleta : true,
+      } as any,
       update: {
         nombre: data.nombre.trim(),
         horaInicio: data.horaInicio,
@@ -125,11 +208,116 @@ export class ServiciosAdminController {
         horasOrdinarias: Number(data.horasOrdinarias) || 0,
         horasDiurnas: Number(data.horasDiurnas) || 0,
         horasNocturnas: Number(data.horasNocturnas) || 0,
+        minutosAlmuerzo: minAlmuerzo,
         colorHex: data.colorHex || '#E0F2FE',
         descuentaBancoHoras: !!data.descuentaBancoHoras,
         esNocturnoPesado: !!data.esNocturnoPesado,
-      },
+        ...(data.visibleEnPaleta !== undefined ? { visibleEnPaleta: !!data.visibleEnPaleta } : {}),
+      } as any,
     });
+  }
+
+  private async sincronizarReglasPorCargoEnDb(
+    servicioId: string,
+    turnosServicio: string[],
+    reglasPorCargo?: {
+      categoriaId?: string;
+      categoriaNombre: string;
+      reqManana?: number;
+      reqTarde?: number;
+      reqNoche?: number;
+      reqMananaFds?: number;
+      reqTardeFds?: number;
+      reqNocheFds?: number;
+      turnosHabilitados?: string[];
+    }[]
+  ) {
+    const [categoriasDb, tiposTurnoDb] = await Promise.all([
+      this.prisma.categoriaProfesional.findMany(),
+      this.prisma.tipoTurno.findMany(),
+    ]);
+
+    const mapaCatPorNombre = new Map(categoriasDb.map((c) => [c.nombre.trim().toLowerCase(), c.id]));
+    const mapaTurnoPorCod = new Map(tiposTurnoDb.map((t) => [t.codigo.trim().toUpperCase(), t.id]));
+
+    if (Array.isArray(reglasPorCargo) && reglasPorCargo.length > 0) {
+      for (const regla of reglasPorCargo) {
+        let catId = regla.categoriaId || mapaCatPorNombre.get((regla.categoriaNombre || '').trim().toLowerCase());
+        if (!catId && regla.categoriaNombre) {
+          const creada = await this.prisma.categoriaProfesional.upsert({
+            where: { nombre: regla.categoriaNombre.trim() },
+            update: {},
+            create: { nombre: regla.categoriaNombre.trim() },
+          });
+          catId = creada.id;
+          mapaCatPorNombre.set(creada.nombre.toLowerCase(), creada.id);
+        }
+        if (!catId) continue;
+
+        const reqM = Math.max(0, Number(regla.reqManana) || 0);
+        const reqT = Math.max(0, Number(regla.reqTarde) || 0);
+        const reqN = Math.max(0, Number(regla.reqNoche) || 0);
+        const reqMFds = regla.reqMananaFds !== undefined ? Math.max(0, Number(regla.reqMananaFds) || 0) : reqM;
+        const reqTFds = regla.reqTardeFds !== undefined ? Math.max(0, Number(regla.reqTardeFds) || 0) : reqT;
+        const reqNFds = regla.reqNocheFds !== undefined ? Math.max(0, Number(regla.reqNocheFds) || 0) : reqN;
+
+        await (this.prisma.requerimientoCobertura as any).upsert({
+          where: {
+            servicioId_categoriaId: {
+              servicioId,
+              categoriaId: catId,
+            },
+          },
+          update: {
+            cantidadMinima: Math.max(1, reqM),
+            reqManana: reqM,
+            reqTarde: reqT,
+            reqNoche: reqN,
+            reqMananaFds: reqMFds,
+            reqTardeFds: reqTFds,
+            reqNocheFds: reqNFds,
+          },
+          create: {
+            servicioId,
+            categoriaId: catId,
+            cantidadMinima: Math.max(1, reqM),
+            aplicaFestivoDom: true,
+            reqManana: reqM,
+            reqTarde: reqT,
+            reqNoche: reqN,
+            reqMananaFds: reqMFds,
+            reqTardeFds: reqTFds,
+            reqNocheFds: reqNFds,
+          },
+        });
+
+        const codigosCat =
+          Array.isArray(regla.turnosHabilitados) && regla.turnosHabilitados.length > 0
+            ? regla.turnosHabilitados.map((c) => String(c).trim().toUpperCase())
+            : turnosServicio;
+
+        await this.prisma.servicioTurnoHabilitado.deleteMany({
+          where: { servicioId, categoriaId: catId },
+        });
+
+        const filasTurnos = codigosCat
+          .map((cod) => mapaTurnoPorCod.get(cod))
+          .filter((id): id is string => Boolean(id))
+          .map((tipoTurnoId) => ({
+            servicioId,
+            categoriaId: catId!,
+            tipoTurnoId,
+            habilitado: true,
+          }));
+
+        if (filasTurnos.length > 0) {
+          await this.prisma.servicioTurnoHabilitado.createMany({
+            data: filasTurnos,
+            skipDuplicates: true,
+          });
+        }
+      }
+    }
   }
 
   // 2. Crear un servicio nuevo (autónomo en Rafa Turnos)
@@ -141,6 +329,15 @@ export class ServiciosAdminController {
       nombre: string;
       tipoAsistencia: any;
       intranetId?: string;
+      reqManana?: number;
+      reqTarde?: number;
+      reqNoche?: number;
+      modalidadDias?: string;
+      reqMananaFds?: number;
+      reqTardeFds?: number;
+      reqNocheFds?: number;
+      turnosHabilitados?: string[];
+      reglasPorCargo?: any[];
     }
   ) {
     const cod = data.codigo?.trim().toUpperCase();
@@ -157,14 +354,33 @@ export class ServiciosAdminController {
       throw new ConflictException(`El código de servicio '${cod}' ya se encuentra registrado por '${existente.nombre}'.`);
     }
 
-    return this.prisma.servicio.create({
+    const turnosLimpios = Array.isArray(data.turnosHabilitados)
+      ? Array.from(new Set(data.turnosHabilitados.map((t) => String(t).trim().toUpperCase()).filter(Boolean)))
+      : ['M8', 'T8', 'N8', 'D12', 'G24', 'S', 'L', 'COMP', 'VAC', 'INC'];
+
+    const reqM = data.reqManana !== undefined ? Math.max(0, Number(data.reqManana) || 0) : 4;
+    const reqT = data.reqTarde !== undefined ? Math.max(0, Number(data.reqTarde) || 0) : 4;
+    const reqN = data.reqNoche !== undefined ? Math.max(0, Number(data.reqNoche) || 0) : 2;
+
+    const creado = await this.prisma.servicio.create({
       data: {
         codigo: cod,
         nombre: nom,
         tipoAsistencia: normalizarTipoAsistencia(data.tipoAsistencia),
         intranetId: data.intranetId,
-      },
+        reqManana: reqM,
+        reqTarde: reqT,
+        reqNoche: reqN,
+        modalidadDias: data.modalidadDias || 'TODOS_24_7',
+        reqMananaFds: data.reqMananaFds !== undefined ? Math.max(0, Number(data.reqMananaFds) || 0) : reqM,
+        reqTardeFds: data.reqTardeFds !== undefined ? Math.max(0, Number(data.reqTardeFds) || 0) : reqT,
+        reqNocheFds: data.reqNocheFds !== undefined ? Math.max(0, Number(data.reqNocheFds) || 0) : reqN,
+        turnosHabilitadosCodigos: turnosLimpios,
+      } as any,
     });
+
+    await this.sincronizarReglasPorCargoEnDb(creado.id, turnosLimpios, data.reglasPorCargo);
+    return creado;
   }
 
   // 2.1 Actualizar datos de un servicio existente
@@ -176,6 +392,15 @@ export class ServiciosAdminController {
       codigo: string;
       nombre: string;
       tipoAsistencia: any;
+      reqManana?: number;
+      reqTarde?: number;
+      reqNoche?: number;
+      modalidadDias?: string;
+      reqMananaFds?: number;
+      reqTardeFds?: number;
+      reqNocheFds?: number;
+      turnosHabilitados?: string[];
+      reglasPorCargo?: any[];
     }
   ) {
     const cod = data.codigo?.trim().toUpperCase();
@@ -195,14 +420,34 @@ export class ServiciosAdminController {
       throw new ConflictException(`El código '${cod}' ya está en uso por otro servicio (${enConflicto.nombre}).`);
     }
 
-    return this.prisma.servicio.update({
+    const turnosLimpios = Array.isArray(data.turnosHabilitados)
+      ? Array.from(new Set(data.turnosHabilitados.map((t) => String(t).trim().toUpperCase()).filter(Boolean)))
+      : undefined;
+
+    const actualizado = await this.prisma.servicio.update({
       where: { id },
       data: {
         codigo: cod,
         nombre: nom,
         tipoAsistencia: normalizarTipoAsistencia(data.tipoAsistencia),
-      },
+        ...(data.reqManana !== undefined ? { reqManana: Math.max(0, Number(data.reqManana) || 0) } : {}),
+        ...(data.reqTarde !== undefined ? { reqTarde: Math.max(0, Number(data.reqTarde) || 0) } : {}),
+        ...(data.reqNoche !== undefined ? { reqNoche: Math.max(0, Number(data.reqNoche) || 0) } : {}),
+        ...(data.modalidadDias !== undefined ? { modalidadDias: data.modalidadDias } : {}),
+        ...(data.reqMananaFds !== undefined ? { reqMananaFds: Math.max(0, Number(data.reqMananaFds) || 0) } : {}),
+        ...(data.reqTardeFds !== undefined ? { reqTardeFds: Math.max(0, Number(data.reqTardeFds) || 0) } : {}),
+        ...(data.reqNocheFds !== undefined ? { reqNocheFds: Math.max(0, Number(data.reqNocheFds) || 0) } : {}),
+        ...(turnosLimpios !== undefined ? { turnosHabilitadosCodigos: turnosLimpios } : {}),
+      } as any,
     });
+
+    await this.sincronizarReglasPorCargoEnDb(
+      id,
+      turnosLimpios || (actualizado as any).turnosHabilitadosCodigos || ['M8', 'T8', 'N8'],
+      data.reglasPorCargo
+    );
+
+    return actualizado;
   }
 
   // 2.2 Eliminar un servicio si no tiene restricciones de integridad
@@ -245,6 +490,10 @@ export class ServiciosAdminController {
     });
 
     await this.prisma.servicioTurnoHabilitado.deleteMany({
+      where: { servicioId: id },
+    });
+
+    await this.prisma.requerimientoCobertura.deleteMany({
       where: { servicioId: id },
     });
 

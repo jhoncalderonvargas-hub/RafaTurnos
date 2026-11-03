@@ -36,6 +36,14 @@ model Servicio {
   codigo                 String                   @unique
   nombre                 String
   tipoAsistencia         TipoAsistencia
+  reqManana              Int                      @default(4)
+  reqTarde               Int                      @default(4)
+  reqNoche               Int                      @default(2)
+  modalidadDias          String                   @default("TODOS_24_7")
+  reqMananaFds           Int                      @default(4)
+  reqTardeFds            Int                      @default(4)
+  reqNocheFds            Int                      @default(2)
+  turnosHabilitadosCodigos String[]               @default(["M8", "T8", "N8", "M6", "T6", "N12", "D12", "G24", "ADM", "MD", "AP", "DISP", "S", "L", "COMP", "VAC", "INC"])
   empleadosBase          Empleado[]               @relation("ServicioBase")
   cuadrantes             Cuadrante[]
   asignacionesEjecutadas AsignacionTurno[]        @relation("ServicioEjecutor")
@@ -117,9 +125,11 @@ model TipoTurno {
   horasOrdinarias     Float
   horasDiurnas        Float
   horasNocturnas      Float
+  minutosAlmuerzo     Int                       @default(0) // Minutos de almuerzo no computables (Art. 167 CST)
   colorHex            String
   descuentaBancoHoras Boolean                   @default(false)
   esNocturnoPesado    Boolean                   @default(false) // Obliga a S o L al día siguiente
+  visibleEnPaleta     Boolean                   @default(true)
   asignaciones        AsignacionTurno[]
   coberturas          RequerimientoCobertura[]
   turnosHabilitados   ServicioTurnoHabilitado[]
@@ -130,14 +140,21 @@ model TipoTurno {
 model RequerimientoCobertura {
   id               String               @id @default(uuid())
   servicioId       String
-  servicio         Servicio             @relation(fields: [servicioId], references: [id])
+  servicio         Servicio             @relation(fields: [servicioId], references: [id], onDelete: Cascade)
   categoriaId      String
-  categoria        CategoriaProfesional @relation(fields: [categoriaId], references: [id])
-  tipoTurnoId      String
-  tipoTurno        TipoTurno            @relation(fields: [tipoTurnoId], references: [id])
-  cantidadMinima   Int
+  categoria        CategoriaProfesional @relation(fields: [categoriaId], references: [id], onDelete: Cascade)
+  tipoTurnoId      String?
+  tipoTurno        TipoTurno?           @relation(fields: [tipoTurnoId], references: [id], onDelete: SetNull)
+  cantidadMinima   Int                  @default(1)
   aplicaFestivoDom Boolean              @default(false)
+  reqManana        Int                  @default(1)
+  reqTarde         Int                  @default(1)
+  reqNoche         Int                  @default(1)
+  reqMananaFds     Int                  @default(1)
+  reqTardeFds      Int                  @default(1)
+  reqNocheFds      Int                  @default(1)
 
+  @@unique([servicioId, categoriaId])
   @@map("requerimientos_cobertura")
 }
 

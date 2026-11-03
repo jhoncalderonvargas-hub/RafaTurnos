@@ -1,4 +1,15 @@
-import { Body, Controller, Get, Injectable, Module, Post, Put, Query } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  ConflictException,
+  Controller,
+  Get,
+  Injectable,
+  Module,
+  Post,
+  Put,
+  Query,
+} from '@nestjs/common';
 import { EstadoCuadrante } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { FestivosColombiaService } from '../festivos/festivos-colombia.service';
@@ -178,11 +189,15 @@ export class CuadrantesController {
 
     const [cuadrantes, asignaciones, saldos] = await Promise.all([
       this.prisma.cuadrante.findMany({
-        where: { anio },
+        where: {
+          OR: [{ anio }, { anio: anio - 1, mes: 12 }],
+        },
       }),
       this.prisma.asignacionTurno.findMany({
         where: {
-          cuadrante: { anio },
+          cuadrante: {
+            OR: [{ anio }, { anio: anio - 1, mes: 12 }],
+          },
         },
         include: {
           tipoTurno: true,
@@ -282,6 +297,17 @@ export class CuadrantesController {
       },
     });
 
+    // Al publicar el cuadrante, congelar la foto oficial del Turno Previsto (codigo_previsto = turno actual)
+    if (dto.estado === 'PUBLICADO') {
+      await this.prisma.$executeRaw`
+        UPDATE "asignaciones_turno" a
+        SET "codigo_previsto" = CASE WHEN t."codigo" = 'BLANCO' THEN '' ELSE t."codigo" END
+        FROM "tipos_turno" t
+        WHERE a."tipo_turno_id" = t."id"
+          AND a."cuadrante_id" = ${cuadrante.id}::uuid
+      `;
+    }
+
     if (
       dto.estado === 'CERRADO_NOMINA' &&
       Array.isArray(dto.saldosConsolidados) &&
@@ -336,6 +362,21 @@ export class CuadrantesController {
     const anio = Number(dto.anio);
     const mes = Number(dto.mes);
     const dia = Number(dto.dia);
+    const fechaUtc = new Date(Date.UTC(anio, mes - 1, dia));
+
+    // Validar protección por novedad oficial de Intranet (VAC, INC, LIC)
+    const novedadActiva = await this.prisma.novedadAusencia.findFirst({
+      where: {
+        empleadoId: dto.empleadoId,
+        fechaInicio: { lte: fechaUtc },
+        fechaFin: { gte: fechaUtc },
+      },
+    });
+    if (novedadActiva && dto.codigo !== novedadActiva.tipo && dto.codigo !== '') {
+      throw new ConflictException(
+        `Celda bloqueada: El colaborador tiene una novedad oficial de Intranet activa (${novedadActiva.tipo}) en esta fecha.`
+      );
+    }
 
     const cuadrante = await this.prisma.cuadrante.upsert({
       where: {
@@ -355,7 +396,6 @@ export class CuadrantesController {
     });
 
     const tipoTurnoId = await this.resolverTipoTurnoId(dto.codigo);
-    const fechaUtc = new Date(Date.UTC(anio, mes - 1, dia));
 
     const asignacion = await this.prisma.asignacionTurno.upsert({
       where: {
@@ -387,6 +427,7 @@ export class CuadrantesController {
 
   /**
    * 4. Guarda en lote múltiples celdas de un cuadrante (usado en Dejar en Blanco y Auto-Balancear Huecos).
+   * Respeta y protege de forma estricta las celdas con novedades oficiales de Intranet.
    */
   @Put('lote')
   async guardarLote(@Body() dto: GuardarLoteCuadranteDto) {
@@ -410,15 +451,45 @@ export class CuadrantesController {
       },
     });
 
+    // Consultar novedades del mes para proteger las celdas oficiales de Intranet
+    const primerDiaMes = new Date(Date.UTC(anio, mes - 1, 1));
+    const ultimoDiaMes = new Date(Date.UTC(anio, mes, 0, 23, 59, 59));
+    const novedadesMes = await this.prisma.novedadAusencia.findMany({
+      where: {
+        fechaInicio: { lte: ultimoDiaMes },
+        fechaFin: { gte: primerDiaMes },
+      },
+    });
+
+    const mapaNovedadesDia = new Map<string, string>();
+    for (const n of novedadesMes) {
+      const cur = new Date(n.fechaInicio);
+      while (cur <= n.fechaFin) {
+        if (cur.getUTCFullYear() === anio && cur.getUTCMonth() + 1 === mes) {
+          mapaNovedadesDia.set(`${n.empleadoId}_${cur.getUTCDate()}`, n.tipo);
+        }
+        cur.setUTCDate(cur.getUTCDate() + 1);
+      }
+    }
+
+    // Filtrar celdas: si el empleado tiene novedad oficial activa ese día, no se sobreescribe
+    const celdasFiltradas = dto.celdas.filter((c) => {
+      const tipoNov = mapaNovedadesDia.get(`${c.empleadoId}_${c.dia}`);
+      if (tipoNov && c.codigo !== tipoNov) {
+        return false;
+      }
+      return true;
+    });
+
     // Asegurar que todos los códigos de turno del lote estén resueltos en caché
-    const codigosUnicos = Array.from(new Set(dto.celdas.map((c) => c.codigo || '')));
+    const codigosUnicos = Array.from(new Set(celdasFiltradas.map((c) => c.codigo || '')));
     const mapaIds = new Map<string, string>();
     for (const cod of codigosUnicos) {
       mapaIds.set(cod, await this.resolverTipoTurnoId(cod));
     }
 
     await this.prisma.$transaction(
-      dto.celdas.map((c) => {
+      celdasFiltradas.map((c) => {
         const fechaUtc = new Date(Date.UTC(anio, mes - 1, Number(c.dia)));
         const tipoTurnoId = mapaIds.get(c.codigo || '')!;
         return this.prisma.asignacionTurno.upsert({
@@ -448,7 +519,203 @@ export class CuadrantesController {
       })
     );
 
-    return { ok: true, totalGuardadas: dto.celdas.length };
+    return { ok: true, totalGuardadas: celdasFiltradas.length };
+  }
+
+  /**
+   * 5. Consulta de Novedades Oficiales persistidas en PostgreSQL (Caché local de Intranet)
+   */
+  @Get('novedades')
+  async obtenerNovedades(
+    @Query('anio') anioStr?: string,
+    @Query('mes') mesStr?: string
+  ) {
+    const anio = Number(anioStr) || 2026;
+    const mes = Number(mesStr) || 11;
+    const primerDia = new Date(Date.UTC(anio, mes - 1, 1));
+    const ultimoDia = new Date(Date.UTC(anio, mes, 0, 23, 59, 59));
+
+    const novedades = await this.prisma.novedadAusencia.findMany({
+      where: {
+        fechaInicio: { lte: ultimoDia },
+        fechaFin: { gte: primerDia },
+      },
+      include: {
+        empleado: {
+          include: {
+            servicioBase: true,
+            categoria: true,
+          },
+        },
+      },
+      orderBy: { fechaInicio: 'asc' },
+    });
+
+    return novedades.map((n) => ({
+      id: n.id,
+      empleadoId: n.empleadoId,
+      empleadoNombre: n.empleado.nombre,
+      empleadoDocumento: n.empleado.documento,
+      servicioId: n.empleado.servicioBaseId,
+      servicioCodigo: n.empleado.servicioBase?.codigo,
+      servicioNombre: n.empleado.servicioBase?.nombre,
+      cargo: n.empleado.categoria?.nombre,
+      tipo: n.tipo,
+      fechaInicio: n.fechaInicio.toISOString().substring(0, 10),
+      fechaFin: n.fechaFin.toISOString().substring(0, 10),
+      codigoCie10: n.codigoCie10,
+    }));
+  }
+
+  /**
+   * 6. Sincronización de Novedades desde la Intranet Hospitalaria (Simulador puerto 4300 / API real)
+   * Consulta las ausencias oficiales, las guarda en novedades_ausencia y bloquea automáticamente las celdas en el cuadrante.
+   */
+  @Post('sincronizar-novedades')
+  async sincronizarNovedadesIntranet(
+    @Body() body?: { anio?: number; mes?: number; intranetUrl?: string }
+  ) {
+    const anio = Number(body?.anio) || 2026;
+    const mes = Number(body?.mes) || 11;
+    const intranetUrl =
+      body?.intranetUrl || process.env.INTRANET_API_URL || 'http://localhost:4300';
+
+    let items: any[] = [];
+    try {
+      const resp = await fetch(`${intranetUrl}/api/intranet/novedades?mes=${mes}&anio=${anio}`);
+      if (!resp.ok) {
+        throw new BadRequestException(`Intranet respondió con código ${resp.status}`);
+      }
+      items = await resp.json();
+    } catch (err: any) {
+      throw new BadRequestException(
+        `No se pudo conectar a la Intranet en ${intranetUrl}: ${err.message}`
+      );
+    }
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return {
+        ok: true,
+        mensaje: 'No se encontraron novedades en Intranet para este periodo.',
+        totalSincronizadas: 0,
+        celdasBloqueadas: 0,
+        novedades: [],
+      };
+    }
+
+    let celdasBloqueadas = 0;
+    const novedadesProcesadas: any[] = [];
+
+    for (const item of items) {
+      const doc = String(item.empleadoDocumento || '').trim();
+      if (!doc) continue;
+
+      const emp = await this.prisma.empleado.findUnique({
+        where: { documento: doc },
+        include: { servicioBase: true, categoria: true },
+      });
+      if (!emp) continue;
+
+      const tipoNov = String(item.tipoNovedad || 'VAC').trim().toUpperCase();
+      const fInicio = new Date(`${item.fechaInicio}T00:00:00.000Z`);
+      const fFin = new Date(`${item.fechaFin}T23:59:59.999Z`);
+
+      // Eliminar registros previos idénticos para no duplicar en reintentos
+      await this.prisma.novedadAusencia.deleteMany({
+        where: {
+          empleadoId: emp.id,
+          tipo: tipoNov,
+          fechaInicio: fInicio,
+        },
+      });
+
+      await this.prisma.novedadAusencia.create({
+        data: {
+          empleadoId: emp.id,
+          tipo: tipoNov,
+          fechaInicio: fInicio,
+          fechaFin: fFin,
+          codigoCie10: item.codigoCie10 || null,
+        },
+      });
+
+      // Resolver el tipo de turno en PostgreSQL (VAC, INC, LIC)
+      const tipoTurnoId = await this.resolverTipoTurnoId(tipoNov);
+
+      // Asegurar que el cuadrante del servicio del empleado exista
+      const cuadrante = await this.prisma.cuadrante.upsert({
+        where: {
+          anio_mes_servicioId: {
+            anio,
+            mes,
+            servicioId: emp.servicioBaseId,
+          },
+        },
+        update: {},
+        create: {
+          anio,
+          mes,
+          servicioId: emp.servicioBaseId,
+          estado: EstadoCuadrante.BORRADOR,
+        },
+      });
+
+      // Bloquear cada día del rango dentro de este mes
+      const cur = new Date(fInicio);
+      while (cur <= fFin) {
+        if (cur.getUTCFullYear() === anio && cur.getUTCMonth() + 1 === mes) {
+          const dia = cur.getUTCDate();
+          const fechaUtc = new Date(Date.UTC(anio, mes - 1, dia));
+
+          await this.prisma.asignacionTurno.upsert({
+            where: {
+              empleadoId_fecha: {
+                empleadoId: emp.id,
+                fecha: fechaUtc,
+              },
+            },
+            update: {
+              cuadranteId: cuadrante.id,
+              tipoTurnoId,
+              servicioEjecutorId: emp.servicioBaseId,
+              esRotacion: false,
+              codigoPrevisto: tipoNov,
+            },
+            create: {
+              cuadranteId: cuadrante.id,
+              empleadoId: emp.id,
+              tipoTurnoId,
+              servicioEjecutorId: emp.servicioBaseId,
+              fecha: fechaUtc,
+              esRotacion: false,
+              codigoPrevisto: tipoNov,
+            },
+          });
+          celdasBloqueadas++;
+        }
+        cur.setUTCDate(cur.getUTCDate() + 1);
+      }
+
+      novedadesProcesadas.push({
+        empleadoId: emp.id,
+        empleadoNombre: emp.nombre,
+        documento: emp.documento,
+        tipo: tipoNov,
+        desde: item.fechaInicio,
+        hasta: item.fechaFin,
+        servicioCodigo: emp.servicioBase?.codigo,
+        servicioNombre: emp.servicioBase?.nombre,
+        cargo: emp.categoria?.nombre,
+      });
+    }
+
+    return {
+      ok: true,
+      mensaje: `Sincronización completada exitosamente desde Intranet.`,
+      totalSincronizadas: novedadesProcesadas.length,
+      celdasBloqueadas,
+      novedades: novedadesProcesadas,
+    };
   }
 
   @Post('validar-celda')

@@ -8,6 +8,7 @@ import {
   PermutaItem,
   ResultadoBancoYNominaDto,
   ServicioHospitalario,
+  SesionUsuarioSso,
   TipoTurnoConfig,
   ValidacionTurnoDto,
 } from './models';
@@ -30,6 +31,15 @@ export class TurnosApiService {
     nombre: string;
     tipoAsistencia: string;
     intranetId?: string;
+    reqManana?: number;
+    reqTarde?: number;
+    reqNoche?: number;
+    modalidadDias?: string;
+    reqMananaFds?: number;
+    reqTardeFds?: number;
+    reqNocheFds?: number;
+    turnosHabilitados?: string[];
+    reglasPorCargo?: any[];
   }): Observable<any> {
     return this.http.post(`${this.baseUrl}/servicios-admin`, servicio);
   }
@@ -38,6 +48,15 @@ export class TurnosApiService {
     codigo: string;
     nombre: string;
     tipoAsistencia: string;
+    reqManana?: number;
+    reqTarde?: number;
+    reqNoche?: number;
+    modalidadDias?: string;
+    reqMananaFds?: number;
+    reqTardeFds?: number;
+    reqNocheFds?: number;
+    turnosHabilitados?: string[];
+    reglasPorCargo?: any[];
   }): Observable<any> {
     return this.http.put(`${this.baseUrl}/servicios-admin/${id}`, servicio);
   }
@@ -84,9 +103,11 @@ export class TurnosApiService {
     horasOrdinarias: number;
     horasDiurnas: number;
     horasNocturnas: number;
+    minutosAlmuerzo?: number;
     colorHex: string;
     descuentaBancoHoras: boolean;
     esNocturnoPesado: boolean;
+    visibleEnPaleta?: boolean;
   }): Observable<any> {
     return this.http.post(`${this.baseUrl}/servicios-admin/turnos`, turno);
   }
@@ -226,5 +247,66 @@ export class TurnosApiService {
 
   simularPermuta(dto: any): Observable<any> {
     return this.http.post(`${this.baseUrl}/permutas/simular`, dto);
+  }
+
+  // 6. Novedades y Ausencias Oficiales (Intranet Hospitalaria)
+  getNovedades(anio?: number, mes?: number): Observable<any[]> {
+    return this.http.get<any[]>(`${this.baseUrl}/cuadrantes/novedades?anio=${anio || 2026}&mes=${mes || 11}`);
+  }
+
+  sincronizarNovedadesIntranet(anio: number, mes: number): Observable<{
+    ok: boolean;
+    mensaje: string;
+    totalSincronizadas: number;
+    celdasBloqueadas: number;
+    novedades: any[];
+  }> {
+    return this.http.post<any>(`${this.baseUrl}/cuadrantes/sincronizar-novedades`, { anio, mes });
+  }
+
+  // 6. Autenticación Satélite SSO con Intranet Hospitalaria
+  intercambiarTokenSso(ssoToken: string): Observable<{
+    sessionToken: string;
+    usuario: SesionUsuarioSso;
+    intranetReturnUrl: string;
+  }> {
+    return this.http.post<{
+      sessionToken: string;
+      usuario: SesionUsuarioSso;
+      intranetReturnUrl: string;
+    }>(`${this.baseUrl}/intranet/sso-login`, { ssoToken });
+  }
+
+  obtenerSesionSso(sessionToken: string): Observable<{
+    usuario: SesionUsuarioSso;
+    intranetReturnUrl: string;
+  }> {
+    return this.http.get<{
+      usuario: SesionUsuarioSso;
+      intranetReturnUrl: string;
+    }>(`${this.baseUrl}/intranet/sesion`, {
+      headers: { Authorization: `Bearer ${sessionToken}` },
+    });
+  }
+
+  // 7. Enlace personal y feed dinámico de Calendario iCal (.ics)
+  obtenerEnlaceCalendarioIcal(empleadoId: string): Observable<{
+    empleadoId: string;
+    empleadoNombre: string;
+    documento: string;
+    servicioNombre: string;
+    token: string;
+    httpUrl: string;
+    webcalUrl: string;
+  }> {
+    return this.http.get<{
+      empleadoId: string;
+      empleadoNombre: string;
+      documento: string;
+      servicioNombre: string;
+      token: string;
+      httpUrl: string;
+      webcalUrl: string;
+    }>(`${this.baseUrl}/calendario/mi-enlace?empleadoId=${encodeURIComponent(empleadoId)}`);
   }
 }

@@ -8,9 +8,13 @@ import {
   EmpleadoHospital,
   FestivoEntry,
   ModalConfirmacionConfig,
+  ModalidadDiasServicio,
   PermutaItem,
+  ReglaCargoServicio,
   RegistroAuditoria,
+  RolUsuarioSso,
   ServicioHospitalario,
+  SesionUsuarioSso,
   TipoTurnoConfig,
 } from './models';
 import { TurnosApiService } from './turnos-api.service';
@@ -77,6 +81,9 @@ export class AppComponent implements OnInit {
   // Modales
   modalRotacionAbierto = signal<boolean>(false);
   modalIcalAbierto = signal<boolean>(false);
+  enlaceIcalHttp = signal<string>('');
+  enlaceIcalWebcal = signal<string>('');
+  enlaceIcalEmpleadoNombre = signal<string>('');
   modalConfirmacion = signal<ModalConfirmacionConfig | null>(null);
 
   abrirConfirmacion(config: ModalConfirmacionConfig): void {
@@ -105,6 +112,26 @@ export class AppComponent implements OnInit {
   nuevoServicioCodigo = signal<string>('');
   nuevoServicioNombre = signal<string>('');
   nuevoServicioTipoAsistencia = signal<string>('URGENCIAS');
+  nuevoServicioModalidadDias = signal<ModalidadDiasServicio>('TODOS_24_7');
+  nuevoServicioReqManana = signal<number>(4);
+  nuevoServicioReqTarde = signal<number>(4);
+  nuevoServicioReqNoche = signal<number>(2);
+  nuevoServicioReqMananaFds = signal<number>(2);
+  nuevoServicioReqTardeFds = signal<number>(2);
+  nuevoServicioReqNocheFds = signal<number>(1);
+  nuevoServicioTurnosHabilitados = signal<string[]>([
+    'M8',
+    'T8',
+    'N8',
+    'D12',
+    'G24',
+    'S',
+    'L',
+    'COMP',
+    'VAC',
+    'INC',
+  ]);
+  nuevoServicioReglasPorCargo = signal<ReglaCargoServicio[]>([]);
   enlaceHermanoSrv1 = signal<string>('srv-urg');
   enlaceHermanoSrv2 = signal<string>('srv-mat');
 
@@ -114,17 +141,40 @@ export class AppComponent implements OnInit {
   empleadosRotadosPorServicio = signal<Record<string, string[]>>({});
   catalogoTurnosMap = signal<Record<string, TipoTurnoConfig>>({ ...CATALOGO_TURNOS });
 
-  // Lista maestra del catálogo (sin los alias duplicados M, T, N, G12)
+  // Lista maestra del catálogo (sin los alias duplicados M, T, N, G12 ni el marcador interno BLANCO)
   listaTurnosCatalogo = computed<TipoTurnoConfig[]>(() => {
-    const aliasOcultos = new Set(['M', 'T', 'N', 'G12']);
+    const aliasOcultos = new Set(['M', 'T', 'N', 'G12', 'BLANCO']);
     return Object.values(this.catalogoTurnosMap()).filter(
       (t) => !aliasOcultos.has(t.codigo)
     );
   });
 
-  // Turnos visibles en la Paleta del Cuadro de Turnos
+  // Turnos visibles en la Paleta del Cuadro de Turnos (filtrados por el servicio activo y el cargo filtrado si aplica)
   listaTurnosPaleta = computed<TipoTurnoConfig[]>(() => {
-    return this.listaTurnosCatalogo().filter((t) => t.visibleEnPaleta !== false);
+    const srv = this.servicioActual();
+    const filtroCat = this.filtroCategoriaActiva();
+    const reglaCat =
+      filtroCat !== 'TODAS'
+        ? (srv?.reglasPorCargo || []).find((r) => r.categoriaNombre === filtroCat)
+        : undefined;
+
+    const listaCodigosBase =
+      reglaCat?.turnosHabilitados && reglaCat.turnosHabilitados.length > 0
+        ? reglaCat.turnosHabilitados
+        : srv?.turnosHabilitados && srv.turnosHabilitados.length > 0
+          ? srv.turnosHabilitados
+          : null;
+
+    const habilitadosSrv = listaCodigosBase
+      ? new Set(listaCodigosBase.map((c) => c.toUpperCase()))
+      : null;
+    const codigosBaseDescanso = new Set(['L', 'S', 'COMP', 'VAC', 'INC', 'LIC']);
+
+    return this.listaTurnosCatalogo().filter((t) => {
+      if (t.visibleEnPaleta === false) return false;
+      if (!habilitadosSrv) return true;
+      return habilitadosSrv.has(t.codigo.toUpperCase()) || codigosBaseDescanso.has(t.codigo.toUpperCase());
+    });
   });
 
   // Formulario de Creación / Edición de Turnos en Catálogo de Turnos
@@ -134,6 +184,7 @@ export class AppComponent implements OnInit {
   turnoFormModoJornada = signal<'HORARIO' | 'GUARDIA_24H' | 'DESCANSO'>('HORARIO');
   turnoFormHoraInicio = signal<string>('07:00');
   turnoFormHoraFin = signal<string>('15:00');
+  turnoFormMinutosAlmuerzo = signal<number>(0);
   turnoFormColorKey = signal<string>('AZUL_CIELO');
   turnoFormNocturnoPesado = signal<boolean>(false);
   turnoFormDescuentaBanco = signal<boolean>(false);
@@ -149,14 +200,16 @@ export class AppComponent implements OnInit {
     { key: 'TURQUESA_COMP', nombre: 'Turquesa Compensatorio', bgHex: '#CCFBF1', textHex: '#0F766E', borderHex: '#5EEAD4' },
     { key: 'ESMERALDA_VAC', nombre: 'Verde Esmeralda', bgHex: '#D1FAE5', textHex: '#047857', borderHex: '#6EE7B7' },
     { key: 'ROSA_INC', nombre: 'Rosa Novedad', bgHex: '#FCE7F3', textHex: '#BE185D', borderHex: '#F9A8D4' },
+    { key: 'LAVANDA_LIC', nombre: 'Lavanda Licencia', bgHex: '#E0E7FF', textHex: '#3730A3', borderHex: '#C7D2FE' },
     { key: 'GRIS_ADMIN', nombre: 'Gris Neutro', bgHex: '#F3F4F6', textHex: '#374151', borderHex: '#D1D5DB' },
   ];
 
-  // Cálculo automático de horas Ordinarias, Diurnas (06:00-19:00) y Nocturnas (19:00-06:00) - Ley 2466 / CST Art. 160
+  // Cálculo automático de horas Ordinarias, Diurnas (06:00-19:00) y Nocturnas (19:00-06:00) - Ley 2466 / CST Art. 160 y Art. 167 (Almuerzo)
   calculoAutomaticoHorasTurno = computed<{
     ordinarias: number;
     diurnas: number;
     nocturnas: number;
+    minutosAlmuerzo: number;
     horarioTexto: string;
   }>(() => {
     const modo = this.turnoFormModoJornada();
@@ -165,6 +218,7 @@ export class AppComponent implements OnInit {
         ordinarias: 0,
         diurnas: 0,
         nocturnas: 0,
+        minutosAlmuerzo: 0,
         horarioTexto: 'Descanso / Novedad',
       };
     }
@@ -174,12 +228,14 @@ export class AppComponent implements OnInit {
         ordinarias: 24,
         diurnas: 13,
         nocturnas: 11,
+        minutosAlmuerzo: 0,
         horarioTexto: `${ini} - ${ini} (+1)`,
       };
     }
 
     const iniStr = this.turnoFormHoraInicio() || '07:00';
     const finStr = this.turnoFormHoraFin() || '15:00';
+    const minAlmuerzo = Math.max(0, Number(this.turnoFormMinutosAlmuerzo()) || 0);
     const [hIni, mIni] = iniStr.split(':').map((n) => Number(n) || 0);
     const [hFin, mFin] = finStr.split(':').map((n) => Number(n) || 0);
 
@@ -201,6 +257,15 @@ export class AppComponent implements OnInit {
       }
     }
 
+    // Descuento legal de descanso intermedio / almuerzo no computable (Art. 167 CST), priorizando la franja diurna
+    let descuentoRestante = Math.min(minAlmuerzo, minDiurnos + minNocturnos);
+    const descDiurno = Math.min(minDiurnos, descuentoRestante);
+    minDiurnos -= descDiurno;
+    descuentoRestante -= descDiurno;
+    if (descuentoRestante > 0) {
+      minNocturnos = Math.max(0, minNocturnos - descuentoRestante);
+    }
+
     const diurnas = Math.round((minDiurnos / 60) * 10) / 10;
     const nocturnas = Math.round((minNocturnos / 60) * 10) / 10;
     const ordinarias = Math.round(((minDiurnos + minNocturnos) / 60) * 10) / 10;
@@ -209,6 +274,7 @@ export class AppComponent implements OnInit {
       ordinarias,
       diurnas,
       nocturnas,
+      minutosAlmuerzo: minAlmuerzo,
       horarioTexto: `${iniStr} - ${finStr}`,
     };
   });
@@ -246,10 +312,53 @@ export class AppComponent implements OnInit {
     this.asignacionesPorPeriodo.update((todo) => ({ ...todo, [key]: nuevoMapa }));
   }
 
-  // Portal del Empleado (Autoservicio)
+  // Portal del Empleado (Autoservicio) y Sesión SSO de Intranet
   empleadoPortalId = signal<string>('emp-001');
   diaPermutaSeleccionado = signal<number>(10);
   companeroPermutaId = signal<string>('emp-002');
+  sesionActual = signal<SesionUsuarioSso | null>(null);
+  verificandoSesionSso = signal<boolean>(true);
+  intranetReturnUrl = signal<string>('http://localhost:4300');
+
+  rolActual = computed<RolUsuarioSso>(() => this.sesionActual()?.rol || 'COLABORADOR');
+  esColaborador = computed<boolean>(() => this.rolActual() === 'COLABORADOR');
+  esCoordinador = computed<boolean>(() => this.rolActual() === 'COORDINADOR');
+  esAdminTh = computed<boolean>(() => this.rolActual() === 'ADMIN_TH');
+
+  // Servicios autorizados según el rol de la sesión SSO activa
+  serviciosVisibles = computed<ServicioHospitalario[]>(() => {
+    const todos = this.servicios();
+    const sesion = this.sesionActual();
+    if (!sesion || sesion.rol === 'ADMIN_TH') {
+      return todos;
+    }
+    const permitidos = new Set(sesion.serviciosPermitidosIds || [sesion.servicioBaseId]);
+    const filtrados = todos.filter((s) => permitidos.has(s.id));
+    return filtrados.length > 0 ? filtrados : todos;
+  });
+
+  // Permutas visibles en la vista de Solicitudes según el rol activo
+  permutasVisiblesDashboard = computed<PermutaItem[]>(() => {
+    const todas = this.listaPermutas();
+    const sesion = this.sesionActual();
+    if (!sesion || sesion.rol === 'ADMIN_TH') {
+      return todas;
+    }
+    if (sesion.rol === 'COORDINADOR') {
+      const permitidos = new Set(sesion.serviciosPermitidosIds || [sesion.servicioBaseId]);
+      return todas.filter(
+        (p) =>
+          !p.servicioId ||
+          permitidos.has(p.servicioId) ||
+          p.solicitanteId === sesion.empleadoId ||
+          p.receptorId === sesion.empleadoId
+      );
+    }
+    // COLABORADOR: solo ve las solicitudes donde participa
+    return todas.filter(
+      (p) => p.solicitanteId === sesion.empleadoId || p.receptorId === sesion.empleadoId
+    );
+  });
 
   // Mapa de Saldos Consolidados de Banco de Horas (PostgreSQL)
   saldosConsolidadosMap = signal<Record<string, number>>({});
@@ -260,10 +369,119 @@ export class AppComponent implements OnInit {
   // Bitácora de Auditoría (Persistida localmente sin datos residuales de prueba)
   bitacoraAuditoria = signal<RegistroAuditoria[]>(this.cargarAuditoriaDesdeStorage());
 
+  // Novedades y Ausencias Oficiales desde Intranet Hospitalaria
+  sincronizandoNovedades = signal<boolean>(false);
+  listaNovedades = signal<any[]>([]);
+
   constructor(private readonly api: TurnosApiService) {}
 
   ngOnInit(): void {
     this.cargarDatosDesdeBaseDeDatos();
+    this.inicializarSesionSsoDesdeUrlOStorage();
+  }
+
+  private inicializarSesionSsoDesdeUrlOStorage(): void {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const ssoToken = params.get('sso_token');
+
+      if (ssoToken) {
+        // Limpiar el token de la barra de direcciones por seguridad
+        const urlLimpia = window.location.pathname + window.location.hash;
+        window.history.replaceState({}, document.title, urlLimpia);
+
+        this.api.intercambiarTokenSso(ssoToken).subscribe({
+          next: (res) => {
+            try {
+              sessionStorage.setItem('rafa_turnos_sso_jwt', res.sessionToken);
+            } catch {}
+            if (res.intranetReturnUrl) {
+              this.intranetReturnUrl.set(res.intranetReturnUrl);
+              try {
+                sessionStorage.setItem('rafa_turnos_intranet_url', res.intranetReturnUrl);
+              } catch {}
+            }
+            this.aplicarContextoSesionSso(res.usuario);
+            this.verificandoSesionSso.set(false);
+            this.mostrarNotificacion(
+              `Sesión SSO iniciada: ${res.usuario.nombre} (${this.etiquetaRol(res.usuario.rol)})`
+            );
+          },
+          error: (err) => {
+            this.verificandoSesionSso.set(false);
+            const msg = err?.error?.message || 'Token SSO inválido o expirado.';
+            this.mostrarNotificacion(`❌ Error de autenticación SSO: ${msg}`);
+          },
+        });
+        return;
+      }
+
+      const tokenGuardado = sessionStorage.getItem('rafa_turnos_sso_jwt');
+      if (tokenGuardado) {
+        this.api.obtenerSesionSso(tokenGuardado).subscribe({
+          next: (res) => {
+            if (res.intranetReturnUrl) {
+              this.intranetReturnUrl.set(res.intranetReturnUrl);
+              try {
+                sessionStorage.setItem('rafa_turnos_intranet_url', res.intranetReturnUrl);
+              } catch {}
+            }
+            this.aplicarContextoSesionSso(res.usuario);
+            this.verificandoSesionSso.set(false);
+          },
+          error: () => {
+            try {
+              sessionStorage.removeItem('rafa_turnos_sso_jwt');
+            } catch {}
+            this.verificandoSesionSso.set(false);
+          },
+        });
+        return;
+      }
+
+      this.verificandoSesionSso.set(false);
+      // Sin sesión activa: redirigir automáticamente al portal de la Intranet Hospitalaria
+      const destino = this.intranetReturnUrl();
+      if (destino) {
+        window.location.href = destino;
+      }
+    } catch {
+      this.verificandoSesionSso.set(false);
+    }
+  }
+
+  private aplicarContextoSesionSso(usuario: SesionUsuarioSso): void {
+    this.sesionActual.set(usuario);
+    this.empleadoPortalId.set(usuario.empleadoId);
+    this.servicioSeleccionadoId.set(usuario.servicioBaseId);
+
+    const emps = this.empleados();
+    const primerPar = emps.find(
+      (e) =>
+        e.id !== usuario.empleadoId &&
+        e.servicioBaseId === usuario.servicioBaseId &&
+        e.categoria === usuario.categoria
+    );
+    if (primerPar) {
+      this.companeroPermutaId.set(primerPar.id);
+    }
+
+    if (usuario.rol === 'COLABORADOR') {
+      this.vistaActual.set('PORTAL_EMPLEADO');
+    } else if (usuario.rol === 'COORDINADOR') {
+      this.filtroReporteServicioId.set(usuario.servicioBaseId);
+      if (this.vistaActual() === 'CONFIGURACION') {
+        this.vistaActual.set('PLANIFICADOR');
+      }
+    } else {
+      this.filtroReporteServicioId.set('TODOS');
+    }
+  }
+
+  etiquetaRol(rol: RolUsuarioSso): string {
+    if (rol === 'ADMIN_TH') return 'Talento Humano / Admin';
+    if (rol === 'COORDINADOR') return 'Coordinador de Servicio';
+    return 'Colaborador Asistencial';
   }
 
   private cargarPermutasDesdeStorage(): PermutaItem[] {
@@ -333,6 +551,47 @@ export class AppComponent implements OnInit {
     this.sincronizarFestivosDesdePostgres();
     this.sincronizarCuadrantesDesdePostgres();
     this.sincronizarPermutasDesdePostgres();
+    this.sincronizarNovedadesDesdePostgres();
+  }
+
+  sincronizarNovedadesDesdePostgres(): void {
+    this.api.getNovedades(this.anioSeleccionado(), this.mesSeleccionado()).subscribe({
+      next: (novedadesDb) => {
+        if (Array.isArray(novedadesDb)) {
+          this.listaNovedades.set(novedadesDb);
+        }
+      },
+      error: () => {},
+    });
+  }
+
+  sincronizarNovedadesIntranet(): void {
+    if (this.sincronizandoNovedades()) return;
+    this.sincronizandoNovedades.set(true);
+    this.mostrarNotificacion('⏳ Conectando con Intranet Hospitalaria para sincronizar novedades...');
+
+    const anio = this.anioSeleccionado();
+    const mes = this.mesSeleccionado();
+
+    this.api.sincronizarNovedadesIntranet(anio, mes).subscribe({
+      next: (res) => {
+        this.sincronizandoNovedades.set(false);
+        if (res && res.ok) {
+          this.mostrarNotificacion(
+            `✅ Sincronización exitosa: ${res.totalSincronizadas} novedades aplicadas (${res.celdasBloqueadas} días bloqueados con VAC/INC/LIC).`
+          );
+          this.sincronizarNovedadesDesdePostgres();
+          this.sincronizarCuadrantesDesdePostgres();
+        } else {
+          this.mostrarNotificacion(res?.mensaje || 'Respuesta inesperada de Intranet.');
+        }
+      },
+      error: (err) => {
+        this.sincronizandoNovedades.set(false);
+        const msg = err.error?.message || err.message || 'Error de conexión con Intranet';
+        this.mostrarNotificacion(`⛔ No se pudo sincronizar novedades: ${msg}`);
+      },
+    });
   }
 
   private sincronizarPermutasDesdePostgres(): void {
@@ -354,8 +613,18 @@ export class AppComponent implements OnInit {
         this.empleados.set(emps);
         this.inicializarMatrizCuadrante(emps);
 
-        // Si el empleado activo del portal no está definido o no existe en la BD, asignar preferiblemente uno con cuadrante activo o el primero
-        if (!emps.some((e) => e.id === this.empleadoPortalId())) {
+        // Si hay sesión SSO activa, fijar el portal en el empleado autenticado
+        const sesion = this.sesionActual();
+        if (sesion && emps.some((e) => e.id === sesion.empleadoId)) {
+          this.empleadoPortalId.set(sesion.empleadoId);
+          const primerPar = emps.find(
+            (e) =>
+              e.id !== sesion.empleadoId &&
+              e.servicioBaseId === sesion.servicioBaseId &&
+              e.categoria === sesion.categoria
+          );
+          this.companeroPermutaId.set(primerPar?.id || sesion.empleadoId);
+        } else if (!emps.some((e) => e.id === this.empleadoPortalId())) {
           const empInicial = emps.find((e) => e.servicioBaseId === 'srv-urg') || emps[0];
           this.empleadoPortalId.set(empInicial.id);
           const primerPar = emps.find(
@@ -412,7 +681,7 @@ export class AppComponent implements OnInit {
           const copia = { ...actual };
           for (const t of turnosDb) {
             const cod = (t.codigo || '').toUpperCase();
-            if (!cod) continue;
+            if (!cod || cod === 'BLANCO') continue;
             const existente = copia[cod];
             const tema =
               this.temasColorTurno.find(
@@ -436,6 +705,7 @@ export class AppComponent implements OnInit {
               horasOrdinarias: Number(t.horasOrdinarias ?? existente?.horasOrdinarias ?? 0),
               horasDiurnas: Number(t.horasDiurnas ?? existente?.horasDiurnas ?? 0),
               horasNocturnas: Number(t.horasNocturnas ?? existente?.horasNocturnas ?? 0),
+              minutosAlmuerzo: Number(t.minutosAlmuerzo ?? existente?.minutosAlmuerzo ?? 0),
               bgHex: t.colorHex || existente?.bgHex || tema.bgHex,
               textHex: existente?.textHex || tema.textHex,
               borderHex: existente?.borderHex || tema.borderHex,
@@ -444,10 +714,11 @@ export class AppComponent implements OnInit {
                 t.esNocturnoPesado ?? existente?.esNocturnoPesado ?? cod === 'G24'
               ),
               descuentaBancoHoras: !!(t.descuentaBancoHoras ?? existente?.descuentaBancoHoras),
-              visibleEnPaleta:
-                existente?.visibleEnPaleta !== undefined
-                  ? existente.visibleEnPaleta
-                  : !['M', 'T', 'N', 'G12'].includes(cod),
+              visibleEnPaleta: ['M', 'T', 'N', 'G12'].includes(cod)
+                ? false
+                : t.visibleEnPaleta !== undefined
+                  ? Boolean(t.visibleEnPaleta)
+                  : existente?.visibleEnPaleta ?? true,
             };
           }
           return copia;
@@ -626,6 +897,21 @@ export class AppComponent implements OnInit {
     return conteo;
   });
 
+  /**
+   * Obtiene dinámicamente el turno asignado en el último día del mes inmediatamente anterior
+   * (ej. día 31 de Octubre para Noviembre, o día 31 de Diciembre de anio-1 para Enero).
+   */
+  obtenerUltimoTurnoMesPrevio(empId: string, fallback: CodigoTurno = 'L'): CodigoTurno {
+    const anio = this.anioSeleccionado();
+    const mes = this.mesSeleccionado();
+    const anioPrev = mes === 1 ? anio - 1 : anio;
+    const mesPrev = mes === 1 ? 12 : mes - 1;
+    const ultimoDiaPrev = new Date(anioPrev, mesPrev, 0).getDate();
+    const periodoPrevKey = `${anioPrev}-${mesPrev}`;
+    const codPrev = this.asignacionesPorPeriodo()[periodoPrevKey]?.[empId]?.[ultimoDiaPrev]?.codigo;
+    return (codPrev || fallback) as CodigoTurno;
+  }
+
   // Filas calculadas completas de todo el servicio (sin filtro visual de categoría), usadas para Cierre de Nómina y Exportación
   filasServicioCompletas = computed(() => {
     const dias = this.diasDelMes();
@@ -682,10 +968,18 @@ export class AppComponent implements OnInit {
       const saldoAntReal = this.saldosConsolidadosMap()[saldoKeyPrev] !== undefined
         ? this.saldosConsolidadosMap()[saldoKeyPrev]
         : emp.saldoBancoAnterior;
+      const ultimoTurnoPrevReal = this.obtenerUltimoTurnoMesPrevio(
+        emp.id,
+        emp.ultimoTurnoMesPrevio || 'L'
+      );
 
       const diferenciaMes = horasTrabajadas - emp.horasContratoMes - horasAmortizadasComp;
       const nuevoSaldoBanco = saldoAntReal + diferenciaMes;
-      const empConSaldo = { ...emp, saldoBancoAnterior: saldoAntReal };
+      const empConSaldo = {
+        ...emp,
+        saldoBancoAnterior: saldoAntReal,
+        ultimoTurnoMesPrevio: ultimoTurnoPrevReal,
+      };
 
       return {
         empleado: empConSaldo,
@@ -749,11 +1043,14 @@ export class AppComponent implements OnInit {
     return { manana, tarde, noche };
   }
 
-  // Cobertura dinámica por turno al pie del cuadrante (incluye planta + personal rotado de apoyo)
+  // Cobertura dinámica por turno al pie del cuadrante (respeta el filtro de cargo activo si se selecciona uno)
   coberturaPorDia = computed<Record<number, { manana: number; tarde: number; noche: number }>>(() => {
     const dias = this.diasDelMes();
     const matriz = this.asignaciones();
-    const empsDelCuadrante = this.empleadosServicioSinFiltro();
+    const filtroCat = this.filtroCategoriaActiva();
+    const empsDelCuadrante = this.empleadosServicioSinFiltro().filter(
+      ({ emp }) => filtroCat === 'TODAS' || emp.categoria === filtroCat
+    );
     const catalogo = this.catalogoTurnosMap();
     const resultado: Record<number, { manana: number; tarde: number; noche: number }> = {};
 
@@ -917,19 +1214,129 @@ export class AppComponent implements OnInit {
     return alertas;
   });
 
+  reglaCargoActivaEnCuadrante = computed<ReglaCargoServicio | undefined>(() => {
+    const cat = this.filtroCategoriaActiva();
+    if (!cat || cat === 'TODAS') return undefined;
+    const srv = this.servicioActual();
+    return (srv.reglasPorCargo || []).find((r) => r.categoriaNombre === cat);
+  });
+
+  /**
+   * Calcula las metas de cobertura requeridas (Mañana / Tarde / Noche) para un día específico,
+   * respetando la modalidad operativa del servicio (24/7, Guardia FDS, Lun-Sáb o Lun-Vie Hábiles)
+   * y el desglose por cargo profesional cuando se filtra o evalúa un cargo específico.
+   */
+  obtenerMetasDiaServicio(
+    srv: ServicioHospitalario,
+    d: DiaColumna,
+    categoriaEspecifica?: string
+  ): { reqManana: number; reqTarde: number; reqNoche: number; cerrado: boolean } {
+    const mod = srv.modalidadDias || 'TODOS_24_7';
+    const esDomOFest = d.esDomingo || !!d.festivo;
+
+    const catFiltro =
+      categoriaEspecifica !== undefined
+        ? categoriaEspecifica
+        : this.filtroCategoriaActiva() !== 'TODAS'
+          ? this.filtroCategoriaActiva()
+          : undefined;
+
+    const reglaCargo = catFiltro
+      ? (srv.reglasPorCargo || []).find((r) => r.categoriaNombre === catFiltro)
+      : undefined;
+
+    const baseM = reglaCargo ? reglaCargo.reqManana : srv.reqManana;
+    const baseT = reglaCargo ? reglaCargo.reqTarde : srv.reqTarde;
+    const baseN = reglaCargo ? reglaCargo.reqNoche : srv.reqNoche;
+    const fdsM = reglaCargo ? (reglaCargo.reqMananaFds ?? baseM) : (srv.reqMananaFds ?? baseM);
+    const fdsT = reglaCargo ? (reglaCargo.reqTardeFds ?? baseT) : (srv.reqTardeFds ?? baseT);
+    const fdsN = reglaCargo ? (reglaCargo.reqNocheFds ?? baseN) : (srv.reqNocheFds ?? baseN);
+
+    if (esDomOFest) {
+      if (mod === 'LUN_VIE_HABILES' || mod === 'LUN_SAB_SIN_FESTIVOS') {
+        return { reqManana: 0, reqTarde: 0, reqNoche: 0, cerrado: true };
+      }
+      if (mod === 'TODOS_GUARDIA_FDS') {
+        return {
+          reqManana: fdsM,
+          reqTarde: fdsT,
+          reqNoche: fdsN,
+          cerrado: false,
+        };
+      }
+      return {
+        reqManana: baseM,
+        reqTarde: baseT,
+        reqNoche: baseN,
+        cerrado: false,
+      };
+    }
+
+    if (d.esSabado) {
+      if (mod === 'LUN_VIE_HABILES') {
+        return { reqManana: 0, reqTarde: 0, reqNoche: 0, cerrado: true };
+      }
+      if (mod === 'TODOS_GUARDIA_FDS' || mod === 'LUN_SAB_SIN_FESTIVOS') {
+        return {
+          reqManana: fdsM,
+          reqTarde: fdsT,
+          reqNoche: fdsN,
+          cerrado: false,
+        };
+      }
+      return {
+        reqManana: baseM,
+        reqTarde: baseT,
+        reqNoche: baseN,
+        cerrado: false,
+      };
+    }
+
+    return {
+      reqManana: baseM,
+      reqTarde: baseT,
+      reqNoche: baseN,
+      cerrado: false,
+    };
+  }
+
+  etiquetaModalidadDias(mod?: string): string {
+    switch (mod) {
+      case 'TODOS_GUARDIA_FDS':
+        return '24/7 (Guardia FDS/Fest.)';
+      case 'LUN_SAB_SIN_FESTIVOS':
+        return 'Lun–Sáb (Sin Dom/Fest)';
+      case 'LUN_VIE_HABILES':
+        return 'Lun–Vie Hábiles';
+      default:
+        return '24/7 Todos los días';
+    }
+  }
+
   // KPIs de la Torre de Control
   porcentajeCoberturaGlobal = computed<number>(() => {
     const dias = this.diasDelMes();
     const srv = this.servicioActual();
     const cob = this.coberturaPorDia();
-    let totalChecks = dias.length * 3;
+    let totalChecks = 0;
     let cumplidos = 0;
 
     for (const d of dias) {
+      const metas = this.obtenerMetasDiaServicio(srv, d);
+      if (metas.cerrado) continue;
       const c = cob[d.dia];
-      if (c.manana >= srv.reqManana) cumplidos++;
-      if (c.tarde >= srv.reqTarde) cumplidos++;
-      if (c.noche >= srv.reqNoche) cumplidos++;
+      if (metas.reqManana > 0) {
+        totalChecks++;
+        if (c.manana >= metas.reqManana) cumplidos++;
+      }
+      if (metas.reqTarde > 0) {
+        totalChecks++;
+        if (c.tarde >= metas.reqTarde) cumplidos++;
+      }
+      if (metas.reqNoche > 0) {
+        totalChecks++;
+        if (c.noche >= metas.reqNoche) cumplidos++;
+      }
     }
     return totalChecks > 0 ? Math.round((cumplidos / totalChecks) * 100) : 100;
   });
@@ -1447,12 +1854,11 @@ export class AppComponent implements OnInit {
     const celdaActual = filaEmp[dia];
 
     if (
-      (celdaActual?.codigo === 'VAC' || celdaActual?.codigo === 'INC') &&
-      nuevoCodigo !== '' &&
+      (celdaActual?.codigo === 'VAC' || celdaActual?.codigo === 'INC' || celdaActual?.codigo === 'LIC') &&
       nuevoCodigo !== celdaActual.codigo
     ) {
       this.mostrarNotificacion(
-        `Celda bloqueada por novedad oficial (${celdaActual.codigo}). Usa el borrador si deseas retirar la ausencia.`
+        `🔒 Celda bloqueada: Novedad oficial de Intranet (${celdaActual.codigo}). Las ausencias oficiales solo pueden ser gestionadas desde Gestión Humana.`
       );
       return;
     }
@@ -1462,10 +1868,11 @@ export class AppComponent implements OnInit {
 
     const empObj = this.empleados().find((e) => e.id === empId);
     const esRotacion = empObj ? empObj.servicioBaseId !== this.servicioSeleccionadoId() : false;
+    const enBorrador = this.estadoCuadrante() === 'BORRADOR';
 
     filaEmp[dia] = {
       codigo: nuevoCodigo,
-      previsto: celdaActual?.previsto ?? anterior,
+      previsto: enBorrador ? nuevoCodigo : (celdaActual?.previsto ?? anterior),
       esRotacion,
       servicioEjecutorId: this.servicioSeleccionadoId(),
     };
@@ -1478,7 +1885,7 @@ export class AppComponent implements OnInit {
       if (!sig || sig === 'L') {
         filaEmp[dia + 1] = {
           codigo: 'S',
-          previsto: filaEmp[dia + 1]?.previsto ?? sig,
+          previsto: enBorrador ? 'S' : (filaEmp[dia + 1]?.previsto ?? sig),
           esRotacion,
         };
         seAutoAsignoSaliente = true;
@@ -1568,14 +1975,26 @@ export class AppComponent implements OnInit {
       esRotacion?: boolean;
     }[] = [];
 
+    const enBorrador = this.estadoCuadrante() === 'BORRADOR';
+
     for (const { emp, esRotado } of this.empleadosServicioSinFiltro()) {
       const fila = { ...(actualMap[emp.id] || {}) };
       for (const d of this.diasDelMes()) {
         const celda = fila[d.dia];
-        if (!celda || celda.codigo === '' || celda.codigo === 'VAC' || celda.codigo === 'INC') {
+        if (
+          !celda ||
+          celda.codigo === '' ||
+          celda.codigo === 'VAC' ||
+          celda.codigo === 'INC' ||
+          celda.codigo === 'LIC'
+        ) {
           continue;
         }
-        const prev = celda.previsto ?? celda.codigo;
+        // Si es personal de apoyo rotado, no borrar los turnos ejecutados en su servicio base original
+        if (esRotado && celda.servicioEjecutorId && celda.servicioEjecutorId !== this.servicioSeleccionadoId()) {
+          continue;
+        }
+        const prev = enBorrador ? '' : (celda.previsto ?? celda.codigo);
         fila[d.dia] = {
           codigo: '',
           previsto: prev,
@@ -1619,7 +2038,7 @@ export class AppComponent implements OnInit {
     });
 
     this.mostrarNotificacion(
-      `Cuadro de turnos en blanco: ${celdasLimpiadas} turnos borrados. VAC e INC oficiales conservadas.`
+      `Cuadro de turnos en blanco: ${celdasLimpiadas} turnos borrados. Novedades oficiales de Intranet (VAC/INC/LIC) conservadas.`
     );
   }
 
@@ -1636,6 +2055,13 @@ export class AppComponent implements OnInit {
     const actualMap = { ...this.asignaciones() };
     const filasBase = this.filasServicioCompletas();
     const horasExtraLoop = new Map<string, number>();
+    const nochesLoop = new Map<string, number>();
+    const domFestLoop = new Map<string, number>();
+    for (const f of filasBase) {
+      nochesLoop.set(f.empleado.id, f.conteoNoches);
+      domFestLoop.set(f.empleado.id, f.conteoDomFest);
+    }
+
     let totalAsignados = 0;
     const loteParaDb: {
       empleadoId: string;
@@ -1645,34 +2071,271 @@ export class AppComponent implements OnInit {
       esRotacion?: boolean;
     }[] = [];
 
-    for (const d of dias) {
-      // Recalcular cobertura del día sobre actualMap para reflejar cambios hechos en iteraciones previas
+    // Helper: dado un arreglo de códigos habilitados (del servicio o de un cargo), elige los turnos ideales Mañana/Tarde/Noche
+    const seleccionarTurnosIdeales = (
+      listaCodigos?: string[]
+    ): { turnoManana: CodigoTurno; turnoTarde: CodigoTurno; turnoNoche: CodigoTurno } => {
+      const setHabilitados = new Set(
+        (listaCodigos && listaCodigos.length > 0
+          ? listaCodigos
+          : srv.turnosHabilitados && srv.turnosHabilitados.length > 0
+            ? srv.turnosHabilitados
+            : ['M8', 'T8', 'N8', 'M6', 'T6', 'N12', 'D12', 'G24', 'ADM', 'MD', 'AP']
+        ).map((c) => c.toUpperCase())
+      );
+
+      const operativos = this.listaTurnosCatalogo().filter(
+        (t) => t.horasOrdinarias > 0 && !t.esAusencia && setHabilitados.has(t.codigo.toUpperCase())
+      );
+
+      const soloManana = operativos.filter((t) => {
+        const f = this.clasificarFranjasTurno(t);
+        return f.manana && !f.tarde && !f.noche;
+      });
+      const soloTarde = operativos.filter((t) => {
+        const f = this.clasificarFranjasTurno(t);
+        return f.tarde && !f.manana && !f.noche;
+      });
+      const diurnosCompletos = operativos.filter((t) => {
+        const f = this.clasificarFranjasTurno(t);
+        return f.manana && f.tarde && !f.noche;
+      });
+      const nocturnos = operativos.filter((t) => {
+        const f = this.clasificarFranjasTurno(t);
+        return f.noche && !f.manana;
+      });
+      const guardia24 = operativos.filter((t) => t.horasOrdinarias >= 24);
+
+      const tM: CodigoTurno =
+        soloManana.find((t) => t.codigo === 'M8')?.codigo ||
+        soloManana[0]?.codigo ||
+        diurnosCompletos.find((t) => t.codigo === 'D12')?.codigo ||
+        diurnosCompletos[0]?.codigo ||
+        guardia24[0]?.codigo ||
+        'M8';
+
+      const tT: CodigoTurno =
+        soloTarde.find((t) => t.codigo === 'T8')?.codigo ||
+        soloTarde[0]?.codigo ||
+        diurnosCompletos.find((t) => t.codigo === 'D12')?.codigo ||
+        diurnosCompletos[0]?.codigo ||
+        guardia24[0]?.codigo ||
+        'T8';
+
+      const es12h =
+        soloManana.length === 0 &&
+        diurnosCompletos.some((t) => t.codigo === tM && t.horasOrdinarias >= 12);
+
+      const tN: CodigoTurno =
+        (es12h ? nocturnos.find((t) => t.codigo === 'N12')?.codigo : undefined) ||
+        nocturnos.find((t) => t.codigo === 'N8')?.codigo ||
+        nocturnos[0]?.codigo ||
+        guardia24[0]?.codigo ||
+        'N8';
+
+      return { turnoManana: tM, turnoTarde: tT, turnoNoche: tN };
+    };
+
+    const { turnoManana, turnoTarde, turnoNoche } = seleccionarTurnosIdeales(srv.turnosHabilitados);
+
+    // Helper: valida que al asignar un turno operativo en diaEval no supere los 6 días consecutivos sin descanso
+    const superaMaximoDiasConsecutivos = (empObj: EmpleadoHospital, diaEval: number): boolean => {
+      let rachaPrevia = 0;
+      for (let prev = diaEval - 1; prev >= 1; prev--) {
+        const codPrev = actualMap[empObj.id]?.[prev]?.codigo || '';
+        const cfgP = codPrev ? catalogo[codPrev] : undefined;
+        if (cfgP && cfgP.horasOrdinarias > 0 && !cfgP.esAusencia) {
+          rachaPrevia++;
+        } else {
+          break;
+        }
+      }
+      if (rachaPrevia === diaEval - 1) {
+        const cfgMesPrev = empObj.ultimoTurnoMesPrevio ? catalogo[empObj.ultimoTurnoMesPrevio] : undefined;
+        if (cfgMesPrev && cfgMesPrev.horasOrdinarias > 0 && !cfgMesPrev.esAusencia) {
+          rachaPrevia++;
+        }
+      }
+
+      let rachaPosterior = 0;
+      for (let sig = diaEval + 1; sig <= totalDias; sig++) {
+        const codSig = actualMap[empObj.id]?.[sig]?.codigo || '';
+        const cfgS = codSig ? catalogo[codSig] : undefined;
+        if (cfgS && cfgS.horasOrdinarias > 0 && !cfgS.esAusencia) {
+          rachaPosterior++;
+        } else {
+          break;
+        }
+      }
+
+      return rachaPrevia + 1 + rachaPosterior > 6;
+    };
+
+    // Helper: cuenta noches consecutivas inmediatamente previas a diaEval
+    const contarNochesConsecutivasPrevias = (empObj: EmpleadoHospital, diaEval: number): number => {
+      let nochesSeguidas = 0;
+      for (let prev = diaEval - 1; prev >= 1; prev--) {
+        const codPrev = actualMap[empObj.id]?.[prev]?.codigo || '';
+        const cfgP = codPrev ? catalogo[codPrev] : undefined;
+        if (cfgP && this.clasificarFranjasTurno(cfgP).noche) {
+          nochesSeguidas++;
+        } else {
+          break;
+        }
+      }
+      return nochesSeguidas;
+    };
+
+    // Helper: clasifica cualquier código de turno en su fase de rotación ('M' | 'T' | 'N' | 'L')
+    const clasificarFaseCod = (cod?: string): 'M' | 'T' | 'N' | 'L' => {
+      if (!cod || cod === 'L' || cod === 'S' || cod === 'COMP') return 'L';
+      const cfg = catalogo[cod];
+      if (!cfg || cfg.esAusencia || cfg.horasOrdinarias <= 0) return 'L';
+      const fr = this.clasificarFranjasTurno(cfg);
+      if (fr.noche) return 'N';
+      if (fr.tarde && !fr.manana) return 'T';
+      return 'M';
+    };
+
+    // Helper: obtiene la fase del día anterior, los días seguidos en esa misma fase y la racha laboral acumulada
+    const obtenerEstadoRotacionPrevia = (
+      empObj: EmpleadoHospital,
+      diaEval: number
+    ): { faseAyer: 'M' | 'T' | 'N' | 'L'; rachaFase: number; rachaTrabajo: number } => {
+      if (diaEval <= 1) {
+        const fasePrev = clasificarFaseCod(empObj.ultimoTurnoMesPrevio);
+        return {
+          faseAyer: fasePrev,
+          rachaFase: fasePrev === 'L' ? 2 : 1,
+          rachaTrabajo: fasePrev === 'L' ? 0 : 1,
+        };
+      }
+
+      const codAyer = actualMap[empObj.id]?.[diaEval - 1]?.codigo || '';
+      const faseAyer = clasificarFaseCod(codAyer);
+
+      let rachaFase = 0;
+      for (let prev = diaEval - 1; prev >= 1; prev--) {
+        const fPrev = clasificarFaseCod(actualMap[empObj.id]?.[prev]?.codigo || '');
+        if (fPrev === faseAyer) {
+          rachaFase++;
+        } else {
+          break;
+        }
+      }
+
+      let rachaTrabajo = 0;
+      for (let prev = diaEval - 1; prev >= 1; prev--) {
+        const fPrev = clasificarFaseCod(actualMap[empObj.id]?.[prev]?.codigo || '');
+        if (fPrev !== 'L') {
+          rachaTrabajo++;
+        } else {
+          break;
+        }
+      }
+      if (rachaTrabajo === diaEval - 1 && clasificarFaseCod(empObj.ultimoTurnoMesPrevio) !== 'L') {
+        rachaTrabajo++;
+      }
+
+      return { faseAyer, rachaFase, rachaTrabajo };
+    };
+
+    // Helper: puntaje de rotación horaria escalonada con descanso individual (L -> M -> T -> N -> L)
+    const calcularPuntajeRotacion = (
+      empObj: EmpleadoHospital,
+      diaEval: number,
+      faseDestino: 'M' | 'T' | 'N'
+    ): number => {
+      const { faseAyer, rachaFase, rachaTrabajo } = obtenerEstadoRotacionPrevia(empObj, diaEval);
+
+      if (diaEval === 1) {
+        if (faseDestino === 'M') {
+          return faseAyer === 'L' ? 10 : 40;
+        }
+        if (faseDestino === 'T') {
+          if (faseAyer === 'M' || faseAyer === 'T') return 10;
+          if (faseAyer === 'L') return 20;
+          return 40;
+        }
+        // faseDestino === 'N'
+        if (faseAyer === 'N') return 10;
+        if (faseAyer === 'T' || faseAyer === 'M') return 20;
+        return 30;
+      }
+
+      // Si ayer descansó (L), prioridad #1 absoluta (score 5) para reingresar hoy y evitar 2 días libres seguidos (L L)
+      if (faseAyer === 'L') {
+        if (faseDestino === 'M') return 5;
+        if (faseDestino === 'T') return 12;
+        return 18;
+      }
+
+      if (faseDestino === 'M') {
+        if (faseAyer === 'M' && rachaFase < 2 && rachaTrabajo < 5) return 10;
+        if (faseAyer === 'M' && rachaTrabajo < 5) return 20 + rachaFase;
+        return 50 + rachaTrabajo;
+      }
+
+      if (faseDestino === 'T') {
+        if (faseAyer === 'M' && rachaTrabajo < 5) return 10;
+        if (faseAyer === 'T' && rachaFase < 2 && rachaTrabajo < 5) return 15;
+        if (faseAyer === 'T' && rachaTrabajo < 5) return 25 + rachaFase;
+        return 50 + rachaTrabajo;
+      }
+
+      // faseDestino === 'N'
+      if (faseAyer === 'T' && rachaTrabajo <= 5) return 10;
+      if (faseAyer === 'N' && rachaFase < 2 && rachaTrabajo < 6) return 15;
+      if (faseAyer === 'M' && rachaTrabajo <= 5) return 22;
+      if (faseAyer === 'N' && rachaFase >= 2) return 60 + rachaFase;
+      return 55;
+    };
+
+    const recalcularCoberturaDia = (diaNum: number, categoriaFiltro?: string) => {
       let manana = 0;
       let tarde = 0;
       let noche = 0;
       for (const f of filasBase) {
-        const cod = actualMap[f.empleado.id]?.[d.dia]?.codigo || '';
+        if (categoriaFiltro && f.empleado.categoria !== categoriaFiltro) continue;
+        const cod = actualMap[f.empleado.id]?.[diaNum]?.codigo || '';
         if (!cod) continue;
         const franjas = this.clasificarFranjasTurno(catalogo[cod]);
         if (franjas.manana) manana++;
         if (franjas.tarde) tarde++;
         if (franjas.noche) noche++;
       }
+      return { manana, tarde, noche };
+    };
 
-      const faltanM = Math.max(0, srv.reqManana - manana);
-      const faltanT = Math.max(0, srv.reqTarde - tarde);
-      const faltanN = Math.max(0, srv.reqNoche - noche);
-
-      const cubrir = (turno: CodigoTurno, cant: number) => {
-        if (cant <= 0) return;
+    for (const d of dias) {
+      const cubrir = (turno: CodigoTurno, cant: number, categoriaObjetivo?: string) => {
+        if (cant <= 0 || !turno) return;
         const cfgTurno = catalogo[turno];
-        const esNocturno = Boolean(cfgTurno?.esNocturnoPesado);
+        if (!cfgTurno) return;
+        const esNocturno = Boolean(cfgTurno.esNocturnoPesado);
+        const franjasTurno = this.clasificarFranjasTurno(cfgTurno);
+        const faseDestino: 'M' | 'T' | 'N' = franjasTurno.noche
+          ? 'N'
+          : franjasTurno.tarde && !franjasTurno.manana
+            ? 'T'
+            : 'M';
+        const esDomOFest = d.esDomingo || !!d.festivo;
 
         const candidatos = [...filasBase]
           .filter((f) => {
+            if (categoriaObjetivo && f.empleado.categoria !== categoriaObjetivo) return false;
             const hoy = actualMap[f.empleado.id]?.[d.dia]?.codigo || '';
             if (hoy !== '' && hoy !== 'L') return false;
 
+            // Regla 1: Máximo 6 días consecutivos laborados sin descanso
+            if (superaMaximoDiasConsecutivos(f.empleado, d.dia)) return false;
+
+            // Regla 2: Máximo 3 noches consecutivas para evitar fatiga severa
+            if (franjasTurno.noche && contarNochesConsecutivasPrevias(f.empleado, d.dia) >= 3) {
+              return false;
+            }
+
+            // Regla 3: Descanso legal >= 12h respecto al día anterior (o cierre del mes previo en Día 1)
             const ayer =
               d.dia === 1
                 ? f.empleado.ultimoTurnoMesPrevio
@@ -1682,7 +2345,7 @@ export class AppComponent implements OnInit {
             const descansoDesdeAyer = this.calcularHorasDescansoEntreTurnos(cfgAyer, cfgTurno);
             if (descansoDesdeAyer !== null && descansoDesdeAyer < 12) return false;
 
-            // Si el día siguiente ya tiene un turno operativo asignado, verificar que deje >= 12h de descanso
+            // Regla 4: Si el día siguiente ya tiene un turno operativo asignado, verificar >= 12h de descanso
             if (d.dia < totalDias) {
               const sigCod = actualMap[f.empleado.id]?.[d.dia + 1]?.codigo || '';
               const cfgSig = catalogo[sigCod];
@@ -1699,17 +2362,38 @@ export class AppComponent implements OnInit {
             }
             return true;
           })
-          .sort(
-            (a, b) =>
+          .sort((a, b) => {
+            // Prioridad 0: Rotación horaria escalonada (L -> M[2d] -> T[2d] -> N[2d] -> L[2d])
+            // Evita que todos los empleados trabajen 6 días seguidos desde el Día 1 y colapsen juntos los días 7, 14, 21 y 28
+            const scoreRotA = calcularPuntajeRotacion(a.empleado, d.dia, faseDestino);
+            const scoreRotB = calcularPuntajeRotacion(b.empleado, d.dia, faseDestino);
+            if (scoreRotA !== scoreRotB) return scoreRotA - scoreRotB;
+
+            // Equidad 1: si es turno nocturno, priorizar quien lleve menos noches en el mes
+            if (franjasTurno.noche) {
+              const diffNoches =
+                (nochesLoop.get(a.empleado.id) || 0) - (nochesLoop.get(b.empleado.id) || 0);
+              if (diffNoches !== 0) return diffNoches;
+            }
+            // Equidad 2: si es domingo o festivo, priorizar quien lleve menos domingos/festivos laborados
+            if (esDomOFest) {
+              const diffDom =
+                (domFestLoop.get(a.empleado.id) || 0) - (domFestLoop.get(b.empleado.id) || 0);
+              if (diffDom !== 0) return diffDom;
+            }
+            // Equidad 3: priorizar menor saldo acumulado en el Banco de Horas
+            return (
               a.nuevoSaldoBanco +
               (horasExtraLoop.get(a.empleado.id) || 0) -
               (b.nuevoSaldoBanco + (horasExtraLoop.get(b.empleado.id) || 0))
-          );
+            );
+          });
 
+        const enBorrador = this.estadoCuadrante() === 'BORRADOR';
         for (let i = 0; i < Math.min(cant, candidatos.length); i++) {
           const cand = candidatos[i];
           const fila = { ...(actualMap[cand.empleado.id] || {}) };
-          const prev = fila[d.dia]?.previsto ?? 'L';
+          const prev = enBorrador ? turno : (fila[d.dia]?.previsto || turno);
           fila[d.dia] = {
             codigo: turno,
             previsto: prev,
@@ -1725,15 +2409,21 @@ export class AppComponent implements OnInit {
           });
           horasExtraLoop.set(
             cand.empleado.id,
-            (horasExtraLoop.get(cand.empleado.id) || 0) + (cfgTurno?.horasOrdinarias || 8)
+            (horasExtraLoop.get(cand.empleado.id) || 0) + (cfgTurno.horasOrdinarias || 8)
           );
+          if (franjasTurno.noche) {
+            nochesLoop.set(cand.empleado.id, (nochesLoop.get(cand.empleado.id) || 0) + 1);
+          }
+          if (esDomOFest) {
+            domFestLoop.set(cand.empleado.id, (domFestLoop.get(cand.empleado.id) || 0) + 1);
+          }
           totalAsignados++;
 
-          // Auto-protección Post-Guardia: asignar Saliente (S) en d.dia + 1 tras turno nocturno pesado
+          // Auto-protección Post-Guardia: asignar Saliente (S) en d.dia + 1 tras turno nocturno pesado (ej. G24)
           if (esNocturno && d.dia < totalDias) {
             const sigActual = fila[d.dia + 1]?.codigo || '';
             if (!sigActual || sigActual === 'L') {
-              const prevSig = fila[d.dia + 1]?.previsto ?? (sigActual || 'L');
+              const prevSig = enBorrador ? 'S' : (fila[d.dia + 1]?.previsto || 'S');
               fila[d.dia + 1] = {
                 codigo: 'S',
                 previsto: prevSig,
@@ -1754,9 +2444,72 @@ export class AppComponent implements OnInit {
         }
       };
 
-      cubrir('M8', faltanM);
-      cubrir('T8', faltanT);
-      cubrir('N8', faltanN);
+      const reglasCargosSrv = srv.reglasPorCargo || [];
+      const filtroCatActiva = this.filtroCategoriaActiva();
+
+      if (reglasCargosSrv.length > 0) {
+        // Autocompletado diferenciado por Cargo Profesional (RequerimientoCobertura + ServicioTurnoHabilitado)
+        for (const regla of reglasCargosSrv) {
+          if (filtroCatActiva !== 'TODAS' && regla.categoriaNombre !== filtroCatActiva) continue;
+          const metasCargo = this.obtenerMetasDiaServicio(srv, d, regla.categoriaNombre);
+          if (metasCargo.cerrado) continue;
+
+          const turnosCargo = seleccionarTurnosIdeales(regla.turnosHabilitados);
+
+          const cob1 = recalcularCoberturaDia(d.dia, regla.categoriaNombre);
+          cubrir(turnosCargo.turnoManana, Math.max(0, metasCargo.reqManana - cob1.manana), regla.categoriaNombre);
+
+          const cob2 = recalcularCoberturaDia(d.dia, regla.categoriaNombre);
+          cubrir(turnosCargo.turnoTarde, Math.max(0, metasCargo.reqTarde - cob2.tarde), regla.categoriaNombre);
+
+          const cob3 = recalcularCoberturaDia(d.dia, regla.categoriaNombre);
+          cubrir(turnosCargo.turnoNoche, Math.max(0, metasCargo.reqNoche - cob3.noche), regla.categoriaNombre);
+        }
+      } else {
+        const metasDia = this.obtenerMetasDiaServicio(srv, d);
+        if (!metasDia.cerrado) {
+          const cob1 = recalcularCoberturaDia(d.dia);
+          cubrir(turnoManana, Math.max(0, metasDia.reqManana - cob1.manana));
+
+          const cob2 = recalcularCoberturaDia(d.dia);
+          cubrir(turnoTarde, Math.max(0, metasDia.reqTarde - cob2.tarde));
+
+          const cob3 = recalcularCoberturaDia(d.dia);
+          cubrir(turnoNoche, Math.max(0, metasDia.reqNoche - cob3.noche));
+        }
+      }
+    }
+
+    // 2. Asignar 'L' (Libre Programado) en todas las celdas que hayan quedado vacías ('')
+    const enBorradorFinal = this.estadoCuadrante() === 'BORRADOR';
+    const filtroCatFinal = this.filtroCategoriaActiva();
+    for (const f of filasBase) {
+      if (filtroCatFinal !== 'TODAS' && f.empleado.categoria !== filtroCatFinal) continue;
+      const fila = { ...(actualMap[f.empleado.id] || {}) };
+      let modificada = false;
+      for (const d of dias) {
+        const codActual = fila[d.dia]?.codigo || '';
+        if (codActual === '') {
+          const prevLibre = enBorradorFinal ? 'L' : (fila[d.dia]?.previsto || 'L');
+          fila[d.dia] = {
+            codigo: 'L',
+            previsto: prevLibre,
+            esRotacion: f.esPersonalRotado,
+            servicioEjecutorId: this.servicioSeleccionadoId(),
+          };
+          loteParaDb.push({
+            empleadoId: f.empleado.id,
+            dia: d.dia,
+            codigo: 'L',
+            previsto: prevLibre,
+            esRotacion: f.esPersonalRotado,
+          });
+          modificada = true;
+        }
+      }
+      if (modificada) {
+        actualMap[f.empleado.id] = fila;
+      }
     }
 
     this.actualizarAsignacionesMesActual(actualMap);
@@ -1772,17 +2525,192 @@ export class AppComponent implements OnInit {
         .subscribe();
     }
     this.mostrarNotificacion(
-      `Se completaron automáticamente ${totalAsignados} turnos faltantes.`
+      `Autocompletado por cargo finalizado: ${totalAsignados} turnos operativos asignados respetando metas por cargo, 12h de descanso y máx. 6 días continuos.`
     );
   }
 
   // Administración de Servicios y Servicios de Apoyo
+  esTurnoHabilitadoEnServicioForm(codigo: string): boolean {
+    return this.nuevoServicioTurnosHabilitados().includes(codigo.toUpperCase());
+  }
+
+  alternarTurnoEnServicioForm(codigo: string): void {
+    const cod = codigo.toUpperCase();
+    const actuales = this.nuevoServicioTurnosHabilitados();
+    if (actuales.includes(cod)) {
+      if (actuales.length <= 1) {
+        this.mostrarNotificacion('El servicio debe tener al menos un turno habilitado.');
+        return;
+      }
+      const nuevos = actuales.filter((c) => c !== cod);
+      this.nuevoServicioTurnosHabilitados.set(nuevos);
+      // También quitarlo de las reglas por cargo si estaba activo
+      this.nuevoServicioReglasPorCargo.update((reglas) =>
+        reglas.map((r) => ({
+          ...r,
+          turnosHabilitados: (r.turnosHabilitados || []).filter((t) => t.toUpperCase() !== cod),
+        }))
+      );
+    } else {
+      this.nuevoServicioTurnosHabilitados.set([...actuales, cod]);
+      // Habilitarlo también por defecto en los cargos del servicio
+      this.nuevoServicioReglasPorCargo.update((reglas) =>
+        reglas.map((r) => ({
+          ...r,
+          turnosHabilitados: r.turnosHabilitados.includes(cod)
+            ? r.turnosHabilitados
+            : [...r.turnosHabilitados, cod],
+        }))
+      );
+    }
+  }
+
+  aplicarPlantillaTurnosServicio(
+    plantilla: 'ROTATIVO_8H' | 'GUARDIAS_12_24' | 'ADMINISTRATIVO' | 'TODOS'
+  ): void {
+    const baseDescansos = ['S', 'L', 'COMP', 'VAC', 'INC'];
+    let nuevos: string[];
+    if (plantilla === 'ROTATIVO_8H') {
+      nuevos = ['M8', 'T8', 'N8', ...baseDescansos];
+    } else if (plantilla === 'GUARDIAS_12_24') {
+      nuevos = ['D12', 'N12', 'G24', ...baseDescansos];
+    } else if (plantilla === 'ADMINISTRATIVO') {
+      nuevos = ['ADM', 'M6', 'T6', ...baseDescansos];
+    } else {
+      nuevos = this.listaTurnosCatalogo().map((t) => t.codigo);
+    }
+    this.nuevoServicioTurnosHabilitados.set(nuevos);
+    this.nuevoServicioReglasPorCargo.update((reglas) =>
+      reglas.map((r) => ({ ...r, turnosHabilitados: [...nuevos] }))
+    );
+  }
+
+  turnosOperativosHabilitadosEnForm = computed<TipoTurnoConfig[]>(() => {
+    const hab = new Set(this.nuevoServicioTurnosHabilitados().map((c) => c.toUpperCase()));
+    return this.listaTurnosCatalogo().filter(
+      (t) => t.horasOrdinarias > 0 && !t.esAusencia && hab.has(t.codigo.toUpperCase())
+    );
+  });
+
+  esTurnoHabilitadoEnCargoForm(categoriaNombre: string, codigoTurno: string): boolean {
+    const regla = this.nuevoServicioReglasPorCargo().find((r) => r.categoriaNombre === categoriaNombre);
+    if (!regla) return true;
+    return (regla.turnosHabilitados || []).map((c) => c.toUpperCase()).includes(codigoTurno.toUpperCase());
+  }
+
+  alternarTurnoEnCargoForm(categoriaNombre: string, codigoTurno: string): void {
+    const cod = codigoTurno.toUpperCase();
+    this.nuevoServicioReglasPorCargo.update((reglas) =>
+      reglas.map((r) => {
+        if (r.categoriaNombre !== categoriaNombre) return r;
+        const actuales = (r.turnosHabilitados || []).map((c) => c.toUpperCase());
+        const operativosActuales = actuales.filter((c) => {
+          const cfg = this.catalogoTurnosMap()[c];
+          return cfg && cfg.horasOrdinarias > 0 && !cfg.esAusencia;
+        });
+        if (actuales.includes(cod)) {
+          if (operativosActuales.length <= 1) {
+            this.mostrarNotificacion(`El cargo "${categoriaNombre}" debe conservar al menos un turno operativo.`);
+            return r;
+          }
+          return { ...r, turnosHabilitados: actuales.filter((c) => c !== cod) };
+        }
+        return { ...r, turnosHabilitados: [...actuales, cod] };
+      })
+    );
+  }
+
+  actualizarMetaCargoForm(
+    categoriaNombre: string,
+    campo: 'reqManana' | 'reqTarde' | 'reqNoche' | 'reqMananaFds' | 'reqTardeFds' | 'reqNocheFds',
+    valor: number
+  ): void {
+    const num = Math.max(0, Number(valor) || 0);
+    this.nuevoServicioReglasPorCargo.update((reglas) => {
+      const actualizadas = reglas.map((r) =>
+        r.categoriaNombre === categoriaNombre ? { ...r, [campo]: num } : r
+      );
+      // Recalcular automáticamente la meta total del servicio como suma de sus cargos
+      this.nuevoServicioReqManana.set(actualizadas.reduce((s, r) => s + (Number(r.reqManana) || 0), 0));
+      this.nuevoServicioReqTarde.set(actualizadas.reduce((s, r) => s + (Number(r.reqTarde) || 0), 0));
+      this.nuevoServicioReqNoche.set(actualizadas.reduce((s, r) => s + (Number(r.reqNoche) || 0), 0));
+      this.nuevoServicioReqMananaFds.set(actualizadas.reduce((s, r) => s + (Number(r.reqMananaFds) || 0), 0));
+      this.nuevoServicioReqTardeFds.set(actualizadas.reduce((s, r) => s + (Number(r.reqTardeFds) || 0), 0));
+      this.nuevoServicioReqNocheFds.set(actualizadas.reduce((s, r) => s + (Number(r.reqNocheFds) || 0), 0));
+      return actualizadas;
+    });
+  }
+
+  obtenerTurnosOperativosServicio(srv: ServicioHospitalario): TipoTurnoConfig[] {
+    const catalogo = this.catalogoTurnosMap();
+    const codigos =
+      srv.turnosHabilitados && srv.turnosHabilitados.length > 0
+        ? srv.turnosHabilitados
+        : ['M8', 'T8', 'N8', 'D12', 'G24'];
+    return codigos
+      .map((c) => catalogo[c.toUpperCase()])
+      .filter((t): t is TipoTurnoConfig => Boolean(t && t.horasOrdinarias > 0 && !t.esAusencia));
+  }
+
   cargarServicioParaEdicion(srv: ServicioHospitalario): void {
     this.servicioEditandoId.set(srv.id);
     this.nuevoServicioCodigo.set(srv.codigo);
     this.nuevoServicioNombre.set(srv.nombre);
     this.nuevoServicioTipoAsistencia.set(srv.tipoAsistencia || 'URGENCIAS');
+    this.nuevoServicioModalidadDias.set(srv.modalidadDias || 'TODOS_24_7');
+    this.nuevoServicioReqManana.set(srv.reqManana ?? 4);
+    this.nuevoServicioReqTarde.set(srv.reqTarde ?? 4);
+    this.nuevoServicioReqNoche.set(srv.reqNoche ?? 2);
+    this.nuevoServicioReqMananaFds.set(srv.reqMananaFds ?? srv.reqManana ?? 4);
+    this.nuevoServicioReqTardeFds.set(srv.reqTardeFds ?? srv.reqTarde ?? 4);
+    this.nuevoServicioReqNocheFds.set(srv.reqNocheFds ?? srv.reqNoche ?? 2);
+    const turnosSrv =
+      srv.turnosHabilitados && srv.turnosHabilitados.length > 0
+        ? [...srv.turnosHabilitados]
+        : ['M8', 'T8', 'N8', 'M6', 'T6', 'N12', 'D12', 'G24', 'ADM', 'MD', 'AP', 'DISP', 'S', 'L', 'COMP', 'VAC', 'INC'];
+    this.nuevoServicioTurnosHabilitados.set(turnosSrv);
+
+    if (srv.reglasPorCargo && srv.reglasPorCargo.length > 0) {
+      this.nuevoServicioReglasPorCargo.set(
+        srv.reglasPorCargo.map((r) => ({
+          ...r,
+          turnosHabilitados: r.turnosHabilitados?.length ? [...r.turnosHabilitados] : [...turnosSrv],
+        }))
+      );
+    } else {
+      // Construir a partir de los cargos con personal adscrito al servicio
+      const empsSrv = this.empleados().filter((e) => e.servicioBaseId === srv.id);
+      const cats = Array.from(new Set(empsSrv.map((e) => e.categoria)));
+      this.nuevoServicioReglasPorCargo.set(
+        cats.map((cat) => {
+          const count = empsSrv.filter((e) => e.categoria === cat).length;
+          return {
+            categoriaNombre: cat,
+            empleadosCount: count,
+            reqManana: Math.max(1, Math.min(2, Math.floor(count / 2))),
+            reqTarde: Math.max(1, Math.min(2, Math.floor(count / 2))),
+            reqNoche: count >= 3 ? 1 : 0,
+            reqMananaFds: Math.max(1, Math.min(2, Math.floor(count / 2))),
+            reqTardeFds: Math.max(1, Math.min(2, Math.floor(count / 2))),
+            reqNocheFds: count >= 3 ? 1 : 0,
+            turnosHabilitados: [...turnosSrv],
+          };
+        })
+      );
+    }
+
     this.mostrarNotificacion(`Modo edición activado: ${srv.nombre}`);
+
+    setTimeout(() => {
+      const panel = document.getElementById('panel-edicion-servicio');
+      if (panel) {
+        panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      const inputCod = document.getElementById('input-codigo-servicio') as HTMLInputElement | null;
+      if (inputCod) {
+        inputCod.focus({ preventScroll: true });
+      }
+    }, 30);
   }
 
   cancelarEdicionServicio(): void {
@@ -1790,12 +2718,41 @@ export class AppComponent implements OnInit {
     this.nuevoServicioCodigo.set('');
     this.nuevoServicioNombre.set('');
     this.nuevoServicioTipoAsistencia.set('URGENCIAS');
+    this.nuevoServicioModalidadDias.set('TODOS_24_7');
+    this.nuevoServicioReqManana.set(4);
+    this.nuevoServicioReqTarde.set(4);
+    this.nuevoServicioReqNoche.set(2);
+    this.nuevoServicioReqMananaFds.set(2);
+    this.nuevoServicioReqTardeFds.set(2);
+    this.nuevoServicioReqNocheFds.set(1);
+    this.nuevoServicioTurnosHabilitados.set([
+      'M8',
+      'T8',
+      'N8',
+      'D12',
+      'G24',
+      'S',
+      'L',
+      'COMP',
+      'VAC',
+      'INC',
+    ]);
+    this.nuevoServicioReglasPorCargo.set([]);
   }
 
   guardarServicioAutonomo(): void {
     const cod = this.nuevoServicioCodigo().trim().toUpperCase();
     const nom = this.nuevoServicioNombre().trim();
     const tipo = this.nuevoServicioTipoAsistencia();
+    const modalidadDias = this.nuevoServicioModalidadDias();
+    const reqManana = Math.max(0, Number(this.nuevoServicioReqManana()) || 0);
+    const reqTarde = Math.max(0, Number(this.nuevoServicioReqTarde()) || 0);
+    const reqNoche = Math.max(0, Number(this.nuevoServicioReqNoche()) || 0);
+    const reqMananaFds = Math.max(0, Number(this.nuevoServicioReqMananaFds()) || 0);
+    const reqTardeFds = Math.max(0, Number(this.nuevoServicioReqTardeFds()) || 0);
+    const reqNocheFds = Math.max(0, Number(this.nuevoServicioReqNocheFds()) || 0);
+    const turnosHabilitados = this.nuevoServicioTurnosHabilitados();
+    const reglasPorCargo = this.nuevoServicioReglasPorCargo();
     const editandoId = this.servicioEditandoId();
 
     if (!cod || !nom) {
@@ -1815,10 +2772,23 @@ export class AppComponent implements OnInit {
     if (editandoId) {
       // Actualizar existente
       this.api
-        .actualizarServicio(editandoId, { codigo: cod, nombre: nom, tipoAsistencia: tipo })
+        .actualizarServicio(editandoId, {
+          codigo: cod,
+          nombre: nom,
+          tipoAsistencia: tipo,
+          reqManana,
+          reqTarde,
+          reqNoche,
+          modalidadDias,
+          reqMananaFds,
+          reqTardeFds,
+          reqNocheFds,
+          turnosHabilitados,
+          reglasPorCargo,
+        })
         .subscribe({
           next: () => {
-            this.mostrarNotificacion(`Servicio "${nom}" actualizado en PostgreSQL.`);
+            this.mostrarNotificacion(`Servicio "${nom}", metas por cargo y turnos habilitados actualizados en PostgreSQL.`);
             this.cancelarEdicionServicio();
             this.recargarServicios();
           },
@@ -1830,7 +2800,20 @@ export class AppComponent implements OnInit {
     } else {
       // Crear nuevo servicio en PostgreSQL
       this.api
-        .crearServicio({ codigo: cod, nombre: nom, tipoAsistencia: tipo })
+        .crearServicio({
+          codigo: cod,
+          nombre: nom,
+          tipoAsistencia: tipo,
+          reqManana,
+          reqTarde,
+          reqNoche,
+          modalidadDias,
+          reqMananaFds,
+          reqTardeFds,
+          reqNocheFds,
+          turnosHabilitados,
+          reglasPorCargo,
+        })
         .subscribe({
           next: () => {
             this.mostrarNotificacion(`Servicio "${nom}" creado y persistido en PostgreSQL.`);
@@ -2040,19 +3023,20 @@ export class AppComponent implements OnInit {
     const totalDias = this.diasDelMes().length;
 
     // 1. Simular descanso para Solicitante (emp1) al recibir turno2:
-    if (dia > 1) {
-      const codPrev1 = map[emp1Id]?.[dia - 1]?.codigo || '';
-      const cfgPrev1 = catalogo[codPrev1];
-      const descPrev1 = this.calcularHorasDescansoEntreTurnos(cfgPrev1, cfgT2);
-      if (
-        (cfgPrev1?.esNocturnoPesado && cfgT2 && cfgT2.horasOrdinarias > 0 && turno2 !== 'S' && turno2 !== 'L') ||
-        (descPrev1 !== null && descPrev1 < 12)
-      ) {
-        return {
-          valida: false,
-          motivo: `Infracción CST Art. 160 para ${emp1.nombre}: Tu turno del día anterior (${codPrev1}) y el nuevo turno (${turno2}) dejan menos de 12h de descanso legal.`,
-        };
-      }
+    const codPrev1 =
+      dia === 1
+        ? this.obtenerUltimoTurnoMesPrevio(emp1Id, emp1.ultimoTurnoMesPrevio || 'L')
+        : map[emp1Id]?.[dia - 1]?.codigo || '';
+    const cfgPrev1 = catalogo[codPrev1];
+    const descPrev1 = this.calcularHorasDescansoEntreTurnos(cfgPrev1, cfgT2);
+    if (
+      (cfgPrev1?.esNocturnoPesado && cfgT2 && cfgT2.horasOrdinarias > 0 && turno2 !== 'S' && turno2 !== 'L') ||
+      (descPrev1 !== null && descPrev1 < 12)
+    ) {
+      return {
+        valida: false,
+        motivo: `Infracción CST Art. 160 para ${emp1.nombre}: Tu turno del día anterior (${codPrev1}) y el nuevo turno (${turno2}) dejan menos de 12h de descanso legal.`,
+      };
     }
     if (dia < totalDias) {
       const codSig1 = map[emp1Id]?.[dia + 1]?.codigo || '';
@@ -2070,19 +3054,20 @@ export class AppComponent implements OnInit {
     }
 
     // 2. Simular descanso para Receptor (emp2) al recibir turno1:
-    if (dia > 1) {
-      const codPrev2 = map[emp2Id]?.[dia - 1]?.codigo || '';
-      const cfgPrev2 = catalogo[codPrev2];
-      const descPrev2 = this.calcularHorasDescansoEntreTurnos(cfgPrev2, cfgT1);
-      if (
-        (cfgPrev2?.esNocturnoPesado && cfgT1 && cfgT1.horasOrdinarias > 0 && turno1 !== 'S' && turno1 !== 'L') ||
-        (descPrev2 !== null && descPrev2 < 12)
-      ) {
-        return {
-          valida: false,
-          motivo: `Infracción CST Art. 160 para ${emp2.nombre}: Su turno del día anterior (${codPrev2}) y el turno que recibiría (${turno1}) dejan menos de 12h de descanso legal.`,
-        };
-      }
+    const codPrev2 =
+      dia === 1
+        ? this.obtenerUltimoTurnoMesPrevio(emp2Id, emp2.ultimoTurnoMesPrevio || 'L')
+        : map[emp2Id]?.[dia - 1]?.codigo || '';
+    const cfgPrev2 = catalogo[codPrev2];
+    const descPrev2 = this.calcularHorasDescansoEntreTurnos(cfgPrev2, cfgT1);
+    if (
+      (cfgPrev2?.esNocturnoPesado && cfgT1 && cfgT1.horasOrdinarias > 0 && turno1 !== 'S' && turno1 !== 'L') ||
+      (descPrev2 !== null && descPrev2 < 12)
+    ) {
+      return {
+        valida: false,
+        motivo: `Infracción CST Art. 160 para ${emp2.nombre}: Su turno del día anterior (${codPrev2}) y el turno que recibiría (${turno1}) dejan menos de 12h de descanso legal.`,
+      };
     }
     if (dia < totalDias) {
       const codSig2 = map[emp2Id]?.[dia + 1]?.codigo || '';
@@ -2374,6 +3359,14 @@ export class AppComponent implements OnInit {
   onItemNavegacionClick(
     vista: 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'PORTAL_EMPLEADO' | 'CONFIGURACION'
   ): void {
+    if (this.esColaborador() && (vista === 'PLANIFICADOR' || vista === 'REPORTES' || vista === 'CONFIGURACION')) {
+      this.mostrarNotificacion('Acceso restringido: tu perfil de Colaborador solo tiene acceso a Mi Calendario y Solicitudes.');
+      return;
+    }
+    if (this.esCoordinador() && vista === 'CONFIGURACION') {
+      this.mostrarNotificacion('Acceso restringido: la configuración global está reservada para Talento Humano / Administración.');
+      return;
+    }
     this.vistaActual.set(vista);
     if (!this.sidebarFijo()) {
       this.sidebarHovered.set(false);
@@ -2482,7 +3475,21 @@ export class AppComponent implements OnInit {
   }
 
   cambiarEstadoCuadrante(): void {
+    if (this.esColaborador()) {
+      this.mostrarNotificacion('No tienes permisos para cambiar el estado del cuadrante.');
+      return;
+    }
+
     const actual = this.estadoCuadrante();
+    if (this.esCoordinador() && actual === 'PUBLICADO') {
+      this.mostrarNotificacion('El Cierre para Nómina está reservado exclusivamente al perfil de Talento Humano / Nómina.');
+      return;
+    }
+    if (this.esCoordinador() && actual === 'CERRADO_NOMINA') {
+      this.mostrarNotificacion('Este mes ya fue cerrado para Nómina. Solo Talento Humano puede reabrirlo.');
+      return;
+    }
+
     const srvId = this.servicioSeleccionadoId();
     const anio = this.anioSeleccionado();
     const mes = this.mesSeleccionado();
@@ -2510,6 +3517,31 @@ export class AppComponent implements OnInit {
     }
 
     this.estadosPorCuadrante.update((m) => ({ ...m, [key]: nuevoEstado }));
+
+    // Al publicar el cuadrante, congelar la foto oficial del Turno Previsto (previsto = codigo) en el servicio activo
+    if (nuevoEstado === 'PUBLICADO') {
+      const actualMap = { ...this.asignaciones() };
+      const dias = this.diasDelMes();
+      for (const { emp, esRotado } of this.empleadosServicioSinFiltro()) {
+        const fila = { ...(actualMap[emp.id] || {}) };
+        let modificada = false;
+        for (const d of dias) {
+          const celda = fila[d.dia];
+          if (!celda) continue;
+          if (esRotado && celda.servicioEjecutorId && celda.servicioEjecutorId !== srvId) {
+            continue;
+          }
+          if (celda.previsto !== celda.codigo) {
+            fila[d.dia] = { ...celda, previsto: celda.codigo };
+            modificada = true;
+          }
+        }
+        if (modificada) {
+          actualMap[emp.id] = fila;
+        }
+      }
+      this.actualizarAsignacionesMesActual(actualMap);
+    }
 
     // Consolidar siempre la totalidad del personal de planta del servicio (ignorando cualquier filtro visual de categoría)
     const saldosConsolidados =
@@ -2557,6 +3589,9 @@ export class AppComponent implements OnInit {
   }
 
   cambiarEmpleadoPortal(nuevoId: string): void {
+    if (!this.esAdminTh()) {
+      return;
+    }
     this.empleadoPortalId.set(nuevoId);
     const pares = this.companerosParesPortal();
     this.companeroPermutaId.set(pares.length > 0 ? pares[0].id : '');
@@ -2566,13 +3601,85 @@ export class AppComponent implements OnInit {
     this.enfocarCeldaPorId(empId, dia);
   }
 
+  abrirModalIcal(): void {
+    const empId = this.empleadoPortalId() || this.sesionActual()?.empleadoId || '';
+    const empObj = this.empleados().find((e) => e.id === empId);
+    this.enlaceIcalEmpleadoNombre.set(empObj?.nombre || this.sesionActual()?.nombre || 'Colaborador');
+    this.modalIcalAbierto.set(true);
+
+    if (empId) {
+      this.api.obtenerEnlaceCalendarioIcal(empId).subscribe({
+        next: (res) => {
+          this.enlaceIcalHttp.set(res.httpUrl);
+          this.enlaceIcalWebcal.set(res.webcalUrl);
+          this.enlaceIcalEmpleadoNombre.set(res.empleadoNombre);
+        },
+        error: () => {
+          const fallbackToken = `cal_${empObj?.documento || empId}`;
+          this.enlaceIcalHttp.set(`http://localhost:3000/api/v1/calendario/feed/${fallbackToken}.ics`);
+          this.enlaceIcalWebcal.set(`webcal://localhost:3000/api/v1/calendario/feed/${fallbackToken}.ics`);
+        },
+      });
+    }
+  }
+
   copiarEnlaceIcal(): void {
-    this.modalIcalAbierto.set(false);
-    this.mostrarNotificacion('Enlace de calendario copiado al portapapeles.');
+    const url = this.enlaceIcalHttp() || this.enlaceIcalWebcal();
+    if (!url) {
+      this.mostrarNotificacion('Generando enlace de calendario, intenta nuevamente...');
+      return;
+    }
+
+    const finalizarCopia = () => {
+      this.modalIcalAbierto.set(false);
+      this.mostrarNotificacion('📋 Enlace personal de calendario (.ics) copiado al portapapeles.');
+    };
+
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(url).then(finalizarCopia).catch(() => {
+        this.copiarTextoFallback(url);
+        finalizarCopia();
+      });
+    } else {
+      this.copiarTextoFallback(url);
+      finalizarCopia();
+    }
+  }
+
+  private copiarTextoFallback(texto: string): void {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = texto;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    } catch {}
+  }
+
+  descargarArchivoIcal(): void {
+    const url = this.enlaceIcalHttp();
+    if (!url) return;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Mis_Turnos_${(this.enlaceIcalEmpleadoNombre() || 'Hospital').replace(/\s+/g, '_')}.ics`;
+    a.target = '_blank';
+    a.click();
+    this.mostrarNotificacion('⬇️ Descargando archivo de calendario (.ics)...');
   }
 
   notificarIntranet(): void {
-    this.mostrarNotificacion('Regresando a la Intranet Hospitalaria...');
+    const destino = this.sesionActual()?.intranetReturnUrl || this.intranetReturnUrl();
+    try {
+      sessionStorage.removeItem('rafa_turnos_sso_jwt');
+    } catch {}
+    this.sesionActual.set(null);
+    this.mostrarNotificacion('Cerrando sesión y regresando a la Intranet Hospitalaria...');
+    if (destino) {
+      window.location.href = destino;
+    }
   }
 
   obtenerConfigTurno(cod: CodigoTurno): TipoTurnoConfig | undefined {
@@ -2594,6 +3701,7 @@ export class AppComponent implements OnInit {
 
     this.turnoFormHoraInicio.set(turno.horaInicio || '07:00');
     this.turnoFormHoraFin.set(turno.horaFin || '15:00');
+    this.turnoFormMinutosAlmuerzo.set(turno.minutosAlmuerzo ?? 0);
     this.turnoFormNocturnoPesado.set(!!turno.esNocturnoPesado);
     this.turnoFormDescuentaBanco.set(!!turno.descuentaBancoHoras);
 
@@ -2611,6 +3719,7 @@ export class AppComponent implements OnInit {
     this.turnoFormModoJornada.set('HORARIO');
     this.turnoFormHoraInicio.set('07:00');
     this.turnoFormHoraFin.set('15:00');
+    this.turnoFormMinutosAlmuerzo.set(0);
     this.turnoFormColorKey.set('AZUL_CIELO');
     this.turnoFormNocturnoPesado.set(false);
     this.turnoFormDescuentaBanco.set(false);
@@ -2640,6 +3749,7 @@ export class AppComponent implements OnInit {
       horasOrdinarias: calc.ordinarias,
       horasDiurnas: calc.diurnas,
       horasNocturnas: calc.nocturnas,
+      minutosAlmuerzo: calc.minutosAlmuerzo,
       bgHex: tema.bgHex,
       textHex: tema.textHex,
       borderHex: tema.borderHex,
@@ -2663,9 +3773,11 @@ export class AppComponent implements OnInit {
         horasOrdinarias: nuevoTurno.horasOrdinarias,
         horasDiurnas: nuevoTurno.horasDiurnas,
         horasNocturnas: nuevoTurno.horasNocturnas,
+        minutosAlmuerzo: nuevoTurno.minutosAlmuerzo || 0,
         colorHex: nuevoTurno.bgHex,
         descuentaBancoHoras: nuevoTurno.descuentaBancoHoras,
         esNocturnoPesado: nuevoTurno.esNocturnoPesado,
+        visibleEnPaleta: nuevoTurno.visibleEnPaleta,
       })
       .subscribe({
         next: () => {
@@ -2680,21 +3792,43 @@ export class AppComponent implements OnInit {
         },
       });
 
+    // Si es un turno nuevo, incluirlo en la lista del formulario de servicio
+    if (!existente && !this.nuevoServicioTurnosHabilitados().includes(codigo)) {
+      this.nuevoServicioTurnosHabilitados.update((lista) => [...lista, codigo]);
+    }
+
     this.limpiarFormularioTurno();
   }
 
   alternarVisibilidadTurnoPaleta(codigo: string): void {
-    this.catalogoTurnosMap.update((actual) => {
-      const item = actual[codigo];
-      if (!item) return actual;
-      return {
-        ...actual,
-        [codigo]: {
-          ...item,
-          visibleEnPaleta: item.visibleEnPaleta === false ? true : false,
-        },
-      };
-    });
+    const itemActual = this.catalogoTurnosMap()[codigo];
+    if (!itemActual) return;
+    const nuevoValor = itemActual.visibleEnPaleta === false ? true : false;
+
+    this.catalogoTurnosMap.update((actual) => ({
+      ...actual,
+      [codigo]: {
+        ...itemActual,
+        visibleEnPaleta: nuevoValor,
+      },
+    }));
+
+    this.api
+      .guardarTipoTurno({
+        codigo: itemActual.codigo,
+        nombre: itemActual.nombre,
+        horaInicio: itemActual.horaInicio || '07:00',
+        horaFin: itemActual.horaFin || '15:00',
+        horasOrdinarias: itemActual.horasOrdinarias,
+        horasDiurnas: itemActual.horasDiurnas,
+        horasNocturnas: itemActual.horasNocturnas,
+        minutosAlmuerzo: itemActual.minutosAlmuerzo || 0,
+        colorHex: itemActual.bgHex,
+        descuentaBancoHoras: itemActual.descuentaBancoHoras,
+        esNocturnoPesado: itemActual.esNocturnoPesado,
+        visibleEnPaleta: nuevoValor,
+      })
+      .subscribe();
   }
 
   obtenerConflictoCelda(empId: string, dia: number): InfraccionNormativa | undefined {

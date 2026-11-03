@@ -12,6 +12,25 @@ export interface ServicioHermanoRef {
   nombre: string;
 }
 
+export type ModalidadDiasServicio =
+  | 'TODOS_24_7'
+  | 'TODOS_GUARDIA_FDS'
+  | 'LUN_SAB_SIN_FESTIVOS'
+  | 'LUN_VIE_HABILES';
+
+export interface ReglaCargoServicio {
+  categoriaId?: string;
+  categoriaNombre: string;
+  empleadosCount?: number;
+  reqManana: number;
+  reqTarde: number;
+  reqNoche: number;
+  reqMananaFds: number;
+  reqTardeFds: number;
+  reqNocheFds: number;
+  turnosHabilitados: string[];
+}
+
 export interface ServicioHospitalario {
   id: string;
   codigo: string;
@@ -21,6 +40,12 @@ export interface ServicioHospitalario {
   reqManana: number;
   reqTarde: number;
   reqNoche: number;
+  modalidadDias?: ModalidadDiasServicio;
+  reqMananaFds?: number;
+  reqTardeFds?: number;
+  reqNocheFds?: number;
+  turnosHabilitados?: string[];
+  reglasPorCargo?: ReglaCargoServicio[];
   empleadosCount?: number;
   hermanos?: ServicioHermanoRef[];
 }
@@ -36,6 +61,7 @@ export interface TipoTurnoConfig {
   horasOrdinarias: number;
   horasDiurnas: number;
   horasNocturnas: number;
+  minutosAlmuerzo?: number;
   bgHex: string;
   textHex: string;
   borderHex: string;
@@ -169,7 +195,7 @@ export const CATALOGO_TURNOS: Record<string, TipoTurnoConfig> = {
   D12: { codigo: 'D12', nombre: 'Guardia Diurna 12h', horario: '07:00 - 19:00', horaInicio: '07:00', horaFin: '19:00', horasOrdinarias: 12, horasDiurnas: 12, horasNocturnas: 0, bgHex: '#FFEDD5', textHex: '#C2410C', borderHex: '#FDBA74', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
   G24: { codigo: 'G24', nombre: 'Guardia Médica 24h', horario: '07:00 - 07:00 (+1)', horaInicio: '07:00', horaFin: '07:00', horasOrdinarias: 24, horasDiurnas: 13, horasNocturnas: 11, bgHex: '#FEE2E2', textHex: '#B91C1C', borderHex: '#FCA5A5', esAusencia: false, esNocturnoPesado: true, descuentaBancoHoras: false, visibleEnPaleta: true },
 
-  ADM: { codigo: 'ADM', nombre: 'Administrativo 8h', horario: '08:00 - 17:00', horaInicio: '08:00', horaFin: '17:00', horasOrdinarias: 8, horasDiurnas: 8, horasNocturnas: 0, bgHex: '#F3F4F6', textHex: '#374151', borderHex: '#D1D5DB', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
+  ADM: { codigo: 'ADM', nombre: 'Administrativo 8h', horario: '08:00 - 17:00', horaInicio: '08:00', horaFin: '17:00', horasOrdinarias: 8, horasDiurnas: 8, horasNocturnas: 0, minutosAlmuerzo: 60, bgHex: '#F3F4F6', textHex: '#374151', borderHex: '#D1D5DB', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
   MD: { codigo: 'MD', nombre: 'Madrugada / Aseo', horario: '06:00 - 14:00', horaInicio: '06:00', horaFin: '14:00', horasOrdinarias: 8, horasDiurnas: 8, horasNocturnas: 0, bgHex: '#E2E8F0', textHex: '#1E293B', borderHex: '#94A3B8', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
   AP: { codigo: 'AP', nombre: 'Refuerzo Horas Pico', horario: '10:00 - 18:00', horaInicio: '10:00', horaFin: '18:00', horasOrdinarias: 8, horasDiurnas: 8, horasNocturnas: 0, bgHex: '#CFFAFE', textHex: '#0891B2', borderHex: '#67E8F9', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
   DISP: { codigo: 'DISP', nombre: 'Disponibilidad / Retén', horario: 'Al llamado', horaInicio: '00:00', horaFin: '00:00', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, bgHex: '#FEF9C3', textHex: '#854D0E', borderHex: '#FDE047', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
@@ -188,3 +214,19 @@ export interface ModalConfirmacionConfig {
   esPeligroso?: boolean;
   onConfirmar: () => void;
 }
+
+export type RolUsuarioSso = 'ADMIN_TH' | 'COORDINADOR' | 'COLABORADOR';
+
+export interface SesionUsuarioSso {
+  empleadoId: string;
+  documento: string;
+  nombre: string;
+  correo?: string;
+  categoria: string;
+  rol: RolUsuarioSso;
+  servicioBaseId: string;
+  servicioBaseNombre: string;
+  serviciosPermitidosIds: string[];
+  intranetReturnUrl?: string;
+}
+
