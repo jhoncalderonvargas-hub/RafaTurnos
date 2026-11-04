@@ -259,6 +259,23 @@
           ✨ Autocompletar Turnos Faltantes
         </button>
 
+        <div class="undo-redo-cluster">
+          <button
+            class="btn-undo-action"
+            (click)="deshacerUltimaAccion()"
+            [disabled]="pilaDeshacer().length === 0"
+            title="Deshacer último cambio (Ctrl + Z)">
+            ↩️ Deshacer
+          </button>
+          <button
+            class="btn-undo-action"
+            (click)="rehacerUltimaAccion()"
+            [disabled]="pilaRehacer().length === 0"
+            title="Rehacer cambio revertido (Ctrl + Y)">
+            ↪️ Rehacer
+          </button>
+        </div>
+
         <button class="btn-outline" (click)="limpiarCuadranteCompleto()" title="Borra todos los turnos para armar el cuadro de turnos a mano (conserva VAC/INC)">
           🧹 Dejar en Blanco
         </button>
@@ -415,6 +432,14 @@
                   <span class="emp-name">{{ fila.empleado.nombre }}</span>
                   @if (fila.esPersonalRotado) {
                     <span class="badge-rotado" title="Personal de apoyo de otro servicio">🔄</span>
+                    <button
+                      type="button"
+                      class="btn-quitar-rotado"
+                      (click)="quitarPersonalApoyo(fila.empleado.id)"
+                      title="Quitar este colaborador del personal de apoyo"
+                    >
+                      ✕
+                    </button>
                   }
                 </div>
               </td>
@@ -736,6 +761,12 @@
                       <span class="mini-shift">{{ log.turnoNuevo || 'Vacío' }}</span>
                     </td>
                     <td>{{ log.motivo }}</td>
+                  </tr>
+                } @empty {
+                  <tr>
+                    <td colspan="6" class="text-muted" style="text-align: center; padding: 22px;">
+                      🛡️ No hay movimientos de auditoría registrados para este servicio.
+                    </td>
                   </tr>
                 }
               </tbody>
@@ -1211,17 +1242,22 @@
           @for (d of diasDelMes(); track d.dia) {
             @let celdaMia = portal.celdas[d.dia];
             @let cfgMio = obtenerConfigTurno(celdaMia?.codigo || '');
+            @let srvDia = obtenerServicioDiaPortal(celdaMia, portal.empleado.servicioBaseId);
             <div
               class="emp-day-card"
               [class.selected-day]="diaPermutaSeleccionado() === d.dia"
               [class.sat-card]="d.esSabado"
               [class.sun-card]="d.esDomingo"
               [class.holiday-card]="!!d.festivo"
+              [class.support-card]="srvDia?.esRotacion"
               (click)="seleccionarDiaEnPortal(d.dia)">
               <div class="emp-day-head">
                 <span class="emp-day-num">{{ d.dia }}</span>
                 @if (d.festivo) {
                   <span class="emp-festivo-tag" [title]="d.festivo.nombre">🇨🇴 Festivo</span>
+                }
+                @if (srvDia?.esRotacion) {
+                  <span class="emp-rot-tag" title="Personal de apoyo en otro servicio">🔄 Apoyo</span>
                 }
               </div>
 
@@ -1237,6 +1273,13 @@
               <div class="emp-day-hours">
                 {{ cfgMio ? cfgMio.horario : 'Descanso' }}
               </div>
+
+              @if (srvDia) {
+                <div class="emp-day-service" [class.srv-rotado]="srvDia.esRotacion" [title]="'Servicio asignado: ' + srvDia.nombre">
+                  <span class="srv-icon">{{ srvDia.esRotacion ? '🔄' : '📍' }}</span>
+                  <span class="srv-text">{{ srvDia.nombre }}</span>
+                </div>
+              }
             </div>
           }
 
@@ -1296,9 +1339,13 @@
             </div>
           }
 
-          <p class="panel-desc" style="margin-top: 12px;">
-            Tu turno el <strong>Día {{ diaPermutaSeleccionado() }}</strong>:
+          <p class="panel-desc" style="margin-top: 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <span>Tu turno el <strong>Día {{ diaPermutaSeleccionado() }}</strong>:</span>
             <span class="mini-shift">{{ portal.celdas[diaPermutaSeleccionado()]?.codigo || 'L' }}</span>
+            @let srvSel = servicioDiaSeleccionadoPortal();
+            <span class="badge-srv-panel" [class.badge-srv-rot]="srvSel.esRotacion" [title]="srvSel.esRotacion ? 'Servicio de apoyo rotado' : 'Servicio base asignado'">
+              {{ srvSel.esRotacion ? '🔄 ' : '📍 ' }}{{ srvSel.nombre }}
+            </span>
           </p>
 
           <div class="form-stack">
@@ -1359,7 +1406,7 @@
         <!-- ¿Quién está de turno conmigo ese día? -->
         <div class="panel-card">
           <div class="panel-header">
-            <h3>🏥 Compañeros de Turno — Día {{ diaPermutaSeleccionado() }} ({{ portal.servicioBase?.nombre || 'Mi Servicio' }})</h3>
+            <h3>🏥 Compañeros de Turno — Día {{ diaPermutaSeleccionado() }} ({{ servicioDiaSeleccionadoPortal().nombre }})</h3>
           </div>
 
           <table class="data-table">

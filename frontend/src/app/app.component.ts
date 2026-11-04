@@ -5,10 +5,12 @@ import {
   CATALOGO_TURNOS,
   CeldaAsignacion,
   CodigoTurno,
+  CambioCeldaHistorial,
   EmpleadoHospital,
   FestivoEntry,
   ModalConfirmacionConfig,
   ModalidadDiasServicio,
+  PasoHistorialEdicion,
   PermutaItem,
   ReglaCargoServicio,
   RegistroAuditoria,
@@ -138,7 +140,7 @@ export class AppComponent implements OnInit {
   // Catálogos reactivos cargados desde la Base de Datos
   servicios = signal<ServicioHospitalario[]>([]);
   empleados = signal<EmpleadoHospital[]>([]);
-  empleadosRotadosPorServicio = signal<Record<string, string[]>>({});
+  empleadosRotadosPorServicio = signal<Record<string, string[]>>(this.cargarRotadosDesdeStorage());
   catalogoTurnosMap = signal<Record<string, TipoTurnoConfig>>({ ...CATALOGO_TURNOS });
 
   // Lista maestra del catálogo (sin los alias duplicados M, T, N, G12 ni el marcador interno BLANCO)
@@ -366,8 +368,13 @@ export class AppComponent implements OnInit {
   // Solicitudes de Permuta 1-a-1 (Persistidas localmente sin datos residuales de prueba)
   listaPermutas = signal<PermutaItem[]>(this.cargarPermutasDesdeStorage());
 
-  // Bitácora de Auditoría (Persistida localmente sin datos residuales de prueba)
-  bitacoraAuditoria = signal<RegistroAuditoria[]>(this.cargarAuditoriaDesdeStorage());
+  // Bitácora de Auditoría Médico-Legal (Persistida de forma centralizada en PostgreSQL)
+  bitacoraAuditoria = signal<RegistroAuditoria[]>([]);
+
+  // Pilas de Deshacer (Ctrl+Z) y Rehacer (Ctrl+Y) en el Planificador
+  pilaDeshacer = signal<PasoHistorialEdicion[]>([]);
+  pilaRehacer = signal<PasoHistorialEdicion[]>([]);
+  private loteArrastreActual: CambioCeldaHistorial[] = [];
 
   // Novedades y Ausencias Oficiales desde Intranet Hospitalaria
   sincronizandoNovedades = signal<boolean>(false);
@@ -518,30 +525,37 @@ export class AppComponent implements OnInit {
     } catch {}
   }
 
+  private cargarRotadosDesdeStorage(): Record<string, string[]> {
+    try {
+      const raw = localStorage.getItem('rafa_turnos_rotados_servicio');
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private guardarRotadosEnStorage(mapa: Record<string, string[]>): void {
+    try {
+      localStorage.setItem('rafa_turnos_rotados_servicio', JSON.stringify(mapa));
+    } catch {}
+  }
+
   private actualizarListaPermutas(lista: PermutaItem[]): void {
     this.listaPermutas.set(lista);
     this.guardarPermutasEnStorage(lista);
   }
 
-  private cargarAuditoriaDesdeStorage(): RegistroAuditoria[] {
-    try {
-      const guardadas = localStorage.getItem('rafa_turnos_auditoria');
-      return guardadas ? JSON.parse(guardadas) : [];
-    } catch {
-      return [];
-    }
-  }
-
-  private guardarAuditoriaEnStorage(lista: RegistroAuditoria[]): void {
-    try {
-      localStorage.setItem('rafa_turnos_auditoria', JSON.stringify(lista));
-    } catch {}
-  }
-
-  private registrarLogAuditoria(log: RegistroAuditoria): void {
-    const actualizada = [log, ...this.bitacoraAuditoria().slice(0, 30)];
-    this.bitacoraAuditoria.set(actualizada);
-    this.guardarAuditoriaEnStorage(actualizada);
+  sincronizarAuditoriasDesdePostgres(): void {
+    const srvId = this.servicioSeleccionadoId();
+    this.api.obtenerAuditorias(srvId).subscribe({
+      next: (logs) => {
+        this.bitacoraAuditoria.set(logs || []);
+        try {
+          localStorage.removeItem('rafa_turnos_auditoria');
+        } catch {}
+      },
+      error: () => {},
+    });
   }
 
   private mapearEmpleadosDesdeBackend(rawEmps: any[]): EmpleadoHospital[] {
@@ -571,6 +585,7 @@ export class AppComponent implements OnInit {
     this.sincronizarCuadrantesDesdePostgres();
     this.sincronizarPermutasDesdePostgres();
     this.sincronizarNovedadesDesdePostgres();
+    this.sincronizarAuditoriasDesdePostgres();
   }
 
   sincronizarNovedadesDesdePostgres(): void {
@@ -807,6 +822,28 @@ export class AppComponent implements OnInit {
             }
             return copia;
           });
+
+          // Auto-descubrir personal de apoyo con asignaciones persistidas en PostgreSQL
+          const mapaRot = { ...this.empleadosRotadosPorServicio() };
+          let huboNuevosRotados = false;
+          for (const [, mapaEmpsDb] of Object.entries(res.asignacionesPorPeriodo)) {
+            for (const [empId, diasDb] of Object.entries(mapaEmpsDb)) {
+              for (const celdaDb of Object.values(diasDb)) {
+                if (celdaDb.esRotacion && celdaDb.servicioEjecutorId) {
+                  const srvEje = celdaDb.servicioEjecutorId;
+                  const lista = mapaRot[srvEje] || [];
+                  if (!lista.includes(empId)) {
+                    mapaRot[srvEje] = [...lista, empId];
+                    huboNuevosRotados = true;
+                  }
+                }
+              }
+            }
+          }
+          if (huboNuevosRotados) {
+            this.empleadosRotadosPorServicio.set(mapaRot);
+            this.guardarRotadosEnStorage(mapaRot);
+          }
         }
 
         if (res.saldosConsolidados) {
@@ -907,18 +944,34 @@ export class AppComponent implements OnInit {
     return Math.ceil(totalDirecciones / 2);
   });
 
-  // Empleados totales del servicio actual sin filtro de categoría (Planta + Rotados homólogos)
+  // Empleados totales del servicio actual sin filtro de categoría (Planta + Rotados homólogos / Apoyo)
   empleadosServicioSinFiltro = computed<{ emp: EmpleadoHospital; esRotado: boolean }[]>(() => {
     const srvId = this.servicioSeleccionadoId();
     const todos = this.empleados();
-    const idsRotados = this.empleadosRotadosPorServicio()[srvId] || [];
+    const idsRotados = new Set(this.empleadosRotadosPorServicio()[srvId] || []);
+
+    // Incluir también cualquier colaborador que tenga turnos asignados en este servicio durante el periodo
+    const matriz = this.asignaciones();
+    for (const emp of todos) {
+      if (emp.servicioBaseId !== srvId && !idsRotados.has(emp.id)) {
+        const celdasEmp = matriz[emp.id];
+        if (celdasEmp) {
+          const tieneTurnoEnServicio = Object.values(celdasEmp).some(
+            (c) => c && c.codigo && c.codigo !== '' && (c.servicioEjecutorId === srvId || c.esRotacion)
+          );
+          if (tieneTurnoEnServicio) {
+            idsRotados.add(emp.id);
+          }
+        }
+      }
+    }
 
     const propios = todos
       .filter((e) => e.servicioBaseId === srvId)
       .map((emp) => ({ emp, esRotado: false }));
 
     const rotados = todos
-      .filter((e) => idsRotados.includes(e.id))
+      .filter((e) => e.servicioBaseId !== srvId && idsRotados.has(e.id))
       .map((emp) => ({ emp, esRotado: true }));
 
     return [...propios, ...rotados].sort((a, b) => {
@@ -1627,6 +1680,43 @@ export class AppComponent implements OnInit {
     };
   });
 
+  obtenerServicioDiaPortal(celda?: CeldaAsignacion, srvBaseId?: string): {
+    nombre: string;
+    esRotacion: boolean;
+  } | null {
+    if (!celda || !celda.codigo || celda.codigo === 'L') return null;
+    const cfg = this.catalogoTurnosMap()[celda.codigo];
+    if (!cfg || cfg.horasOrdinarias <= 0 || cfg.esAusencia) return null;
+
+    const srvEjeId = celda.servicioEjecutorId || srvBaseId;
+    const servicio = this.servicios().find((s) => s.id === srvEjeId);
+    const esRotacion = Boolean(
+      celda.esRotacion || (celda.servicioEjecutorId && celda.servicioEjecutorId !== srvBaseId)
+    );
+
+    return {
+      nombre: servicio?.nombre || 'Servicio Hospitalario',
+      esRotacion,
+    };
+  }
+
+  servicioDiaSeleccionadoPortal = computed<{ id: string; nombre: string; esRotacion: boolean }>(() => {
+    const portal = this.datosEmpleadoPortal();
+    const dia = this.diaPermutaSeleccionado();
+    const celda = portal.celdas[dia];
+    const srvBaseId = portal.empleado.servicioBaseId;
+    const srvEjeId = celda?.servicioEjecutorId || srvBaseId;
+    const srv = this.servicios().find((s) => s.id === srvEjeId) || portal.servicioBase;
+    const esRotacion = Boolean(
+      celda?.esRotacion || (celda?.servicioEjecutorId && celda.servicioEjecutorId !== srvBaseId)
+    );
+    return {
+      id: srv?.id || srvBaseId,
+      nombre: srv?.nombre || 'Servicio Hospitalario',
+      esRotacion,
+    };
+  });
+
   companerosParesPortal = computed<EmpleadoHospital[]>(() => {
     const actual = this.datosEmpleadoPortal().empleado;
     return this.empleados().filter(
@@ -1638,17 +1728,33 @@ export class AppComponent implements OnInit {
   });
 
   equipoDeGuardiaDiaSeleccionado = computed(() => {
-    const actual = this.datosEmpleadoPortal().empleado;
+    const portal = this.datosEmpleadoPortal();
+    const actual = portal.empleado;
     const dia = this.diaPermutaSeleccionado();
     const matriz = this.asignaciones();
+    const srvActualId = this.servicioDiaSeleccionadoPortal().id;
 
     return this.empleados()
-      .filter((e) => e.servicioBaseId === actual.servicioBaseId && e.id !== actual.id)
-      .map((e) => ({
-        empleado: e,
-        turno: (matriz[e.id]?.[dia]?.codigo || 'L') as CodigoTurno,
-      }))
-      .filter((x) => x.turno !== '' && x.turno !== 'L' && x.turno !== 'S' && x.turno !== 'VAC' && x.turno !== 'INC');
+      .filter((e) => e.id !== actual.id)
+      .map((e) => {
+        const celda = matriz[e.id]?.[dia];
+        const turno = (celda?.codigo || 'L') as CodigoTurno;
+        const srvEjeId = celda?.servicioEjecutorId || e.servicioBaseId;
+        return {
+          empleado: e,
+          turno,
+          servicioEjecutorId: srvEjeId,
+        };
+      })
+      .filter(
+        (x) =>
+          x.servicioEjecutorId === srvActualId &&
+          x.turno !== '' &&
+          x.turno !== 'L' &&
+          x.turno !== 'S' &&
+          x.turno !== 'VAC' &&
+          x.turno !== 'INC'
+      );
   });
 
   propuestasRecibidasPortal = computed<PermutaItem[]>(() => {
@@ -1698,6 +1804,31 @@ export class AppComponent implements OnInit {
     if (event.key === 'Control' || event.key === 'Meta') {
       this.teclaCtrlPresionada.set(true);
     }
+
+    const isCtrl = event.ctrlKey || event.metaKey;
+    const keyLower = event.key.toLowerCase();
+
+    // 1. Ctrl + Z (sin Shift): Deshacer en el planificador
+    if (isCtrl && keyLower === 'z' && !event.shiftKey) {
+      const activeTag = (document.activeElement?.tagName || '').toLowerCase();
+      if (activeTag === 'input' || activeTag === 'textarea' || activeTag === 'select') {
+        return;
+      }
+      event.preventDefault();
+      this.deshacerUltimaAccion();
+      return;
+    }
+
+    // 2. Ctrl + Y o Ctrl + Shift + Z: Rehacer en el planificador
+    if (isCtrl && (keyLower === 'y' || (keyLower === 'z' && event.shiftKey))) {
+      const activeTag = (document.activeElement?.tagName || '').toLowerCase();
+      if (activeTag === 'input' || activeTag === 'textarea' || activeTag === 'select') {
+        return;
+      }
+      event.preventDefault();
+      this.rehacerUltimaAccion();
+      return;
+    }
   }
 
   @HostListener('window:keyup', ['$event'])
@@ -1719,6 +1850,7 @@ export class AppComponent implements OnInit {
 
   iniciarPintadoCelda(empId: string, dia: number, event?: MouseEvent): void {
     this.enfocarCeldaPorId(empId, dia);
+    this.loteArrastreActual = [];
 
     const esCtrl = !!(event?.ctrlKey || event?.metaKey || this.teclaCtrlPresionada());
 
@@ -1761,6 +1893,170 @@ export class AppComponent implements OnInit {
     this.pintandoConRaton.set(false);
     this.clonandoConCtrl.set(false);
     this.turnoClonandoConCtrl.set(null);
+
+    if (this.loteArrastreActual.length > 0) {
+      const cambios = [...this.loteArrastreActual];
+      const desc =
+        cambios.length === 1
+          ? `Cambio día ${cambios[0].dia}: ${cambios[0].turnoAnterior || 'L'} ➔ ${cambios[0].turnoNuevo}`
+          : `Arrastre de ${cambios.length} celdas en lote`;
+
+      this.pilaDeshacer.update((pila) =>
+        [
+          ...pila,
+          {
+            descripcion: desc,
+            servicioId: this.servicioSeleccionadoId(),
+            anio: this.anioSeleccionado(),
+            mes: this.mesSeleccionado(),
+            cambios,
+          },
+        ].slice(-30)
+      );
+      this.pilaRehacer.set([]);
+      this.loteArrastreActual = [];
+    }
+  }
+
+  deshacerUltimaAccion(): void {
+    if (this.esColaborador()) return;
+    if (this.estadoCuadrante() === 'CERRADO_NOMINA') {
+      this.mostrarNotificacion('El cuadro de turnos está CERRADO para Nómina.');
+      return;
+    }
+    const pila = [...this.pilaDeshacer()];
+    if (pila.length === 0) {
+      this.mostrarNotificacion('ℹ️ No hay más acciones para deshacer en este servicio.');
+      return;
+    }
+    const ultimoPaso = pila.pop()!;
+    this.pilaDeshacer.set(pila);
+
+    // Preparar paso simétrico para la pila de Rehacer (Ctrl + Y)
+    const pasoInverso: PasoHistorialEdicion = {
+      descripcion: ultimoPaso.descripcion,
+      servicioId: ultimoPaso.servicioId,
+      anio: ultimoPaso.anio,
+      mes: ultimoPaso.mes,
+      cambios: ultimoPaso.cambios.map((c) => ({
+        empId: c.empId,
+        dia: c.dia,
+        turnoAnterior: c.turnoNuevo,
+        turnoNuevo: c.turnoAnterior,
+        previstoAnterior: c.previstoAnterior,
+        esRotacion: c.esRotacion,
+      })),
+    };
+    this.pilaRehacer.update((r) => [pasoInverso, ...r].slice(0, 30));
+
+    // Revertir celdas en memoria reactiva
+    const actualMap = { ...this.asignaciones() };
+    const enBorrador = this.estadoCuadrante() === 'BORRADOR';
+    const justificacionAuditoria = '↩️ Deshacer (Ctrl+Z): Reversión inmediata de asignación previa';
+
+    for (const c of ultimoPaso.cambios) {
+      const filaEmp = { ...(actualMap[c.empId] || {}) };
+      filaEmp[c.dia] = {
+        codigo: c.turnoAnterior,
+        previsto: c.previstoAnterior ?? (enBorrador ? c.turnoAnterior : (filaEmp[c.dia]?.previsto || c.turnoAnterior)),
+        esRotacion: c.esRotacion,
+        servicioEjecutorId: ultimoPaso.servicioId,
+      };
+      actualMap[c.empId] = filaEmp;
+
+      // Persistir reversión en PostgreSQL
+      this.api
+        .guardarCeldaCuadrante({
+          servicioId: ultimoPaso.servicioId,
+          anio: ultimoPaso.anio,
+          mes: ultimoPaso.mes,
+          dia: c.dia,
+          empleadoId: c.empId,
+          codigo: c.turnoAnterior,
+          previsto: filaEmp[c.dia].previsto || '',
+          esRotacion: c.esRotacion,
+          justificacion: justificacionAuditoria,
+        })
+        .subscribe();
+    }
+
+    this.actualizarAsignacionesMesActual(actualMap);
+
+    if (this.estadoCuadrante() === 'PUBLICADO') {
+      setTimeout(() => this.sincronizarAuditoriasDesdePostgres(), 400);
+    }
+
+    this.mostrarNotificacion(`↩️ Deshecho: ${ultimoPaso.descripcion}`);
+  }
+
+  rehacerUltimaAccion(): void {
+    if (this.esColaborador()) return;
+    if (this.estadoCuadrante() === 'CERRADO_NOMINA') {
+      this.mostrarNotificacion('El cuadro de turnos está CERRADO para Nómina.');
+      return;
+    }
+    const pila = [...this.pilaRehacer()];
+    if (pila.length === 0) {
+      this.mostrarNotificacion('ℹ️ No hay acciones para rehacer.');
+      return;
+    }
+    const ultimoPaso = pila.shift()!;
+    this.pilaRehacer.set(pila);
+
+    // Preparar paso inverso para la pila de Deshacer (Ctrl + Z)
+    const pasoInverso: PasoHistorialEdicion = {
+      descripcion: ultimoPaso.descripcion,
+      servicioId: ultimoPaso.servicioId,
+      anio: ultimoPaso.anio,
+      mes: ultimoPaso.mes,
+      cambios: ultimoPaso.cambios.map((c) => ({
+        empId: c.empId,
+        dia: c.dia,
+        turnoAnterior: c.turnoNuevo,
+        turnoNuevo: c.turnoAnterior,
+        previstoAnterior: c.previstoAnterior,
+        esRotacion: c.esRotacion,
+      })),
+    };
+    this.pilaDeshacer.update((d) => [...d, pasoInverso].slice(-30));
+
+    // Reaplicar celdas en memoria reactiva
+    const actualMap = { ...this.asignaciones() };
+    const enBorrador = this.estadoCuadrante() === 'BORRADOR';
+    const justificacionAuditoria = '↪️ Rehacer (Ctrl+Y): Reaplicación de asignación';
+
+    for (const c of ultimoPaso.cambios) {
+      const filaEmp = { ...(actualMap[c.empId] || {}) };
+      filaEmp[c.dia] = {
+        codigo: c.turnoAnterior,
+        previsto: enBorrador ? c.turnoAnterior : (filaEmp[c.dia]?.previsto || c.turnoAnterior),
+        esRotacion: c.esRotacion,
+        servicioEjecutorId: ultimoPaso.servicioId,
+      };
+      actualMap[c.empId] = filaEmp;
+
+      this.api
+        .guardarCeldaCuadrante({
+          servicioId: ultimoPaso.servicioId,
+          anio: ultimoPaso.anio,
+          mes: ultimoPaso.mes,
+          dia: c.dia,
+          empleadoId: c.empId,
+          codigo: c.turnoAnterior,
+          previsto: filaEmp[c.dia].previsto || '',
+          esRotacion: c.esRotacion,
+          justificacion: justificacionAuditoria,
+        })
+        .subscribe();
+    }
+
+    this.actualizarAsignacionesMesActual(actualMap);
+
+    if (this.estadoCuadrante() === 'PUBLICADO') {
+      setTimeout(() => this.sincronizarAuditoriasDesdePostgres(), 400);
+    }
+
+    this.mostrarNotificacion(`↪️ Rehecho: ${ultimoPaso.descripcion}`);
   }
 
   enfocarCeldaPorId(empId: string, dia: number): void {
@@ -1929,12 +2225,42 @@ export class AppComponent implements OnInit {
       return;
     }
 
-    const anterior = celdaActual?.codigo || '';
+    const anterior = (celdaActual?.codigo as CodigoTurno) || 'L';
     if (anterior === nuevoCodigo) return;
 
     const empObj = this.empleados().find((e) => e.id === empId);
     const esRotacion = empObj ? empObj.servicioBaseId !== this.servicioSeleccionadoId() : false;
     const enBorrador = this.estadoCuadrante() === 'BORRADOR';
+
+    const cambioHistorial: CambioCeldaHistorial = {
+      empId,
+      dia,
+      turnoAnterior: anterior,
+      turnoNuevo: nuevoCodigo,
+      previstoAnterior: celdaActual?.previsto,
+      esRotacion,
+    };
+
+    if (this.pintandoConRaton()) {
+      const yaEnLote = this.loteArrastreActual.some((c) => c.empId === empId && c.dia === dia);
+      if (!yaEnLote) {
+        this.loteArrastreActual.push(cambioHistorial);
+      }
+    } else {
+      this.pilaDeshacer.update((pila) =>
+        [
+          ...pila,
+          {
+            descripcion: `${empObj?.nombre?.split(' ')[0] || 'Colaborador'} día ${dia}: ${anterior} ➔ ${nuevoCodigo}`,
+            servicioId: this.servicioSeleccionadoId(),
+            anio: this.anioSeleccionado(),
+            mes: this.mesSeleccionado(),
+            cambios: [cambioHistorial],
+          },
+        ].slice(-30)
+      );
+      this.pilaRehacer.set([]);
+    }
 
     filaEmp[dia] = {
       codigo: nuevoCodigo,
@@ -1990,19 +2316,8 @@ export class AppComponent implements OnInit {
         .subscribe();
     }
 
-    if (empObj) {
-      const nuevoLog: RegistroAuditoria = {
-        id: 'aud-' + Date.now(),
-        timestamp: new Date().toTimeString().substring(0, 8),
-        actor: 'Supervisora de Servicio',
-        empleadoNombre: empObj.nombre,
-        servicioNombre: this.servicioActual().nombre,
-        dia,
-        turnoAnterior: anterior,
-        turnoNuevo: nuevoCodigo,
-        motivo: origen,
-      };
-      this.registrarLogAuditoria(nuevoLog);
+    if (empObj && this.estadoCuadrante() === 'PUBLICADO') {
+      setTimeout(() => this.sincronizarAuditoriasDesdePostgres(), 300);
     }
   }
 
@@ -2090,18 +2405,6 @@ export class AppComponent implements OnInit {
         })
         .subscribe();
     }
-
-    this.registrarLogAuditoria({
-      id: 'aud-' + Date.now(),
-      timestamp: new Date().toTimeString().substring(0, 8),
-      actor: 'Gestión Humana',
-      empleadoNombre: 'Todo el servicio',
-      servicioNombre: srvNombre,
-      dia: 0,
-      turnoAnterior: '',
-      turnoNuevo: '',
-      motivo: `Limpieza total del cuadro de turnos (${celdasLimpiadas} turnos borrados) para construcción manual`,
-    });
 
     this.mostrarNotificacion(
       `Cuadro de turnos en blanco: ${celdasLimpiadas} turnos borrados. Novedades oficiales de Intranet (VAC/INC/LIC) conservadas.`
@@ -3033,9 +3336,22 @@ export class AppComponent implements OnInit {
     if (!listaActual.includes(cand.id)) {
       mapaRot[srvId] = [...listaActual, cand.id];
       this.empleadosRotadosPorServicio.set(mapaRot);
+      this.guardarRotadosEnStorage(mapaRot);
     }
     this.modalRotacionAbierto.set(false);
     this.mostrarNotificacion(`${cand.nombre} agregado como personal de apoyo al cuadrante.`);
+  }
+
+  quitarPersonalApoyo(empId: string): void {
+    const srvId = this.servicioSeleccionadoId();
+    const mapaRot = { ...this.empleadosRotadosPorServicio() };
+    const listaActual = (mapaRot[srvId] || []).filter((id) => id !== empId);
+    mapaRot[srvId] = listaActual;
+    this.empleadosRotadosPorServicio.set(mapaRot);
+    this.guardarRotadosEnStorage(mapaRot);
+
+    const empObj = this.empleados().find((e) => e.id === empId);
+    this.mostrarNotificacion(`${empObj?.nombre || 'Colaborador'} removido del personal de apoyo.`);
   }
 
   // =========================================================================
@@ -3292,18 +3608,7 @@ export class AppComponent implements OnInit {
           this.listaPermutas().map((p) => (p.id === idPermuta ? { ...p, estado: 'APROBADA' } : p))
         );
 
-        const srvNombre = this.servicios().find((s) => s.id === perm.servicioId)?.nombre || perm.servicioId;
-        this.registrarLogAuditoria({
-          id: 'aud-' + Date.now(),
-          timestamp: new Date().toTimeString().substring(0, 8),
-          actor: 'Supervisión',
-          empleadoNombre: `${perm.solicitanteNombre} ⇄ ${perm.receptorNombre}`,
-          servicioNombre: srvNombre,
-          dia: perm.diaOrigen,
-          turnoAnterior: perm.turnoOrigen,
-          turnoNuevo: perm.turnoDestino,
-          motivo: 'Permuta aprobada por Supervisión y aplicada en PostgreSQL',
-        });
+        this.sincronizarAuditoriasDesdePostgres();
 
         this.mostrarNotificacion(`✅ Cambio de turno aprobado por Supervisión y actualizado en el cuadrante.`);
       },
@@ -3434,6 +3739,9 @@ export class AppComponent implements OnInit {
       return;
     }
     this.vistaActual.set(vista);
+    if (vista === 'DASHBOARD') {
+      this.sincronizarAuditoriasDesdePostgres();
+    }
     if (!this.sidebarFijo()) {
       this.sidebarHovered.set(false);
     }
@@ -3534,10 +3842,15 @@ export class AppComponent implements OnInit {
   cambiarServicio(nuevoId: string): void {
     this.servicioSeleccionadoId.set(nuevoId);
     this.filtroCategoriaActiva.set('TODAS');
+    this.pilaDeshacer.set([]);
+    this.pilaRehacer.set([]);
+    this.sincronizarAuditoriasDesdePostgres();
   }
 
   cambiarMes(nuevoMes: number): void {
     this.mesSeleccionado.set(Number(nuevoMes));
+    this.pilaDeshacer.set([]);
+    this.pilaRehacer.set([]);
     this.sincronizacionAutomaticaIntranet(true);
   }
 

@@ -230,3 +230,21 @@ export interface SesionUsuarioSso {
   intranetReturnUrl?: string;
 }
 
+export interface CambioCeldaHistorial {
+  empId: string;
+  dia: number;
+  turnoAnterior: CodigoTurno;
+  turnoNuevo: CodigoTurno;
+  previstoAnterior?: string;
+  esRotacion?: boolean;
+}
+
+export interface PasoHistorialEdicion {
+  descripcion: string;
+  servicioId: string;
+  anio: number;
+  mes: number;
+  cambios: CambioCeldaHistorial[];
+}
+
+

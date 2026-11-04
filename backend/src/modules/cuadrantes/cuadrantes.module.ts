@@ -9,6 +9,7 @@ import {
   Post,
   Put,
   Query,
+  Req,
 } from '@nestjs/common';
 import { EstadoCuadrante } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -48,6 +49,7 @@ export interface GuardarCeldaCuadranteDto {
   codigo: string;
   previsto?: string;
   esRotacion?: boolean;
+  justificacion?: string;
 }
 
 export interface GuardarLoteCuadranteDto {
@@ -358,7 +360,10 @@ export class CuadrantesController {
    * 3. Guarda o actualiza una celda individual en asignaciones_turno en PostgreSQL.
    */
   @Put('celda')
-  async guardarCelda(@Body() dto: GuardarCeldaCuadranteDto) {
+  async guardarCelda(
+    @Body() dto: GuardarCeldaCuadranteDto,
+    @Req() req?: any,
+  ) {
     const anio = Number(dto.anio);
     const mes = Number(dto.mes);
     const dia = Number(dto.dia);
@@ -395,6 +400,18 @@ export class CuadrantesController {
       },
     });
 
+    // Consultar turno anterior para auditoría si el cuadrante está PUBLICADO
+    const asigPrevia = await this.prisma.asignacionTurno.findUnique({
+      where: {
+        empleadoId_fecha: {
+          empleadoId: dto.empleadoId,
+          fecha: fechaUtc,
+        },
+      },
+      include: { tipoTurno: true },
+    });
+    const codigoAnterior = asigPrevia?.tipoTurno?.codigo || 'L';
+
     const tipoTurnoId = await this.resolverTipoTurnoId(dto.codigo);
 
     const asignacion = await this.prisma.asignacionTurno.upsert({
@@ -421,6 +438,28 @@ export class CuadrantesController {
         codigoPrevisto: dto.previsto ?? dto.codigo,
       },
     });
+
+    // Auditar de forma estricta solo si el cuadrante está PUBLICADO y el código cambió
+    const codigoNuevo = dto.codigo || 'L';
+    if (
+      cuadrante.estado === EstadoCuadrante.PUBLICADO &&
+      codigoAnterior !== codigoNuevo
+    ) {
+      const actor = req?.usuarioSso?.nombre
+        ? `${req.usuarioSso.nombre} (Supervisor)`
+        : 'SUPERVISOR';
+      await this.prisma.auditoriaCambio.create({
+        data: {
+          asignacionTurnoId: asignacion.id,
+          actorId: actor,
+          turnoAnterior: codigoAnterior,
+          turnoNuevo: codigoNuevo,
+          justificacion:
+            dto.justificacion ||
+            'Modificación manual de turno sobre cuadrante publicado',
+        },
+      });
+    }
 
     return { ok: true, id: asignacion.id };
   }

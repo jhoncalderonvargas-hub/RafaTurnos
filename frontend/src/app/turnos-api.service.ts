@@ -6,6 +6,7 @@ import {
   EmpleadoHospital,
   FestivoEntry,
   PermutaItem,
+  RegistroAuditoria,
   ResultadoBancoYNominaDto,
   ServicioHospitalario,
   SesionUsuarioSso,
@@ -196,6 +197,7 @@ export class TurnosApiService {
     codigo: string;
     previsto?: string;
     esRotacion?: boolean;
+    justificacion?: string;
   }): Observable<any> {
     return this.http.put(`${this.baseUrl}/cuadrantes/celda`, payload);
   }
@@ -318,5 +320,14 @@ export class TurnosApiService {
       httpUrl: string;
       webcalUrl: string;
     }>(`${this.baseUrl}/calendario/mi-enlace?empleadoId=${encodeURIComponent(empleadoId)}`);
+  }
+
+  // 8. Bitácora forense de auditoría médico-legal (PostgreSQL)
+  obtenerAuditorias(servicioId?: string, limite = 50): Observable<RegistroAuditoria[]> {
+    let url = `${this.baseUrl}/auditorias?limite=${limite}`;
+    if (servicioId && servicioId !== 'TODOS') {
+      url += `&servicioId=${encodeURIComponent(servicioId)}`;
+    }
+    return this.http.get<RegistroAuditoria[]>(url);
   }
 }

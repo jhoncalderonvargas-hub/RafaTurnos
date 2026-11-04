@@ -346,6 +346,17 @@ const server = http.createServer((req, res) => {
             estadoContrato: 'ACTIVO',
           });
         }
+        if (!censo.some((x) => x.documento === '1037645123')) {
+          censo.push({
+            documento: '1037645123',
+            nombre: 'Tomas grajales frias',
+            correo: 'tomas.grajales@hospital.gov.co',
+            cargoNombre: 'Tecnólogo(a) en Imágenes Diagnósticas',
+            servicioCodigo: 'TOM',
+            horasContratoMes: 168,
+            estadoContrato: 'ACTIVO',
+           });
+        }
 
         res.end(JSON.stringify(censo, null, 2));
       })

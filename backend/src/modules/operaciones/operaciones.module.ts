@@ -803,7 +803,107 @@ export class CalendarioIcalController {
   }
 }
 
+@Controller('api/v1/auditorias')
+export class AuditoriasController {
+  constructor(private readonly prisma: PrismaService) {}
+
+  @Get()
+  async listarAuditorias(
+    @Query('servicioId') servicioId?: string,
+    @Query('empleadoId') empleadoId?: string,
+    @Query('limite') limiteQuery?: string,
+    @Req() req?: any,
+  ) {
+    const usuarioSso = req?.usuarioSso;
+    const esColaborador = usuarioSso?.rol === 'COLABORADOR';
+    const esCoordinador = usuarioSso?.rol === 'COORDINADOR';
+
+    const whereClause: any = {};
+
+    // 1. Regla de Privacidad: COLABORADOR solo ve sus propios movimientos
+    if (esColaborador && (usuarioSso?.empleadoId || usuarioSso?.documento)) {
+      whereClause.asignacionTurno = {
+        OR: [
+          ...(usuarioSso?.empleadoId ? [{ empleadoId: usuarioSso.empleadoId }] : []),
+          ...(usuarioSso?.documento ? [{ empleado: { documento: String(usuarioSso.documento) } }] : []),
+        ],
+      };
+    } else if (empleadoId) {
+      whereClause.asignacionTurno = {
+        OR: [{ empleadoId }, { empleado: { documento: empleadoId } }],
+      };
+    }
+
+    // 2. Filtro por servicio:
+    if (esCoordinador && Array.isArray(usuarioSso?.serviciosCoordinados) && usuarioSso.serviciosCoordinados.length > 0) {
+      const permitidos = usuarioSso.serviciosCoordinados;
+      if (servicioId && permitidos.includes(servicioId)) {
+        whereClause.asignacionTurno = {
+          ...(whereClause.asignacionTurno || {}),
+          servicioEjecutorId: servicioId,
+        };
+      } else {
+        whereClause.asignacionTurno = {
+          ...(whereClause.asignacionTurno || {}),
+          servicioEjecutorId: { in: permitidos },
+        };
+      }
+    } else if (servicioId && servicioId !== 'TODOS') {
+      whereClause.asignacionTurno = {
+        ...(whereClause.asignacionTurno || {}),
+        servicioEjecutorId: servicioId,
+      };
+    }
+
+    const limite = Math.min(Math.max(Number(limiteQuery) || 50, 1), 200);
+
+    const logs = await this.prisma.auditoriaCambio.findMany({
+      where: whereClause,
+      include: {
+        asignacionTurno: {
+          include: {
+            empleado: true,
+            servicioEjecutor: true,
+          },
+        },
+      },
+      orderBy: { timestamp: 'desc' },
+      take: limite,
+    });
+
+    return logs.map((log) => {
+      const fechaUtc = log.asignacionTurno?.fecha
+        ? new Date(log.asignacionTurno.fecha)
+        : null;
+      const dia = fechaUtc ? fechaUtc.getUTCDate() : 0;
+      const tsDate = new Date(log.timestamp);
+      const timestampFormateado =
+        tsDate.toLocaleDateString('es-CO', { timeZone: 'America/Bogota' }) +
+        ' ' +
+        tsDate.toLocaleTimeString('es-CO', { timeZone: 'America/Bogota', hour12: true });
+
+      return {
+        id: log.id,
+        timestamp: timestampFormateado,
+        actor: log.actorId || 'Supervisión',
+        empleadoId: log.asignacionTurno?.empleadoId,
+        empleadoNombre: log.asignacionTurno?.empleado?.nombre || 'Colaborador',
+        servicioNombre: log.asignacionTurno?.servicioEjecutor?.nombre || 'Servicio Asistencial',
+        dia,
+        turnoAnterior: log.turnoAnterior,
+        turnoNuevo: log.turnoNuevo,
+        motivo: log.justificacion || 'Modificación registrada',
+      };
+    });
+  }
+}
+
 @Module({
-  controllers: [PermutasController, IntranetIntegrationController, CalendarioIcalController],
+  controllers: [
+    PermutasController,
+    IntranetIntegrationController,
+    CalendarioIcalController,
+    AuditoriasController,
+  ],
 })
 export class OperacionesHospitalModule {}
