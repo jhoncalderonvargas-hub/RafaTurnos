@@ -310,6 +310,52 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.method === 'GET' && req.url.startsWith('/api/intranet/empleados')) {
+    res.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    });
+
+    // Obtener censo actual desde PostgreSQL y enriquecer con novedades de contratación
+    fetch(`${RAFA_TURNOS_BACKEND_URL}/api/v1/servicios-admin/empleados`)
+      .then((r) => r.json())
+      .then((baseEmpleados) => {
+        const censo = Array.isArray(baseEmpleados)
+          ? baseEmpleados.map((e) => ({
+              documento: e.documento,
+              nombre: e.nombre,
+              correo: e.correo,
+              cargoNombre: e.categoria?.nombre || 'Auxiliar de Enfermería',
+              servicioCodigo: e.servicioBase?.codigo || 'URG',
+              horasContratoMes: e.horasContratoMes || 168,
+              estadoContrato: 'ACTIVO',
+            }))
+          : [];
+
+        // Nueva contratación reportada por Gestión Humana (para verificar auto-creación)
+        if (!censo.some((x) => x.documento === '1099887766')) {
+          censo.push({
+            documento: '1099887766',
+            nombre: 'Dra. Valentina Castro Mendoza',
+            correo: 'valentina.castro@hospital.gov.co',
+            cargoNombre: 'Médico General',
+            servicioCodigo: 'URG',
+            horasContratoMes: 168,
+            estadoContrato: 'ACTIVO',
+          });
+        }
+
+        res.end(JSON.stringify(censo, null, 2));
+      })
+      .catch((err) => {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      });
+    return;
+  }
+
   if (req.method === 'GET' && req.url.startsWith('/api/intranet/novedades')) {
     res.writeHead(200, {
       'Content-Type': 'application/json; charset=utf-8',

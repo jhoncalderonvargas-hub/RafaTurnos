@@ -371,7 +371,7 @@ export class IntranetIntegrationController {
     rolSolicitado?: RolUsuarioSso,
     serviciosExtraIds?: string[]
   ) {
-    const emp = await this.prisma.empleado.findFirst({
+    let emp = await this.prisma.empleado.findFirst({
       where: {
         OR: [{ documento }, { intranetId: documento }, { id: documento }],
       },
@@ -388,8 +388,68 @@ export class IntranetIntegrationController {
     });
 
     if (!emp) {
+      // Auto-aprovisionamiento Just-In-Time (JIT) desde la Intranet Hospitalaria
+      const intranetUrl = process.env.INTRANET_API_URL || 'http://localhost:4300';
+      try {
+        const resp = await fetch(`${intranetUrl}/api/intranet/empleados`);
+        if (resp.ok) {
+          const censo = await resp.json();
+          const datosEmp = Array.isArray(censo)
+            ? censo.find((x: any) => String(x.documento).trim() === documento.trim())
+            : null;
+          if (datosEmp) {
+            let cat = await this.prisma.categoriaProfesional.findFirst({
+              where: { nombre: datosEmp.cargoNombre || 'Auxiliar de Enfermería' },
+            });
+            if (!cat) {
+              cat = await this.prisma.categoriaProfesional.create({
+                data: { nombre: datosEmp.cargoNombre || 'Auxiliar de Enfermería' },
+              });
+            }
+            let srv = await this.prisma.servicio.findFirst({
+              where: {
+                OR: [
+                  { codigo: datosEmp.servicioCodigo || 'URG' },
+                  { id: datosEmp.servicioCodigo || 'URG' },
+                ],
+              },
+            });
+            if (!srv) {
+              srv = (await this.prisma.servicio.findFirst())!;
+            }
+            await this.prisma.empleado.create({
+              data: {
+                documento,
+                nombre: datosEmp.nombre || `Colaborador ${documento}`,
+                correo: datosEmp.correo || `${documento}@hospital.gov.co`,
+                horasSemanalesLey: 42,
+                horasContratoMes: Number(datosEmp.horasContratoMes) || 168,
+                categoriaId: cat.id,
+                servicioBaseId: srv.id,
+              },
+            });
+
+            emp = await this.prisma.empleado.findFirst({
+              where: { documento },
+              include: {
+                categoria: true,
+                servicioBase: {
+                  include: {
+                    serviciosHermanosOrigen: {
+                      include: { servicioHermano: true },
+                    },
+                  },
+                },
+              },
+            });
+          }
+        }
+      } catch {}
+    }
+
+    if (!emp) {
       throw new NotFoundException(
-        `El documento/identificador "${documento}" del token SSO no corresponde a ningún colaborador activo en Rafa Turnos.`
+        `El documento/identificador "${documento}" del token SSO no corresponde a ningún colaborador activo en Rafa Turnos ni en la Intranet Hospitalaria.`
       );
     }
 

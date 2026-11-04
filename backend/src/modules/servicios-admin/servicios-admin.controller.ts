@@ -156,6 +156,108 @@ export class ServiciosAdminController {
     });
   }
 
+  // 1.1b Sincronización del Censo Maestro de Personal desde Intranet Hospitalaria
+  @Post('sincronizar-empleados-intranet')
+  async sincronizarEmpleadosIntranet(@Body() body?: { intranetUrl?: string }) {
+    const intranetUrl =
+      body?.intranetUrl || process.env.INTRANET_API_URL || 'http://localhost:4300';
+
+    let censo: any[] = [];
+    try {
+      const resp = await fetch(`${intranetUrl}/api/intranet/empleados`);
+      if (!resp.ok) {
+        throw new BadRequestException(`Intranet respondió con código ${resp.status}`);
+      }
+      censo = await resp.json();
+    } catch (err: any) {
+      throw new BadRequestException(
+        `No se pudo conectar con la Intranet en ${intranetUrl}: ${err.message}`
+      );
+    }
+
+    if (!Array.isArray(censo) || censo.length === 0) {
+      return { ok: true, total: 0, creados: 0, actualizados: 0 };
+    }
+
+    const [categoriasDb, serviciosDb] = await Promise.all([
+      this.prisma.categoriaProfesional.findMany(),
+      this.prisma.servicio.findMany(),
+    ]);
+
+    const mapaCat = new Map(categoriasDb.map((c) => [c.nombre.trim().toLowerCase(), c.id]));
+    const mapaSrv = new Map(
+      serviciosDb.map((s) => [s.codigo.trim().toUpperCase(), s.id])
+    );
+    for (const s of serviciosDb) {
+      mapaSrv.set(s.id, s.id);
+    }
+
+    let creados = 0;
+    let actualizados = 0;
+
+    for (const item of censo) {
+      const doc = String(item.documento || '').trim();
+      if (!doc) continue;
+
+      // Resolver categoría
+      const cargoNombre = String(item.cargoNombre || 'Auxiliar de Enfermería').trim();
+      let catId = mapaCat.get(cargoNombre.toLowerCase());
+      if (!catId) {
+        const nuevaCat = await this.prisma.categoriaProfesional.create({
+          data: { nombre: cargoNombre },
+        });
+        catId = nuevaCat.id;
+        mapaCat.set(cargoNombre.toLowerCase(), catId);
+      }
+
+      // Resolver servicio base
+      const srvCodigo = String(item.servicioCodigo || 'URG').trim().toUpperCase();
+      const srvId = mapaSrv.get(srvCodigo) || serviciosDb[0]?.id;
+      if (!srvId) continue;
+
+      const horasMes = Number(item.horasContratoMes) || 168;
+      const correo = item.correo || `${doc}@hospital.gov.co`;
+
+      const existente = await this.prisma.empleado.findUnique({
+        where: { documento: doc },
+      });
+
+      if (!existente) {
+        await this.prisma.empleado.create({
+          data: {
+            documento: doc,
+            nombre: item.nombre || `Colaborador ${doc}`,
+            correo,
+            horasSemanalesLey: 42,
+            horasContratoMes: horasMes,
+            categoriaId: catId,
+            servicioBaseId: srvId,
+          },
+        });
+        creados++;
+      } else {
+        await this.prisma.empleado.update({
+          where: { id: existente.id },
+          data: {
+            nombre: item.nombre || existente.nombre,
+            horasContratoMes: horasMes,
+            categoriaId: catId,
+            ...(item.servicioCodigo ? { servicioBaseId: srvId } : {}),
+          },
+        });
+        actualizados++;
+      }
+    }
+
+    return {
+      ok: true,
+      mensaje: `Censo sincronizado exitosamente con la Intranet Hospitalaria.`,
+      total: censo.length,
+      creados,
+      actualizados,
+    };
+  }
+
   // 1.2 Listar el catálogo maestro de tipos de turno
   @Get('turnos')
   async listarTiposTurno() {

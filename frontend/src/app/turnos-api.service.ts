@@ -90,6 +90,16 @@ export class TurnosApiService {
     return this.http.get<any[]>(`${this.baseUrl}/servicios-admin/empleados`);
   }
 
+  sincronizarEmpleadosIntranet(): Observable<{
+    ok: boolean;
+    mensaje: string;
+    total: number;
+    creados: number;
+    actualizados: number;
+  }> {
+    return this.http.post<any>(`${this.baseUrl}/servicios-admin/sincronizar-empleados-intranet`, {});
+  }
+
   // 1.5 Catálogo Maestro de Tipos de Turno (PostgreSQL)
   getTiposTurno(): Observable<any[]> {
     return this.http.get<any[]>(`${this.baseUrl}/servicios-admin/turnos`);

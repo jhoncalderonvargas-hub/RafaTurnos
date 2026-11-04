@@ -372,11 +372,11 @@ export class AppComponent implements OnInit {
   // Novedades y Ausencias Oficiales desde Intranet Hospitalaria
   sincronizandoNovedades = signal<boolean>(false);
   listaNovedades = signal<any[]>([]);
+  ultimaSincronizacionIntranet = signal<string>('');
 
   constructor(private readonly api: TurnosApiService) {}
 
   ngOnInit(): void {
-    this.cargarDatosDesdeBaseDeDatos();
     this.inicializarSesionSsoDesdeUrlOStorage();
   }
 
@@ -403,6 +403,14 @@ export class AppComponent implements OnInit {
             }
             this.aplicarContextoSesionSso(res.usuario);
             this.verificandoSesionSso.set(false);
+
+            // Cargar datos institucionales con el token de sesión ya fijado
+            this.cargarDatosDesdeBaseDeDatos();
+
+            if (res.usuario.rol === 'ADMIN_TH' || res.usuario.rol === 'COORDINADOR') {
+              this.sincronizacionAutomaticaIntranet(true);
+            }
+
             this.mostrarNotificacion(
               `Sesión SSO iniciada: ${res.usuario.nombre} (${this.etiquetaRol(res.usuario.rol)})`
             );
@@ -428,12 +436,23 @@ export class AppComponent implements OnInit {
             }
             this.aplicarContextoSesionSso(res.usuario);
             this.verificandoSesionSso.set(false);
+
+            // Cargar datos institucionales con la sesión verificada
+            this.cargarDatosDesdeBaseDeDatos();
+
+            if (res.usuario.rol === 'ADMIN_TH' || res.usuario.rol === 'COORDINADOR') {
+              this.sincronizacionAutomaticaIntranet(true);
+            }
           },
           error: () => {
             try {
               sessionStorage.removeItem('rafa_turnos_sso_jwt');
             } catch {}
             this.verificandoSesionSso.set(false);
+            const destino = this.intranetReturnUrl();
+            if (destino) {
+              window.location.href = destino;
+            }
           },
         });
         return;
@@ -565,33 +584,64 @@ export class AppComponent implements OnInit {
     });
   }
 
-  sincronizarNovedadesIntranet(): void {
+  /**
+   * Sincronización Automática y Transparente con la Intranet Hospitalaria
+   * - En segundo plano (silencioso = true) se ejecuta al iniciar la app o cambiar de mes.
+   * - Manual (silencioso = false) se ejecuta cuando el usuario pulsa 'Refrescar Intranet'.
+   */
+  sincronizacionAutomaticaIntranet(silencioso = true): void {
     if (this.sincronizandoNovedades()) return;
     this.sincronizandoNovedades.set(true);
-    this.mostrarNotificacion('⏳ Conectando con Intranet Hospitalaria para sincronizar novedades...');
+
+    if (!silencioso) {
+      this.mostrarNotificacion('⏳ Conectando con Intranet Hospitalaria para actualizar censo y novedades...');
+    }
 
     const anio = this.anioSeleccionado();
     const mes = this.mesSeleccionado();
 
+    // 1. Sincronizar Censo Maestro de Empleados (nuevas altas, traslados o cambios de contrato)
+    this.api.sincronizarEmpleadosIntranet().subscribe({
+      next: (resEmp) => {
+        if (resEmp && resEmp.creados > 0) {
+          this.sincronizarEmpleadosDesdePostgres();
+        }
+      },
+      error: () => {},
+    });
+
+    // 2. Sincronizar Novedades y Ausencias Oficiales del periodo
     this.api.sincronizarNovedadesIntranet(anio, mes).subscribe({
       next: (res) => {
         this.sincronizandoNovedades.set(false);
+        const horaActual = new Date().toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+        this.ultimaSincronizacionIntranet.set(horaActual);
+
         if (res && res.ok) {
-          this.mostrarNotificacion(
-            `✅ Sincronización exitosa: ${res.totalSincronizadas} novedades aplicadas (${res.celdasBloqueadas} días bloqueados con VAC/INC/LIC).`
-          );
           this.sincronizarNovedadesDesdePostgres();
           this.sincronizarCuadrantesDesdePostgres();
-        } else {
-          this.mostrarNotificacion(res?.mensaje || 'Respuesta inesperada de Intranet.');
+          if (!silencioso) {
+            this.mostrarNotificacion(
+              `✅ Intranet al día (${horaActual}): ${res.totalSincronizadas} ausencias aplicadas (${res.celdasBloqueadas} días protegidos).`
+            );
+          }
         }
       },
       error: (err) => {
         this.sincronizandoNovedades.set(false);
-        const msg = err.error?.message || err.message || 'Error de conexión con Intranet';
-        this.mostrarNotificacion(`⛔ No se pudo sincronizar novedades: ${msg}`);
+        if (!silencioso) {
+          const msg = err.error?.message || err.message || 'Error de conexión con Intranet';
+          this.mostrarNotificacion(`⛔ No se pudo conectar con Intranet: ${msg}`);
+        }
       },
     });
+  }
+
+  sincronizarNovedadesIntranet(): void {
+    this.sincronizacionAutomaticaIntranet(false);
   }
 
   private sincronizarPermutasDesdePostgres(): void {
@@ -1347,6 +1397,22 @@ export class AppComponent implements OnInit {
 
   permutasPendientesCount = computed<number>(() => {
     return this.listaPermutas().filter((p) => p.estado === 'PENDIENTE_SUPERVISOR').length;
+  });
+
+  // Notificaciones dinámicas de Solicitudes según el rol (Badge numérico en el menú lateral)
+  notificacionesSolicitudesCount = computed<number>(() => {
+    const sesion = this.sesionActual();
+    if (!sesion) {
+      return this.permutasPendientesCount();
+    }
+    if (this.esColaborador()) {
+      // Para el Colaborador: propuestas entrantes de compañeros que esperan su visto bueno
+      return this.listaPermutas().filter(
+        (p) => p.receptorId === sesion.empleadoId && p.estado === 'PENDIENTE_PAR'
+      ).length;
+    }
+    // Para Supervisor / Admin: solicitudes concertadas por pares que esperan aprobación de supervisión
+    return this.permutasPendientesCount();
   });
 
   resumenNominaCalculado = computed(() => this.filasCuadrante());
@@ -3472,6 +3538,7 @@ export class AppComponent implements OnInit {
 
   cambiarMes(nuevoMes: number): void {
     this.mesSeleccionado.set(Number(nuevoMes));
+    this.sincronizacionAutomaticaIntranet(true);
   }
 
   cambiarEstadoCuadrante(): void {

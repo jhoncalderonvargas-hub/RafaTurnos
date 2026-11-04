@@ -88,6 +88,11 @@ export class SsoRoleGuard implements CanActivate {
     }
 
     if (rol === 'COLABORADOR') {
+      // El colaborador tiene acceso de solo lectura para consultar su calendario, compañeros y servicios
+      if (method === 'GET' || method === 'HEAD') {
+        return true;
+      }
+
       const esAccionPermutaPropia =
         (method === 'POST' && url.endsWith('/api/v1/permutas')) ||
         (method === 'PATCH' &&

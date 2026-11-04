@@ -80,8 +80,8 @@
           @if (!sidebarContraido()) {
             <span class="side-label">Solicitudes y Historial</span>
           }
-          @if (permutasPendientesCount() > 0 && !esColaborador()) {
-            <span class="pill-count">{{ permutasPendientesCount() }}</span>
+          @if (notificacionesSolicitudesCount() > 0) {
+            <span class="pill-count">{{ notificacionesSolicitudesCount() }}</span>
           }
         </button>
 
@@ -112,6 +112,9 @@
           <span class="side-icon">👩‍⚕️</span>
           @if (!sidebarContraido()) {
             <span class="side-label">Mi Calendario</span>
+          }
+          @if (propuestasRecibidasPortal().length > 0) {
+            <span class="pill-count">{{ propuestasRecibidasPortal().length }}</span>
           }
         </button>
 
@@ -233,9 +236,20 @@
           <span>🔍 Ver cambios frente al original</span>
         </label>
 
-        <button class="btn-secondary" (click)="sincronizarNovedadesIntranet()" [disabled]="sincronizandoNovedades()" title="Consultar e importar ausencias oficiales (Vacaciones / Incapacidades / Licencias) desde la Intranet">
-          🔄 {{ sincronizandoNovedades() ? 'Sincronizando...' : 'Sincronizar Novedades Intranet' }}
-        </button>
+        <div class="intranet-status-box" [title]="'Sincronización automática con Intranet: ' + (ultimaSincronizacionIntranet() || 'Activa')">
+          <span class="live-dot"></span>
+          <span class="intranet-label">Intranet</span>
+          @if (ultimaSincronizacionIntranet()) {
+            <span class="intranet-time">{{ ultimaSincronizacionIntranet() }}</span>
+          }
+          <button
+            class="btn-icon-refresh"
+            (click)="sincronizarNovedadesIntranet()"
+            [disabled]="sincronizandoNovedades()"
+            title="Forzar actualización inmediata con Intranet (Censo y Ausencias)">
+            🔄
+          </button>
+        </div>
 
         <button class="btn-secondary" (click)="abrirModalRotacion()">
           🔄 Traer Personal de Apoyo
@@ -621,8 +635,8 @@
         </div>
         <div class="kpi-card">
           <div class="kpi-label">Cambios de Turno Pendientes</div>
-          <div class="kpi-value">{{ permutasPendientesCount() }}</div>
-          <div class="kpi-sub">Por revisar</div>
+          <div class="kpi-value">{{ notificacionesSolicitudesCount() }}</div>
+          <div class="kpi-sub">{{ esColaborador() ? 'Por responder' : 'Por revisar' }}</div>
         </div>
       </div>
 
@@ -664,7 +678,21 @@
                       <span class="status-tag status-tag-par">⏳ En revisión por Coordinador de Servicio</span>
                     }
                   } @else if (p.estado === 'PENDIENTE_PAR') {
-                    <span class="status-tag status-tag-par">⏳ Esperando respuesta de {{ p.receptorNombre }}</span>
+                    @if (sesionActual()?.empleadoId === p.receptorId) {
+                      <div class="supervisor-approval-group">
+                        <span class="badge-incoming-par">📬 Propuesta dirigida a ti</span>
+                        <div class="btn-group-h">
+                          <button class="btn-approve" (click)="aceptarPropuestaPar(p.id)">
+                            ✅ Aceptar Propuesta
+                          </button>
+                          <button class="btn-reject" (click)="rechazarPropuestaPar(p.id)">
+                            ❌ Declinar
+                          </button>
+                        </div>
+                      </div>
+                    } @else {
+                      <span class="status-tag status-tag-par">⏳ Esperando respuesta de {{ p.receptorNombre }}</span>
+                    }
                   } @else if (p.estado === 'APROBADA') {
                     <span class="status-tag status-tag-ok">✅ Aprobada en Cuadrante</span>
                   } @else {
