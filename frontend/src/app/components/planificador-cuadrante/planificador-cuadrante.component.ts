@@ -151,6 +151,8 @@ import {
           <div
             class="shift-chip"
             [class.selected]="turnoPincelActivo === t.codigo"
+            [class.chip-heavy]="t.horasOrdinarias >= 12 || t.codigo === 'G24' || t.codigo === 'N12' || t.codigo === 'D12'"
+            [class.chip-24]="t.codigo === 'G24'"
             [style.background-color]="t.bgHex"
             [style.color]="t.textHex"
             [style.border-color]="t.borderHex"
@@ -303,6 +305,8 @@ import {
                   [class.cell-holiday]="!!d.festivo"
                   [class.cell-conflict]="!!conflicto"
                   [class.cell-locked]="celda?.codigo === 'VAC' || celda?.codigo === 'INC' || celda?.codigo === 'LIC'"
+                  [class.shift-heavy]="cfg && (cfg.horasOrdinarias >= 12 || cfg.codigo === 'G24' || cfg.codigo === 'N12' || cfg.codigo === 'D12')"
+                  [class.shift-24]="celda?.codigo === 'G24'"
                   [style.background-color]="cfg ? cfg.bgHex : ''"
                   [style.color]="cfg ? cfg.textHex : ''"
                   (mousedown)="iniciarPintadoCelda.emit({ empId: fila.empleado.id, dia: d.dia, event: $event })"

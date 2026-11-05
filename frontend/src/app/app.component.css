@@ -530,6 +530,29 @@ app-modal-rotacion {
   transform: translateY(-1px);
 }
 
+.shift-chip.chip-heavy {
+  position: relative;
+  font-weight: 800;
+}
+
+.shift-chip.chip-heavy::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background-color: currentColor;
+  border-radius: 6px 6px 0 0;
+  opacity: 0.85;
+}
+
+.shift-chip.chip-24::before {
+  background-color: #dc2626 !important;
+  height: 3.5px;
+  opacity: 1;
+}
+
 .chip-code {
   font-size: 14px;
   font-weight: 800;
@@ -952,6 +975,35 @@ tr.row-hovered td.matrix-cell:not(.cell-focused)::after,
 
 .matrix-cell.cell-conflict {
   box-shadow: inset 0 0 0 2px #dc2626 !important;
+}
+
+/* ACENTO DISTINTIVO PARA TURNOS DE LARGA DURACIÓN (G24, N12, D12) */
+.matrix-cell.shift-heavy {
+  font-weight: 900 !important;
+}
+
+.matrix-cell.shift-heavy .cell-inner::before {
+  content: '';
+  position: absolute;
+  top: 1.5px;
+  left: 3px;
+  right: 3px;
+  height: 2.5px;
+  border-radius: 2px;
+  background-color: currentColor;
+  opacity: 0.9;
+  z-index: 3;
+}
+
+.matrix-cell.shift-24 {
+  font-weight: 900 !important;
+}
+
+.matrix-cell.shift-24 .cell-inner::before {
+  top: 1px;
+  height: 3px;
+  background-color: #dc2626 !important;
+  opacity: 1;
 }
 
 .cell-inner {

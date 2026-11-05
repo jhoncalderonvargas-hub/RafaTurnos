@@ -215,16 +215,17 @@ export class AppComponent implements OnInit {
   readonly temasColorTurno = [
     { key: 'AZUL_CIELO', nombre: 'Azul Mañana', bgHex: '#E0F2FE', textHex: '#0369A1', borderHex: '#7DD3FC' },
     { key: 'CELESTE', nombre: 'Celeste Claro', bgHex: '#BAE6FD', textHex: '#0284C7', borderHex: '#38BDF8' },
-    { key: 'AMBAR_TARDE', nombre: 'Ámbar Tarde', bgHex: '#FEF3C7', textHex: '#B45309', borderHex: '#FCD34D' },
-    { key: 'NARANJA_GUARDIA', nombre: 'Naranja Guardia', bgHex: '#FFEDD5', textHex: '#C2410C', borderHex: '#FDBA74' },
-    { key: 'VIOLETA_NOCHE', nombre: 'Violeta Noche', bgHex: '#EDE9FE', textHex: '#6D28D9', borderHex: '#C4B5FD' },
-    { key: 'PURPURA_NOCHE', nombre: 'Púrpura Intenso', bgHex: '#DDD6FE', textHex: '#7C3AED', borderHex: '#A78BFA' },
-    { key: 'ROJO_CORAL', nombre: 'Rojo Guardia 24h', bgHex: '#FEE2E2', textHex: '#B91C1C', borderHex: '#FCA5A5' },
+    { key: 'AMBAR_TARDE', nombre: 'Ámbar Tarde', bgHex: '#FEF08A', textHex: '#854D0E', borderHex: '#FACC15' },
+    { key: 'NARANJA_GUARDIA', nombre: 'Naranja Guardia', bgHex: '#FED7AA', textHex: '#9A3412', borderHex: '#FB923C' },
+    { key: 'VIOLETA_NOCHE', nombre: 'Violeta Noche', bgHex: '#EDE9FE', textHex: '#5B21B6', borderHex: '#C4B5FD' },
+    { key: 'PURPURA_NOCHE', nombre: 'Púrpura Intenso', bgHex: '#DDD6FE', textHex: '#4C1D95', borderHex: '#A78BFA' },
+    { key: 'ROJO_CORAL', nombre: 'Rojo Guardia 24h', bgHex: '#FEE2E2', textHex: '#991B1B', borderHex: '#FCA5A5' },
     { key: 'TURQUESA_COMP', nombre: 'Turquesa Compensatorio', bgHex: '#CCFBF1', textHex: '#0F766E', borderHex: '#5EEAD4' },
     { key: 'ESMERALDA_VAC', nombre: 'Verde Esmeralda', bgHex: '#D1FAE5', textHex: '#047857', borderHex: '#6EE7B7' },
     { key: 'ROSA_INC', nombre: 'Rosa Novedad', bgHex: '#FCE7F3', textHex: '#BE185D', borderHex: '#F9A8D4' },
     { key: 'LAVANDA_LIC', nombre: 'Lavanda Licencia', bgHex: '#E0E7FF', textHex: '#3730A3', borderHex: '#C7D2FE' },
     { key: 'GRIS_ADMIN', nombre: 'Gris Neutro', bgHex: '#F3F4F6', textHex: '#374151', borderHex: '#D1D5DB' },
+    { key: 'BLANCO_LIBRE', nombre: 'Blanco Libre', bgHex: '#FFFFFF', textHex: '#64748B', borderHex: '#E2E8F0' },
   ];
 
   // Cálculo automático de horas Ordinarias, Diurnas (06:00-19:00) y Nocturnas (19:00-06:00) - Ley 2466 / CST Art. 160 y Art. 167 (Almuerzo)
