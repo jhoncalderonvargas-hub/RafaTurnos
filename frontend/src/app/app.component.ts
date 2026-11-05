@@ -965,7 +965,7 @@ export class AppComponent implements OnInit {
         const celdasEmp = matriz[emp.id];
         if (celdasEmp) {
           const tieneTurnoEnServicio = Object.values(celdasEmp).some(
-            (c) => c && c.codigo && c.codigo !== '' && (c.servicioEjecutorId === srvId || c.esRotacion)
+            (c) => c && c.codigo && c.codigo !== '' && c.servicioEjecutorId === srvId
           );
           if (tieneTurnoEnServicio) {
             idsRotados.add(emp.id);
@@ -1659,11 +1659,17 @@ export class AppComponent implements OnInit {
 
   onDragStartPaleta(event: DragEvent, cod: CodigoTurno): void {
     this.turnoPincelActivo.set(cod);
-    event.dataTransfer?.setData('text/plain', cod);
+    if (event.dataTransfer) {
+      event.dataTransfer.setData('text/plain', cod);
+      event.dataTransfer.effectAllowed = 'copy';
+    }
   }
 
   onDragOverCelda(event: DragEvent): void {
     event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy';
+    }
   }
 
   onDropCelda(event: DragEvent, empId: string, dia: number): void {
@@ -1837,21 +1843,41 @@ export class AppComponent implements OnInit {
         servicioEjecutorId: ultimoPaso.servicioId,
       };
       actualMap[c.empId] = filaEmp;
+    }
 
-      // Persistir reversión en PostgreSQL
+    // Persistir reversión en PostgreSQL (si son más de 5 celdas, en un solo lote atómico)
+    if (ultimoPaso.cambios.length > 5) {
+      const loteDb = ultimoPaso.cambios.map((c) => ({
+        empleadoId: c.empId,
+        dia: c.dia,
+        codigo: c.turnoAnterior,
+        previsto: c.previstoAnterior ?? (enBorrador ? c.turnoAnterior : (actualMap[c.empId]?.[c.dia]?.previsto || c.turnoAnterior)),
+        esRotacion: c.esRotacion,
+      }));
       this.api
-        .guardarCeldaCuadrante({
+        .guardarLoteCuadrante({
           servicioId: ultimoPaso.servicioId,
           anio: ultimoPaso.anio,
           mes: ultimoPaso.mes,
-          dia: c.dia,
-          empleadoId: c.empId,
-          codigo: c.turnoAnterior,
-          previsto: filaEmp[c.dia].previsto || '',
-          esRotacion: c.esRotacion,
-          justificacion: justificacionAuditoria,
+          celdas: loteDb,
         })
         .subscribe();
+    } else {
+      for (const c of ultimoPaso.cambios) {
+        this.api
+          .guardarCeldaCuadrante({
+            servicioId: ultimoPaso.servicioId,
+            anio: ultimoPaso.anio,
+            mes: ultimoPaso.mes,
+            dia: c.dia,
+            empleadoId: c.empId,
+            codigo: c.turnoAnterior,
+            previsto: actualMap[c.empId]?.[c.dia]?.previsto || '',
+            esRotacion: c.esRotacion,
+            justificacion: justificacionAuditoria,
+          })
+          .subscribe();
+      }
     }
 
     this.actualizarAsignacionesMesActual(actualMap);
@@ -1908,20 +1934,40 @@ export class AppComponent implements OnInit {
         servicioEjecutorId: ultimoPaso.servicioId,
       };
       actualMap[c.empId] = filaEmp;
+    }
 
+    if (ultimoPaso.cambios.length > 5) {
+      const loteDb = ultimoPaso.cambios.map((c) => ({
+        empleadoId: c.empId,
+        dia: c.dia,
+        codigo: c.turnoAnterior,
+        previsto: enBorrador ? c.turnoAnterior : (actualMap[c.empId]?.[c.dia]?.previsto || c.turnoAnterior),
+        esRotacion: c.esRotacion,
+      }));
       this.api
-        .guardarCeldaCuadrante({
+        .guardarLoteCuadrante({
           servicioId: ultimoPaso.servicioId,
           anio: ultimoPaso.anio,
           mes: ultimoPaso.mes,
-          dia: c.dia,
-          empleadoId: c.empId,
-          codigo: c.turnoAnterior,
-          previsto: filaEmp[c.dia].previsto || '',
-          esRotacion: c.esRotacion,
-          justificacion: justificacionAuditoria,
+          celdas: loteDb,
         })
         .subscribe();
+    } else {
+      for (const c of ultimoPaso.cambios) {
+        this.api
+          .guardarCeldaCuadrante({
+            servicioId: ultimoPaso.servicioId,
+            anio: ultimoPaso.anio,
+            mes: ultimoPaso.mes,
+            dia: c.dia,
+            empleadoId: c.empId,
+            codigo: c.turnoAnterior,
+            previsto: actualMap[c.empId]?.[c.dia]?.previsto || '',
+            esRotacion: c.esRotacion,
+            justificacion: justificacionAuditoria,
+          })
+          .subscribe();
+      }
     }
 
     this.actualizarAsignacionesMesActual(actualMap);
@@ -2099,10 +2145,26 @@ export class AppComponent implements OnInit {
       return;
     }
 
+    const empObj = this.empleados().find((e) => e.id === empId);
+
+    // Protección inter-servicio: No sobreescribir turnos que el colaborador ya tiene asignados en su servicio base u otro servicio
+    if (
+      celdaActual?.servicioEjecutorId &&
+      celdaActual.servicioEjecutorId !== this.servicioSeleccionadoId() &&
+      celdaActual.codigo &&
+      celdaActual.codigo !== '' &&
+      celdaActual.codigo !== 'L'
+    ) {
+      const srvOtro = this.servicios().find((s) => s.id === celdaActual.servicioEjecutorId);
+      this.mostrarNotificacion(
+        `⚠️ Turno asignado en otro servicio: ${empObj?.nombre || 'El colaborador'} ya ejecuta "${celdaActual.codigo}" en "${srvOtro?.nombre || 'otro servicio'}" este día.`
+      );
+      return;
+    }
+
     const anterior = (celdaActual?.codigo as CodigoTurno) || 'L';
     if (anterior === nuevoCodigo) return;
 
-    const empObj = this.empleados().find((e) => e.id === empId);
     const esRotacion = empObj ? empObj.servicioBaseId !== this.servicioSeleccionadoId() : false;
     const enBorrador = this.estadoCuadrante() === 'BORRADOR';
 
@@ -2229,6 +2291,7 @@ export class AppComponent implements OnInit {
       previsto?: string;
       esRotacion?: boolean;
     }[] = [];
+    const cambiosParaHistorial: CambioCeldaHistorial[] = [];
 
     const enBorrador = this.estadoCuadrante() === 'BORRADOR';
 
@@ -2250,6 +2313,15 @@ export class AppComponent implements OnInit {
           continue;
         }
         const prev = enBorrador ? '' : (celda.previsto ?? celda.codigo);
+        cambiosParaHistorial.push({
+          empId: emp.id,
+          dia: d.dia,
+          turnoAnterior: celda.codigo as CodigoTurno,
+          turnoNuevo: '' as CodigoTurno,
+          previstoAnterior: (celda.previsto || celda.codigo) as CodigoTurno,
+          esRotacion: esRotado,
+        });
+
         fila[d.dia] = {
           codigo: '',
           previsto: prev,
@@ -2268,6 +2340,22 @@ export class AppComponent implements OnInit {
     }
 
     this.actualizarAsignacionesMesActual(actualMap);
+
+    if (cambiosParaHistorial.length > 0) {
+      this.pilaDeshacer.update((pila) =>
+        [
+          ...pila,
+          {
+            descripcion: `🧹 Dejar en blanco (${celdasLimpiadas} turnos)`,
+            servicioId: this.servicioSeleccionadoId(),
+            anio: this.anioSeleccionado(),
+            mes: this.mesSeleccionado(),
+            cambios: cambiosParaHistorial,
+          },
+        ].slice(-30)
+      );
+      this.pilaRehacer.set([]);
+    }
 
     if (loteParaDb.length > 0) {
       this.api
@@ -2758,6 +2846,29 @@ export class AppComponent implements OnInit {
     this.actualizarAsignacionesMesActual(actualMap);
 
     if (loteParaDb.length > 0) {
+      const cambiosAutocompletar: CambioCeldaHistorial[] = loteParaDb.map((c) => ({
+        empId: c.empleadoId,
+        dia: c.dia,
+        turnoAnterior: '' as CodigoTurno,
+        turnoNuevo: c.codigo as CodigoTurno,
+        previstoAnterior: '' as CodigoTurno,
+        esRotacion: c.esRotacion,
+      }));
+
+      this.pilaDeshacer.update((pila) =>
+        [
+          ...pila,
+          {
+            descripcion: `✨ Autocompletar (${loteParaDb.length} turnos)`,
+            servicioId: this.servicioSeleccionadoId(),
+            anio: this.anioSeleccionado(),
+            mes: this.mesSeleccionado(),
+            cambios: cambiosAutocompletar,
+          },
+        ].slice(-30)
+      );
+      this.pilaRehacer.set([]);
+
       this.api
         .guardarLoteCuadrante({
           servicioId: this.servicioSeleccionadoId(),
@@ -2897,6 +3008,8 @@ export class AppComponent implements OnInit {
 
   cargarServicioParaEdicion(srv: ServicioHospitalario): void {
     this.servicioEditandoId.set(srv.id);
+    this.enlaceHermanoSrv1.set(srv.id);
+    this.enlaceHermanoSrv2.set('');
     this.nuevoServicioCodigo.set(srv.codigo);
     this.nuevoServicioNombre.set(srv.nombre);
     this.nuevoServicioTipoAsistencia.set(srv.tipoAsistencia || 'URGENCIAS');
@@ -2958,6 +3071,8 @@ export class AppComponent implements OnInit {
 
   cancelarEdicionServicio(): void {
     this.servicioEditandoId.set(null);
+    this.enlaceHermanoSrv1.set(this.servicios()[0]?.id || '');
+    this.enlaceHermanoSrv2.set('');
     this.nuevoServicioCodigo.set('');
     this.nuevoServicioNombre.set('');
     this.nuevoServicioTipoAsistencia.set('URGENCIAS');
@@ -3101,11 +3216,11 @@ export class AppComponent implements OnInit {
   }
 
   guardarEnlaceHermanos(): void {
-    const id1 = this.enlaceHermanoSrv1();
+    const id1 = this.servicioEditandoId() || this.enlaceHermanoSrv1();
     const id2 = this.enlaceHermanoSrv2();
 
-    if (id1 === id2) {
-      this.mostrarNotificacion('Selecciona dos servicios distintos para vincularlos como apoyo.');
+    if (!id2 || id1 === id2) {
+      this.mostrarNotificacion('Selecciona un servicio de apoyo distinto para vincularlo.');
       return;
     }
 
@@ -3144,10 +3259,12 @@ export class AppComponent implements OnInit {
 
     this.api.enlazarServiciosHermanos(id1, id2).subscribe({
       next: () => {
+        this.enlaceHermanoSrv2.set('');
         this.mostrarNotificacion(`Servicios "${srv1.codigo}" y "${srv2.codigo}" vinculados como apoyo.`);
         this.recargarServicios();
       },
       error: () => {
+        this.enlaceHermanoSrv2.set('');
         this.mostrarNotificacion(`Servicios "${srv1.codigo}" y "${srv2.codigo}" vinculados como apoyo.`);
       },
     });
@@ -3223,6 +3340,35 @@ export class AppComponent implements OnInit {
     mapaRot[srvId] = listaActual;
     this.empleadosRotadosPorServicio.set(mapaRot);
     this.guardarRotadosEnStorage(mapaRot);
+
+    // Limpiar turnos que este colaborador tuviera asignados específicamente en este servicio ejecutor
+    const actualMap = { ...this.asignaciones() };
+    const fila = { ...(actualMap[empId] || {}) };
+    let celdasLimpiadas = false;
+    for (const [diaStr, celda] of Object.entries(fila)) {
+      if (celda && celda.servicioEjecutorId === srvId && celda.codigo && celda.codigo !== '') {
+        fila[Number(diaStr)] = {
+          ...celda,
+          codigo: '' as CodigoTurno,
+        };
+        celdasLimpiadas = true;
+        this.api
+          .guardarCeldaCuadrante({
+            servicioId: srvId,
+            anio: this.anioSeleccionado(),
+            mes: this.mesSeleccionado(),
+            dia: Number(diaStr),
+            empleadoId: empId,
+            codigo: '',
+            esRotacion: false,
+          })
+          .subscribe();
+      }
+    }
+    if (celdasLimpiadas) {
+      actualMap[empId] = fila;
+      this.actualizarAsignacionesMesActual(actualMap);
+    }
 
     const empObj = this.empleados().find((e) => e.id === empId);
     this.mostrarNotificacion(`${empObj?.nombre || 'Colaborador'} removido del personal de apoyo.`);
@@ -3342,7 +3488,7 @@ export class AppComponent implements OnInit {
 
     return {
       valida: true,
-      motivo: `Misma categoría asistencial (${emp1.categoria}) y descanso mínimo de 12h verificado para ambos.`,
+      motivo: `Mismo cargo asistencial (${emp1.categoria}) y descanso mínimo de 12h verificado para ambos.`,
     };
   }
 
@@ -3357,7 +3503,7 @@ export class AppComponent implements OnInit {
     const comp = this.empleados().find((e) => e.id === this.companeroPermutaId());
 
     if (!comp) {
-      this.mostrarNotificacion('No hay compañeros de la misma categoría disponibles.');
+      this.mostrarNotificacion('No hay compañeros con el mismo cargo disponibles.');
       return;
     }
 
@@ -3497,12 +3643,14 @@ export class AppComponent implements OnInit {
   /**
    * Paso 3 del Flujo: La Supervisora rechaza la permuta por motivos asistenciales o de servicio.
    */
-  rechazarPermuta(idPermuta: string): void {
-    this.api.rechazarPermuta(idPermuta, 'Rechazada por la supervisora asistencial').subscribe({
+  rechazarPermuta(data: string | { id: string; motivo?: string }): void {
+    const idPermuta = typeof data === 'string' ? data : data.id;
+    const motivo = (typeof data === 'object' && data.motivo) ? data.motivo : 'Rechazada por la supervisora asistencial';
+    this.api.rechazarPermuta(idPermuta, motivo).subscribe({
       next: () => {
         this.actualizarListaPermutas(
           this.listaPermutas().map((p) =>
-            p.id === idPermuta ? { ...p, estado: 'RECHAZADA', motivoRechazo: 'Rechazada por la supervisora asistencial' } : p
+            p.id === idPermuta ? { ...p, estado: 'RECHAZADA', motivoRechazo: motivo } : p
           )
         );
         this.mostrarNotificacion('Solicitud de cambio de turno rechazada por supervisión.');
@@ -3510,12 +3658,21 @@ export class AppComponent implements OnInit {
       error: () => {
         this.actualizarListaPermutas(
           this.listaPermutas().map((p) =>
-            p.id === idPermuta ? { ...p, estado: 'RECHAZADA', motivoRechazo: 'Rechazada por la supervisora asistencial' } : p
+            p.id === idPermuta ? { ...p, estado: 'RECHAZADA', motivoRechazo: motivo } : p
           )
         );
         this.mostrarNotificacion('Solicitud de cambio de turno rechazada.');
       },
     });
+  }
+
+  /**
+   * Recarga bajo demanda los datos del Dashboard de Solicitudes y Auditoría desde PostgreSQL.
+   */
+  recargarDatosDashboard(): void {
+    this.sincronizarAuditoriasDesdePostgres();
+    this.sincronizarPermutasDesdePostgres();
+    this.mostrarNotificacion('🔄 Datos de solicitudes y auditoría actualizados desde el servidor.');
   }
 
   // Días cívicos
@@ -3542,7 +3699,7 @@ export class AppComponent implements OnInit {
     const filas = this.filasServicioCompletas();
     const dias = this.diasDelMes();
     const encabezadosDias = dias.map((d) => `Dia_${d.dia}`).join(';');
-    const header = `Documento;Colaborador;Categoria;Servicio;Contrato_Mes;HOD;HON_35;HDFD_75;HDFN_110;Horas_Trabajadas;Domingos_Festivos;Compensatorio_Causado;Dias_VAC;Dias_INC;Saldo_Banco_Anterior;Diferencia_Mes;Nuevo_Saldo_Banco;${encabezadosDias}`;
+    const header = `Documento;Colaborador;Cargo;Servicio;Contrato_Mes;HOD;HON_35;HDFD_75;HDFN_110;Horas_Trabajadas;Domingos_Festivos;Compensatorio_Causado;Dias_VAC;Dias_INC;Saldo_Banco_Anterior;Diferencia_Mes;Nuevo_Saldo_Banco;${encabezadosDias}`;
 
     const lineas = filas.map((f) => {
       const turnosDia = dias.map((d) => f.celdas[d.dia]?.codigo || 'L').join(';');
@@ -3615,6 +3772,7 @@ export class AppComponent implements OnInit {
     this.vistaActual.set(vista);
     if (vista === 'DASHBOARD') {
       this.sincronizarAuditoriasDesdePostgres();
+      this.sincronizarPermutasDesdePostgres();
     }
     if (!this.sidebarFijo()) {
       this.sidebarHovered.set(false);

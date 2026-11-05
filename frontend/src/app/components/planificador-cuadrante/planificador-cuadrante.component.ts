@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output, ViewEncapsulation } from '@angular/core';
+import { Component, ElementRef, EventEmitter, Input, OnDestroy, Output, ViewChild, ViewEncapsulation } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
@@ -17,8 +17,9 @@ import {
   imports: [CommonModule, FormsModule],
   encapsulation: ViewEncapsulation.None,
   template: `
-    <section class="toolbar-controls">
-      <div class="selectors-group">
+    <section class="toolbar-controls toolbar-eje3">
+      <!-- BLOQUE 1: CONTEXTO Y ESTADO CLÍNICO (IZQUIERDA) -->
+      <div class="toolbar-zone toolbar-zone-context">
         <div class="control-item">
           <label>Servicio:</label>
           <select [ngModel]="servicioSeleccionadoId" (ngModelChange)="cambiarServicio.emit($event)">
@@ -29,7 +30,7 @@ import {
         </div>
 
         <div class="control-item">
-          <label>Mes / Año:</label>
+          <label>Mes:</label>
           <select [ngModel]="mesSeleccionado" (ngModelChange)="cambiarMes.emit($event)">
             @for (m of mesesDisponibles; track m.valor) {
               <option [value]="m.valor">{{ m.nombre }} {{ anioSeleccionado }}</option>
@@ -38,31 +39,77 @@ import {
         </div>
 
         <div class="control-item">
-          <label>Categoría:</label>
+          <label>Cargo:</label>
           <select [ngModel]="filtroCategoriaActiva" (ngModelChange)="cambiarFiltroCategoria.emit($event)">
-            <option value="TODAS">Todas las categorías ({{ categoriasEnServicioActual.length }})</option>
+            <option value="TODAS">Todos los cargos ({{ categoriasEnServicioActual.length }})</option>
             @for (cat of categoriasEnServicioActual; track cat) {
               <option [value]="cat">{{ cat }}</option>
             }
           </select>
         </div>
 
-        <div class="estado-cuadrante-badge" [attr.data-estado]="estadoCuadrante">
-          Estado: <strong>{{ estadoCuadrante }}</strong>
+        <div class="estado-cuadrante-badge" [attr.data-estado]="estadoCuadrante" [title]="'Estado legal del cuadro de turnos: ' + estadoCuadrante">
+          @if (estadoCuadrante === 'BORRADOR') {
+            <span class="badge-dot dot-warn"></span>
+            <span>Borrador</span>
+          } @else if (estadoCuadrante === 'PUBLICADO') {
+            <span class="badge-dot dot-success"></span>
+            <span>Publicado</span>
+          } @else {
+            <span class="badge-dot dot-locked"></span>
+            <span>Cerrado Nómina</span>
+          }
         </div>
       </div>
 
-      <div class="actions-group">
-        <label class="toggle-check" title="Avanza automáticamente a la siguiente celda al presionar una tecla de turno">
-          <input type="checkbox" [ngModel]="autoAvanzarAlTeclear" (ngModelChange)="cambiarAutoAvanzar.emit($event)">
-          <span>⚡ Auto-avanzar celda</span>
-        </label>
+      <div class="toolbar-divider"></div>
 
-        <label class="toggle-check">
-          <input type="checkbox" [ngModel]="mostrarComparadorPrevisto" (ngModelChange)="cambiarMostrarComparador.emit($event)">
-          <span>🔍 Ver cambios frente al original</span>
-        </label>
+      <!-- BLOQUE 2: HERRAMIENTAS DE EDICIÓN ASISTIDA (CENTRO) -->
+      <div class="toolbar-zone toolbar-zone-tools">
+        <!-- Clúster Deshacer / Rehacer -->
+        <div class="undo-redo-cluster">
+          <button
+            class="btn-undo-action"
+            (click)="deshacerUltimaAccion.emit()"
+            [disabled]="pilaDeshacer.length === 0"
+            title="Deshacer último cambio (Ctrl + Z)">
+            ↩️
+          </button>
+          <button
+            class="btn-undo-action"
+            (click)="rehacerUltimaAccion.emit()"
+            [disabled]="pilaRehacer.length === 0"
+            title="Rehacer cambio revertido (Ctrl + Y)">
+            ↪️
+          </button>
+        </div>
 
+        <!-- Asistente y Acciones de Cuadrante -->
+        <button class="btn-tool btn-tool-wizard" (click)="ejecutarAutocompletarHuecos.emit()" title="Autocompletar turnos faltantes respetando descansos y normativa colombiana">
+          ✨ Autocompletar
+        </button>
+
+        <button class="btn-tool btn-tool-apoyo" (click)="abrirModalRotacion.emit()" title="Solicitar o traer personal de apoyo homólogo de otros servicios">
+          🔄 Traer Apoyo
+        </button>
+
+        <button class="btn-tool btn-tool-limpiar" (click)="limpiarCuadranteCompleto.emit()" title="Borra todos los turnos para armar a mano (conserva VAC/INC)">
+          🧹 En Blanco
+        </button>
+
+        <div class="tools-micro-divider"></div>
+
+        <!-- Modo Auditoría / Comparador Visual -->
+        <label class="toggle-chip" [class.active]="mostrarComparadorPrevisto" title="Muestra triángulo amarillo en celdas modificadas respecto a la versión oficial">
+          <input type="checkbox" class="toggle-hidden-input" [ngModel]="mostrarComparadorPrevisto" (ngModelChange)="cambiarMostrarComparador.emit($event)">
+          <span>🔍 Cambios</span>
+        </label>
+      </div>
+
+      <div class="toolbar-divider"></div>
+
+      <!-- BLOQUE 3: GOBERNANZA, INTEGRACIÓN Y ACCIÓN PRINCIPAL (DERECHA) -->
+      <div class="toolbar-zone toolbar-zone-governance">
         <div class="intranet-status-box" [title]="'Sincronización automática con Intranet: ' + (ultimaSincronizacionIntranet || 'Activa')">
           <span class="live-dot"></span>
           <span class="intranet-label">Intranet</span>
@@ -78,62 +125,29 @@ import {
           </button>
         </div>
 
-        <button class="btn-secondary" (click)="abrirModalRotacion.emit()">
-          🔄 Traer Personal de Apoyo
-        </button>
-
-        <button class="btn-wizard" (click)="ejecutarAutocompletarHuecos.emit()">
-          ✨ Autocompletar Turnos Faltantes
-        </button>
-
-        <div class="undo-redo-cluster">
-          <button
-            class="btn-undo-action"
-            (click)="deshacerUltimaAccion.emit()"
-            [disabled]="pilaDeshacer.length === 0"
-            title="Deshacer último cambio (Ctrl + Z)">
-            ↩️ Deshacer
-          </button>
-          <button
-            class="btn-undo-action"
-            (click)="rehacerUltimaAccion.emit()"
-            [disabled]="pilaRehacer.length === 0"
-            title="Rehacer cambio revertido (Ctrl + Y)">
-            ↪️ Rehacer
-          </button>
-        </div>
-
-        <button class="btn-outline" (click)="limpiarCuadranteCompleto.emit()" title="Borra todos los turnos para armar el cuadro de turnos a mano (conserva VAC/INC)">
-          🧹 Dejar en Blanco
+        <button class="btn-tool btn-tool-excel" (click)="exportarExcelNomina.emit()" title="Exportar pre-nómina y desglose de horas a Microsoft Excel (.xlsx)">
+          📊 Excel
         </button>
 
         <button
-          class="btn-primary"
+          class="btn-cta-primary"
+          [attr.data-estado]="estadoCuadrante"
           (click)="cambiarEstadoCuadrante.emit()"
           [disabled]="esCoordinador && estadoCuadrante !== 'BORRADOR'"
           [title]="esCoordinador && estadoCuadrante !== 'BORRADOR' ? 'Solo Talento Humano / Nómina puede cerrar o reabrir meses publicados' : ''">
           @if (estadoCuadrante === 'BORRADOR') {
-            🚀 Publicar Cuadro de Turnos
+            🚀 Publicar Cuadro
           } @else if (estadoCuadrante === 'PUBLICADO') {
-            🔒 Cerrar Mes para Nómina
+            🔒 Cerrar Nómina
           } @else {
-            🔓 Reabrir Cuadro de Turnos
+            🔓 Reabrir Cuadro
           }
-        </button>
-
-        <button class="btn-excel" (click)="exportarExcelNomina.emit()">
-          📊 Exportar Excel
         </button>
       </div>
     </section>
 
     <!-- PALETA DE TURNOS -->
     <section class="thurni-palette-bar">
-      <div class="palette-instructions">
-        <strong>🎨 Tipos de Turno:</strong>
-        <span>Usa <strong>👆 Puntero</strong> para navegar o teclear turnos (<code>1-8, M, T, N, D, G, S, L, C, V, I, Supr</code>). <span class="badge-ctrl-tip">💡 <strong>Ctrl + Arrastrar</strong> clona el turno de cualquier celda (estilo Excel).</span></span>
-      </div>
-
       <div class="palette-clusters-wrapper">
         <!-- BLOQUE 1: HERRAMIENTAS (PUNTERO Y BORRADOR) -->
         <div class="palette-cluster cluster-tools">
@@ -275,11 +289,20 @@ import {
       </div>
     }
 
-    <div class="grid-container" [class.ctrl-pressed]="teclaCtrlPresionada" [class.is-cloning]="clonandoConCtrl">
-      <table class="schedule-matrix" (mouseleave)="onGridMouseLeave()">
+    <div
+      #gridContainer
+      class="grid-container"
+      [class.ctrl-pressed]="teclaCtrlPresionada"
+      [class.is-cloning]="clonandoConCtrl"
+      (dragover)="onGridDragOver($event)"
+      (dragleave)="onGridDragLeave($event)"
+      (drop)="onGridDrop($event)"
+      (mousemove)="onGridMouseMove($event)"
+      (mouseleave)="onGridMouseLeave()">
+      <table class="schedule-matrix">
         <thead>
           <tr>
-            <th class="col-sticky-emp">Colaborador / Categoría</th>
+            <th class="col-sticky-emp">Colaborador / Cargo</th>
             <th class="col-empalme" title="Último turno del mes anterior (Protección de Empalme)">Emp.<br>Ant</th>
             @for (d of diasDelMes; track d.dia) {
               <th
@@ -380,8 +403,8 @@ import {
                   [style.color]="cfg ? cfg.textHex : ''"
                   (mousedown)="iniciarPintadoCelda.emit({ empId: fila.empleado.id, dia: d.dia, event: $event })"
                   (mouseenter)="onCeldaMouseEnter(fila.empleado.id, d.dia)"
-                  (dragover)="dragOverCelda.emit($event)"
-                  (drop)="dropCelda.emit({ event: $event, empId: fila.empleado.id, dia: d.dia })"
+                  (dragover)="onCeldaDragOver($event)"
+                  (drop)="onCeldaDrop($event, fila.empleado.id, d.dia)"
                   (keydown)="keyDownCelda.emit({ event: $event, empId: fila.empleado.id, dia: d.dia })"
                   [title]="construirTooltipCelda(fila.empleado, d, celda, conflicto)">
 
@@ -544,7 +567,12 @@ import {
     </div>
   `,
 })
-export class PlanificadorCuadranteComponent {
+export class PlanificadorCuadranteComponent implements OnDestroy {
+  @ViewChild('gridContainer') gridContainerRef?: ElementRef<HTMLDivElement>;
+
+  private autoScrollAnimationId: number | null = null;
+  private autoScrollVelocidadY = 0;
+  private autoScrollVelocidadX = 0;
   @Input() servicioSeleccionadoId = '';
   @Input() serviciosVisibles: ServicioHospitalario[] = [];
   @Input() mesSeleccionado = 1;
@@ -600,13 +628,122 @@ export class PlanificadorCuadranteComponent {
 
   celdaHovered: { empId: string; dia: number } | null = null;
 
+  ngOnDestroy(): void {
+    this.detenerAutoScroll();
+  }
+
   onCeldaMouseEnter(empId: string, dia: number): void {
     this.celdaHovered = { empId, dia };
     this.continuarPintadoCelda.emit({ empId, dia });
   }
 
+  onGridDragOver(event: DragEvent): void {
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy';
+    }
+    this.procesarAutoScroll(event.clientY, event.clientX);
+  }
+
+  onGridDragLeave(event: DragEvent): void {
+    this.detenerAutoScroll();
+  }
+
+  onGridDrop(event: DragEvent): void {
+    this.detenerAutoScroll();
+  }
+
+  onCeldaDragOver(event: DragEvent): void {
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy';
+    }
+    this.procesarAutoScroll(event.clientY, event.clientX);
+    this.dragOverCelda.emit(event);
+  }
+
+  onCeldaDrop(event: DragEvent, empId: string, dia: number): void {
+    this.detenerAutoScroll();
+    this.dropCelda.emit({ event, empId, dia });
+  }
+
+  onGridMouseMove(event: MouseEvent): void {
+    if (event.buttons === 1) {
+      this.procesarAutoScroll(event.clientY, event.clientX);
+    } else if (this.autoScrollVelocidadY !== 0 || this.autoScrollVelocidadX !== 0) {
+      this.detenerAutoScroll();
+    }
+  }
+
   onGridMouseLeave(): void {
     this.celdaHovered = null;
+    this.detenerAutoScroll();
+  }
+
+  private procesarAutoScroll(clientY: number, clientX: number): void {
+    const el = this.gridContainerRef?.nativeElement;
+    if (!el) return;
+
+    const rect = el.getBoundingClientRect();
+    const threshold = 75; // Zona sensible de 75px en los bordes
+
+    // Detección Vertical
+    if (clientY > rect.bottom - threshold && clientY <= rect.bottom + 35) {
+      const factor = Math.min(1, Math.max(0.15, (clientY - (rect.bottom - threshold)) / threshold));
+      this.autoScrollVelocidadY = Math.round(factor * 20) + 6;
+    } else if (clientY < rect.top + threshold && clientY >= rect.top - 35) {
+      const factor = Math.min(1, Math.max(0.15, ((rect.top + threshold) - clientY) / threshold));
+      this.autoScrollVelocidadY = -(Math.round(factor * 20) + 6);
+    } else {
+      this.autoScrollVelocidadY = 0;
+    }
+
+    // Detección Horizontal
+    if (clientX > rect.right - threshold && clientX <= rect.right + 35) {
+      const factor = Math.min(1, Math.max(0.15, (clientX - (rect.right - threshold)) / threshold));
+      this.autoScrollVelocidadX = Math.round(factor * 20) + 6;
+    } else if (clientX < rect.left + threshold && clientX >= rect.left - 35) {
+      const factor = Math.min(1, Math.max(0.15, ((rect.left + threshold) - clientX) / threshold));
+      this.autoScrollVelocidadX = -(Math.round(factor * 20) + 6);
+    } else {
+      this.autoScrollVelocidadX = 0;
+    }
+
+    if ((this.autoScrollVelocidadY !== 0 || this.autoScrollVelocidadX !== 0) && this.autoScrollAnimationId === null) {
+      this.iniciarLoopAutoScroll();
+    } else if (this.autoScrollVelocidadY === 0 && this.autoScrollVelocidadX === 0) {
+      this.detenerAutoScroll();
+    }
+  }
+
+  private iniciarLoopAutoScroll(): void {
+    const tick = () => {
+      const el = this.gridContainerRef?.nativeElement;
+      if (!el || (this.autoScrollVelocidadY === 0 && this.autoScrollVelocidadX === 0)) {
+        this.detenerAutoScroll();
+        return;
+      }
+
+      if (this.autoScrollVelocidadY !== 0) {
+        el.scrollTop += this.autoScrollVelocidadY;
+      }
+      if (this.autoScrollVelocidadX !== 0) {
+        el.scrollLeft += this.autoScrollVelocidadX;
+      }
+
+      this.autoScrollAnimationId = requestAnimationFrame(tick);
+    };
+
+    this.autoScrollAnimationId = requestAnimationFrame(tick);
+  }
+
+  detenerAutoScroll(): void {
+    if (this.autoScrollAnimationId !== null) {
+      cancelAnimationFrame(this.autoScrollAnimationId);
+      this.autoScrollAnimationId = null;
+    }
+    this.autoScrollVelocidadY = 0;
+    this.autoScrollVelocidadX = 0;
   }
 
   onDragStartPaleta(codigo: string, event: DragEvent): void {

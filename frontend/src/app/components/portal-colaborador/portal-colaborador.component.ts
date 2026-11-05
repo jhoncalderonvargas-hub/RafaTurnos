@@ -59,7 +59,7 @@ export interface DatosEmpleadoPortal {
       <!-- Bloque 1: Tarjetas de Resumen Personal y Mi Banco de Horas -->
       <div class="kpi-grid">
         <div class="kpi-card">
-          <div class="kpi-label">Servicio y Categoría</div>
+          <div class="kpi-label">Servicio y Cargo</div>
           <div class="kpi-value" style="font-size: 20px;">{{ portal.servicioBase?.nombre || 'Servicio Asistencial' }}</div>
           <div class="kpi-sub">{{ portal.empleado.categoria }} • C.C. {{ portal.empleado.documento }}</div>
         </div>
@@ -241,7 +241,7 @@ export interface DatosEmpleadoPortal {
               </button>
             } @else {
               <div class="text-muted" style="padding: 8px; font-style: italic;">
-                No hay otros compañeros con la misma categoría asistencial en este servicio para realizar permutas.
+                No hay otros compañeros con el mismo cargo en este servicio para realizar permutas.
               </div>
             }
           </div>
@@ -289,7 +289,7 @@ export interface DatosEmpleadoPortal {
             <thead>
               <tr>
                 <th>Compañero</th>
-                <th>Categoría</th>
+                <th>Cargo</th>
                 <th>Turno</th>
                 <th>Horario</th>
               </tr>

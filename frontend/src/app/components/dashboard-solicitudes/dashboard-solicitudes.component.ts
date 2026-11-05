@@ -1,45 +1,114 @@
 import { Component, EventEmitter, Input, Output, ViewEncapsulation } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { PermutaItem, RegistroAuditoria, SesionUsuarioSso } from '../../models';
 
 @Component({
   selector: 'app-dashboard-solicitudes',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, FormsModule],
   encapsulation: ViewEncapsulation.None,
   template: `
     <div class="dashboard-layout">
+      <!-- CABECERA DEL DASHBOARD -->
+      <div class="dashboard-header-bar">
+        <div>
+          <h2>📊 Panel de Solicitudes y Bitácora Asistencial</h2>
+          <p class="dashboard-header-desc">
+            Monitoreo en tiempo real de cobertura, alertas de descanso, gestión de permutas 1-a-1 y trazabilidad de cambios.
+          </p>
+        </div>
+        <div class="dashboard-header-actions">
+          <span class="badge-service-pill">🏥 {{ servicioNombre || 'Hospital' }}</span>
+          <button class="btn-outline-refresh" (click)="refrescarDatos.emit()" title="Actualizar datos desde el servidor">
+            🔄 Actualizar
+          </button>
+        </div>
+      </div>
+
+      <!-- TARJETAS DE INDICADORES KPI -->
       <div class="kpi-grid">
         <div class="kpi-card">
           <div class="kpi-label">Cobertura del Servicio</div>
-          <div class="kpi-value">{{ porcentajeCobertura }}%</div>
+          <div class="kpi-value" [class.text-pos]="porcentajeCobertura >= 95" [class.text-neg]="porcentajeCobertura < 80">
+            {{ porcentajeCobertura }}%
+          </div>
           <div class="kpi-sub">{{ servicioNombre }}</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-label">Alertas de Descanso</div>
-          <div class="kpi-value" [class.text-neg]="infraccionesCount > 0">{{ infraccionesCount }}</div>
+          <div class="kpi-value" [class.text-neg]="infraccionesCount > 0" [class.text-pos]="infraccionesCount === 0">
+            {{ infraccionesCount }}
+          </div>
           <div class="kpi-sub">Descanso mínimo: 12 horas</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-label">Balance Banco de Horas</div>
-          <div class="kpi-value">{{ formatearSigno(balanceBancoHoras) }}h</div>
+          <div class="kpi-value" [class.text-pos]="balanceBancoHoras >= 0" [class.text-neg]="balanceBancoHoras < 0">
+            {{ formatearSigno(balanceBancoHoras) }}h
+          </div>
           <div class="kpi-sub">Total acumulado del servicio</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-label">Cambios de Turno Pendientes</div>
-          <div class="kpi-value">{{ notificacionesCount }}</div>
+          <div class="kpi-value" [class.text-neg]="notificacionesCount > 0" [class.text-pos]="notificacionesCount === 0">
+            {{ notificacionesCount }}
+          </div>
           <div class="kpi-sub">{{ esColaborador ? 'Por responder' : 'Por revisar' }}</div>
         </div>
       </div>
 
+      <!-- PANELES DE GESTIÓN: PERMUTAS Y BITÁCORA -->
       <div class="two-col-panels">
-        <!-- Panel de Cambios de Turno entre compañeros -->
+        <!-- Panel 1: Solicitudes de Cambio de Turno entre compañeros -->
         <div class="panel-card">
           <div class="panel-header">
             <h3>🔄 Solicitudes de Cambio de Turno (Permutas)</h3>
+            <span class="badge-info">{{ countPendientes }} pendientes</span>
           </div>
+
+          <!-- Barra de Filtros y Búsqueda de Permutas -->
+          <div class="panel-filter-bar">
+            <div class="filter-tabs">
+              <button
+                class="filter-tab"
+                [class.active]="filtroEstadoPermuta === 'TODAS'"
+                (click)="filtroEstadoPermuta = 'TODAS'">
+                Todas ({{ countTodas }})
+              </button>
+              <button
+                class="filter-tab"
+                [class.active]="filtroEstadoPermuta === 'PENDIENTES'"
+                (click)="filtroEstadoPermuta = 'PENDIENTES'">
+                ⏳ Pendientes ({{ countPendientes }})
+              </button>
+              <button
+                class="filter-tab"
+                [class.active]="filtroEstadoPermuta === 'APROBADA'"
+                (click)="filtroEstadoPermuta = 'APROBADA'">
+                ✅ Aprobadas ({{ countAprobadas }})
+              </button>
+              <button
+                class="filter-tab"
+                [class.active]="filtroEstadoPermuta === 'RECHAZADA'"
+                (click)="filtroEstadoPermuta = 'RECHAZADA'">
+                ❌ Rechazadas ({{ countRechazadas }})
+              </button>
+            </div>
+            <div class="search-input-wrap">
+              <input
+                type="text"
+                [(ngModel)]="busquedaPermuta"
+                placeholder="🔍 Buscar colaborador o turno..."
+                class="filter-search-input" />
+              @if (busquedaPermuta) {
+                <button class="btn-clear-search" (click)="busquedaPermuta = ''">✕</button>
+              }
+            </div>
+          </div>
+
           <div class="permutas-list">
-            @for (p of permutas; track p.id) {
+            @for (p of permutasFiltradas; track p.id) {
               <div class="permuta-item" [class.permuta-ready]="p.estado === 'PENDIENTE_SUPERVISOR'">
                 <div class="permuta-main">
                   <div class="permuta-title">
@@ -47,7 +116,7 @@ import { PermutaItem, RegistroAuditoria, SesionUsuarioSso } from '../../models';
                     ⇄ <strong>{{ p.receptorNombre }}</strong> (Día {{ p.diaDestino }}: <code>{{ p.turnoDestino }}</code>)
                   </div>
                   <div class="permuta-meta">
-                    Categoría: <b>{{ p.categoria }}</b> • Solicitud: {{ p.fechaSolicitud }}
+                    Cargo: <b>{{ p.categoria }}</b> • Solicitud: {{ p.fechaSolicitud }}
                   </div>
                   <div class="permuta-validation">
                     ✅ {{ p.validacionReglas }}
@@ -63,7 +132,7 @@ import { PermutaItem, RegistroAuditoria, SesionUsuarioSso } from '../../models';
                         <span class="badge-concertada">🤝 Acuerdo mutuo confirmado</span>
                         <div class="btn-group-h">
                           <button class="btn-approve" (click)="aprobarPermuta.emit(p.id)">✔ Aprobar Cambio</button>
-                          <button class="btn-reject" (click)="rechazarPermuta.emit(p.id)">✕ Rechazar</button>
+                          <button class="btn-reject" (click)="solicitarRechazoSupervisor(p.id)">✕ Rechazar</button>
                         </div>
                       </div>
                     } @else {
@@ -77,7 +146,7 @@ import { PermutaItem, RegistroAuditoria, SesionUsuarioSso } from '../../models';
                           <button class="btn-approve" (click)="aceptarPropuestaPar.emit(p.id)">
                             ✅ Aceptar Propuesta
                           </button>
-                          <button class="btn-reject" (click)="rechazarPropuestaPar.emit(p.id)">
+                          <button class="btn-reject" (click)="solicitarRechazoPar(p.id)">
                             ❌ Declinar
                           </button>
                         </div>
@@ -93,16 +162,38 @@ import { PermutaItem, RegistroAuditoria, SesionUsuarioSso } from '../../models';
                 </div>
               </div>
             } @empty {
-              <div class="text-muted" style="padding: 16px;">No hay solicitudes de permuta registradas.</div>
+              <div class="text-muted empty-state-box">
+                @if (busquedaPermuta || filtroEstadoPermuta !== 'TODAS') {
+                  <span>🔍 No se encontraron solicitudes que coincidan con los filtros aplicados.</span>
+                } @else {
+                  <span>No hay solicitudes de permuta registradas para este servicio.</span>
+                }
+              </div>
             }
           </div>
         </div>
 
-        <!-- Historial de Cambios del Cuadro de Turnos -->
+        <!-- Panel 2: Historial de Cambios del Cuadro de Turnos (Bitácora de Auditoría) -->
         <div class="panel-card">
           <div class="panel-header">
             <h3>📋 Historial de Cambios del Cuadro de Turnos</h3>
+            <span class="badge-info">{{ auditoriasFiltradas.length }} registros</span>
           </div>
+
+          <!-- Barra de Búsqueda de Auditoría -->
+          <div class="panel-filter-bar">
+            <div class="search-input-wrap search-input-full">
+              <input
+                type="text"
+                [(ngModel)]="busquedaAuditoria"
+                placeholder="🔍 Buscar por colaborador, actor, motivo, día o turno..."
+                class="filter-search-input" />
+              @if (busquedaAuditoria) {
+                <button class="btn-clear-search" (click)="busquedaAuditoria = ''">✕</button>
+              }
+            </div>
+          </div>
+
           <div class="audit-table-wrap">
             <table class="data-table">
               <thead>
@@ -116,7 +207,7 @@ import { PermutaItem, RegistroAuditoria, SesionUsuarioSso } from '../../models';
                 </tr>
               </thead>
               <tbody>
-                @for (log of bitacoraAuditoria; track log.id) {
+                @for (log of auditoriasFiltradas; track log.id) {
                   <tr>
                     <td class="font-mono">{{ log.timestamp }}</td>
                     <td>{{ log.actor }}</td>
@@ -132,7 +223,11 @@ import { PermutaItem, RegistroAuditoria, SesionUsuarioSso } from '../../models';
                 } @empty {
                   <tr>
                     <td colspan="6" class="text-muted" style="text-align: center; padding: 22px;">
-                      🛡️ No hay movimientos de auditoría registrados para este servicio.
+                      @if (busquedaAuditoria) {
+                        🔍 No se encontraron registros de auditoría que coincidan con "{{ busquedaAuditoria }}".
+                      } @else {
+                        🛡️ No hay movimientos de auditoría registrados para este servicio.
+                      }
                     </td>
                   </tr>
                 }
@@ -156,12 +251,96 @@ export class DashboardSolicitudesComponent {
   @Input() sesionActual: SesionUsuarioSso | null = null;
 
   @Output() aprobarPermuta = new EventEmitter<string>();
-  @Output() rechazarPermuta = new EventEmitter<string>();
+  @Output() rechazarPermuta = new EventEmitter<string | { id: string; motivo: string }>();
   @Output() aceptarPropuestaPar = new EventEmitter<string>();
   @Output() rechazarPropuestaPar = new EventEmitter<string>();
+  @Output() refrescarDatos = new EventEmitter<void>();
+
+  filtroEstadoPermuta: 'TODAS' | 'PENDIENTES' | 'APROBADA' | 'RECHAZADA' = 'TODAS';
+  busquedaPermuta = '';
+  busquedaAuditoria = '';
+
+  get countTodas(): number {
+    return this.permutas.length;
+  }
+
+  get countPendientes(): number {
+    return this.permutas.filter(
+      (p) => p.estado === 'PENDIENTE_SUPERVISOR' || p.estado === 'PENDIENTE_PAR'
+    ).length;
+  }
+
+  get countAprobadas(): number {
+    return this.permutas.filter((p) => p.estado === 'APROBADA').length;
+  }
+
+  get countRechazadas(): number {
+    return this.permutas.filter((p) => p.estado === 'RECHAZADA').length;
+  }
+
+  get permutasFiltradas(): PermutaItem[] {
+    const q = this.busquedaPermuta.trim().toLowerCase();
+    return this.permutas.filter((p) => {
+      // Filtro de Estado
+      if (this.filtroEstadoPermuta === 'PENDIENTES') {
+        if (p.estado !== 'PENDIENTE_SUPERVISOR' && p.estado !== 'PENDIENTE_PAR') return false;
+      } else if (this.filtroEstadoPermuta !== 'TODAS') {
+        if (p.estado !== this.filtroEstadoPermuta) return false;
+      }
+
+      // Filtro de Búsqueda
+      if (q) {
+        const match =
+          p.solicitanteNombre?.toLowerCase().includes(q) ||
+          p.receptorNombre?.toLowerCase().includes(q) ||
+          p.categoria?.toLowerCase().includes(q) ||
+          p.turnoOrigen?.toLowerCase().includes(q) ||
+          p.turnoDestino?.toLowerCase().includes(q) ||
+          String(p.diaOrigen).includes(q) ||
+          String(p.diaDestino).includes(q);
+        if (!match) return false;
+      }
+
+      return true;
+    });
+  }
+
+  get auditoriasFiltradas(): RegistroAuditoria[] {
+    const q = this.busquedaAuditoria.trim().toLowerCase();
+    if (!q) return this.bitacoraAuditoria;
+    return this.bitacoraAuditoria.filter(
+      (log) =>
+        log.empleadoNombre?.toLowerCase().includes(q) ||
+        log.actor?.toLowerCase().includes(q) ||
+        log.motivo?.toLowerCase().includes(q) ||
+        log.turnoNuevo?.toLowerCase().includes(q) ||
+        log.turnoAnterior?.toLowerCase().includes(q) ||
+        String(log.dia).includes(q)
+    );
+  }
 
   formatearSigno(n?: number): string {
     const val = Number(n) || 0;
     return (val > 0 ? '+' : '') + val;
+  }
+
+  solicitarRechazoSupervisor(idPermuta: string): void {
+    const motivo = window.prompt(
+      'Indique el motivo del rechazo de la solicitud:',
+      'Rechazada por necesidades asistenciales del servicio'
+    );
+    if (motivo !== null) {
+      this.rechazarPermuta.emit({
+        id: idPermuta,
+        motivo: motivo.trim() || 'Rechazada por la supervisora asistencial',
+      });
+    }
+  }
+
+  solicitarRechazoPar(idPermuta: string): void {
+    const confirmar = window.confirm('¿Está seguro de declinar esta propuesta de cambio de turno?');
+    if (confirmar) {
+      this.rechazarPropuestaPar.emit(idPermuta);
+    }
   }
 }

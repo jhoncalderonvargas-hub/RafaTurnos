@@ -132,7 +132,7 @@ export type SubVistaReportes = 'PRE_NOMINA' | 'EQUIDAD' | 'BANCO_HORAS' | 'AUSEN
                   <th>Documento</th>
                   <th>Colaborador</th>
                   <th>Servicio Base</th>
-                  <th>Categoría</th>
+                  <th>Cargo</th>
                   <th>Contrato</th>
                   <th title="Horas Ordinarias Diurnas (06:00-19:00 L-S)">HOD</th>
                   <th title="Horas Ordinarias Nocturnas (19:00-06:00 L-S) Recargo 35%">HON 35%</th>
@@ -201,7 +201,7 @@ export type SubVistaReportes = 'PRE_NOMINA' | 'EQUIDAD' | 'BANCO_HORAS' | 'AUSEN
                   <th>Documento</th>
                   <th>Colaborador</th>
                   <th>Servicio Base</th>
-                  <th>Categoría</th>
+                  <th>Cargo</th>
                   <th>Noches Realizadas</th>
                   <th>Dom. y Festivos</th>
                   <th>Total Horas Nocturnas</th>
