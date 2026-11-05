@@ -320,14 +320,14 @@ export class CuadrantesController {
       },
     });
 
-    // Al publicar el cuadrante, congelar la foto oficial del Turno Previsto (codigo_previsto = turno actual)
+    // Al publicar el cuadrante, congelar la foto oficial del Turno Previsto (codigoPrevisto = turno actual)
     if (dto.estado === 'PUBLICADO') {
       await this.prisma.$executeRaw`
         UPDATE "asignaciones_turno" a
-        SET "codigo_previsto" = CASE WHEN t."codigo" = 'BLANCO' THEN '' ELSE t."codigo" END
+        SET "codigoPrevisto" = CASE WHEN t."codigo" = 'BLANCO' THEN '' ELSE t."codigo" END
         FROM "tipos_turno" t
-        WHERE a."tipo_turno_id" = t."id"
-          AND a."cuadrante_id" = ${cuadrante.id}::uuid
+        WHERE a."tipoTurnoId" = t."id"
+          AND a."cuadranteId" = ${cuadrante.id}
       `;
     }
 
@@ -421,6 +421,12 @@ export class CuadrantesController {
       },
     });
 
+    if (cuadrante.estado === EstadoCuadrante.CERRADO_NOMINA) {
+      throw new ConflictException(
+        'El cuadrante de este periodo se encuentra CERRADO para nómina. Para modificar turnos, Talento Humano debe reabrir el periodo.'
+      );
+    }
+
     // Consultar turno anterior para auditoría si el cuadrante está PUBLICADO
     const asigPrevia = await this.prisma.asignacionTurno.findUnique({
       where: {
@@ -510,6 +516,12 @@ export class CuadrantesController {
         estado: EstadoCuadrante.BORRADOR,
       },
     });
+
+    if (cuadrante.estado === EstadoCuadrante.CERRADO_NOMINA) {
+      throw new ConflictException(
+        'El cuadrante de este periodo se encuentra CERRADO para nómina. Para modificar turnos, Talento Humano debe reabrir el periodo.'
+      );
+    }
 
     // Consultar novedades del mes para proteger las celdas oficiales de Intranet
     const primerDiaMes = new Date(Date.UTC(anio, mes - 1, 1));
