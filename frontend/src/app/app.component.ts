@@ -1,4 +1,4 @@
-import { Component, computed, HostListener, OnInit, signal } from '@angular/core';
+import { Component, computed, HostListener, OnInit, signal, ViewEncapsulation } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
@@ -64,6 +64,7 @@ import { SidebarNavegacionComponent } from './components/sidebar-navegacion/side
   ],
   templateUrl: './app.component.html',
   styleUrl: './app.component.css',
+  encapsulation: ViewEncapsulation.None,
 })
 export class AppComponent implements OnInit {
   // Navegación principal (Menú lateral izquierdo colapsable automáticamente por hover)

@@ -1,3 +1,19 @@
+/* COMPONENTES STANDALONE - PRESERVAR ESTRUCTURA Y FLUJO FLEXBOX */
+app-sidebar-navegacion,
+app-planificador-cuadrante,
+app-dashboard-solicitudes,
+app-portal-colaborador,
+app-reportes-nomina,
+app-configuracion-general,
+app-configuracion-servicios,
+app-configuracion-catalogo-turnos,
+app-configuracion-festivos,
+app-modal-confirmacion,
+app-modal-ical,
+app-modal-rotacion {
+  display: contents;
+}
+
 .app-shell {
   min-height: 100vh;
   display: flex;
