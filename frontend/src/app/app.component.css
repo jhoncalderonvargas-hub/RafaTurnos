@@ -467,24 +467,25 @@ app-modal-rotacion {
 /* PALETA DE TURNOS ESTILO THURNI */
 .thurni-palette-bar {
   background: #f8fafc;
-  padding: 10px 20px;
+  padding: 5px 16px;
   border-bottom: 1px solid var(--border-strong);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 3px;
 }
 
 .palette-instructions {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-muted);
   display: flex;
   align-items: center;
   gap: 8px;
+  line-height: 1.2;
 }
 
 .palette-instructions code {
   background: #e2e8f0;
-  padding: 1px 6px;
+  padding: 1px 5px;
   border-radius: 4px;
   font-weight: 700;
   color: #0f172a;
@@ -492,33 +493,37 @@ app-modal-rotacion {
 
 .badge-ctrl-tip {
   display: inline-block;
-  margin-left: 8px;
+  margin-left: 6px;
   color: #0369a1;
   font-weight: 600;
   background: #e0f2fe;
-  padding: 1px 8px;
+  padding: 1px 7px;
   border-radius: 12px;
   border: 1px solid #bae6fd;
 }
 
-/* CLUSTERS SEMÁNTICOS DE LA PALETA DE TURNOS */
+/* CLUSTERS SEMÁNTICOS DE LA PALETA DE TURNOS (COMPACTO THURNI 1 FILA) */
 .palette-clusters-wrapper {
   display: flex;
-  align-items: stretch;
-  gap: 10px;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
   padding: 2px 0;
+  scrollbar-width: thin;
 }
 
 .palette-cluster {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
   background: #ffffff;
-  padding: 6px 10px 8px;
-  border-radius: 10px;
+  padding: 2px 6px;
+  border-radius: 8px;
   border: 1px solid #e2e8f0;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  flex-shrink: 0;
 }
 
 .cluster-tools {
@@ -526,18 +531,15 @@ app-modal-rotacion {
   border-color: #cbd5e1;
 }
 
-.cluster-header {
-  display: flex;
-  align-items: center;
-  margin-bottom: 2px;
-}
-
 .cluster-tag {
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 800;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: #475569;
+  letter-spacing: 0.4px;
+  color: #64748b;
+  white-space: nowrap;
+  padding-right: 2px;
+  user-select: none;
 }
 
 .cluster-tag.tag-diurno {
@@ -556,99 +558,73 @@ app-modal-rotacion {
   color: #be185d;
 }
 
-.cluster-chips {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
 .cluster-divider {
   width: 1px;
+  height: 22px;
   background: #cbd5e1;
-  margin: 4px 1px;
+  margin: 0 2px;
   opacity: 0.6;
+  flex-shrink: 0;
 }
 
-.palette-chips {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
+/* PASTILLAS COMPACTAS DE TURNO (ESTILO THURNI PURO) */
 .shift-chip {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 10px;
-  border-radius: 8px;
-  border: 2px solid transparent;
+  justify-content: center;
+  height: 27px;
+  min-width: 32px;
+  padding: 0 5px;
+  border-radius: 6px;
+  border: 1.5px solid transparent;
   cursor: grab;
-  transition: transform 0.1s, box-shadow 0.1s;
-  min-width: 112px;
+  transition: transform 0.08s, box-shadow 0.08s, filter 0.08s;
+  user-select: none;
+  flex-shrink: 0;
 }
 
 .shift-chip:hover {
   transform: translateY(-1px);
-  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.12);
+  filter: brightness(0.97);
 }
 
 .shift-chip.selected {
   outline: 2px solid #0f172a;
-  box-shadow: 0 0 0 4px rgba(2, 132, 199, 0.25);
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.3) !important;
   transform: translateY(-1px);
+  z-index: 2;
 }
 
 .shift-chip.chip-heavy {
   position: relative;
-  font-weight: 800;
+  font-weight: 900;
 }
 
 .shift-chip.chip-heavy::before {
   content: '';
   position: absolute;
   top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
+  left: 2px;
+  right: 2px;
+  height: 2.5px;
   background-color: currentColor;
-  border-radius: 6px 6px 0 0;
-  opacity: 0.85;
+  border-radius: 4px 4px 0 0;
+  opacity: 0.9;
 }
 
 .shift-chip.chip-24::before {
   background-color: #dc2626 !important;
-  height: 3.5px;
+  height: 3px;
   opacity: 1;
 }
 
 .chip-code {
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 800;
-  min-width: 28px;
+  line-height: 1;
   text-align: center;
-}
-
-.chip-meta {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.15;
-}
-
-.chip-name {
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.chip-hours {
-  font-size: 9.5px;
-  opacity: 0.85;
-}
-
-.eraser-chip {
-  background: #ffffff;
-  color: #334155;
-  border-color: #cbd5e1;
+  white-space: nowrap;
 }
 
 .pointer-chip {
@@ -656,6 +632,15 @@ app-modal-rotacion {
   color: #0369a1;
   border-color: #38bdf8;
   cursor: pointer;
+  min-width: 28px;
+}
+
+.eraser-chip {
+  background: #fff1f2;
+  color: #e11d48;
+  border-color: #fecdd3;
+  cursor: grab;
+  min-width: 28px;
 }
 
 .pointer-chip.selected {
