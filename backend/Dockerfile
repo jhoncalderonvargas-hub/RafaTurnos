@@ -11,6 +11,8 @@ COPY package*.json ./
 COPY prisma ./prisma/
 
 RUN npm ci
+
+COPY . .
 RUN npx prisma generate
 RUN npm run build
 
@@ -34,5 +36,5 @@ EXPOSE 3000
 
 # Al iniciar el contenedor:
 # 1. Aplica el esquema e índices en PostgreSQL (npx prisma db push)
-# 2. Inicia el servidor NestJS de producción
-CMD ["sh", "-c", "npx prisma db push --skip-generate && node dist/main.js"]
+# 2. Inicia el servidor NestJS de producción (dist/src/main.js)
+CMD ["sh", "-c", "npx prisma db push --skip-generate && node dist/src/main.js"]
