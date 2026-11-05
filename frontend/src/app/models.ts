@@ -1,4 +1,4 @@
-export type TipoAsistencia =
+type TipoAsistencia =
   | 'CUIDADOS_INTENSIVOS'
   | 'URGENCIAS'
   | 'QUIRURGICO'
@@ -6,7 +6,7 @@ export type TipoAsistencia =
   | 'APOYO_DIAGNOSTICO'
   | 'CONSULTA_EXTERNA';
 
-export interface ServicioHermanoRef {
+interface ServicioHermanoRef {
   id: string;
   codigo: string;
   nombre: string;
@@ -17,6 +17,15 @@ export type ModalidadDiasServicio =
   | 'TODOS_GUARDIA_FDS'
   | 'LUN_SAB_SIN_FESTIVOS'
   | 'LUN_VIE_HABILES';
+
+export interface DiaColumna {
+  dia: number;
+  fechaIso: string;
+  letraDia: string;
+  esSabado: boolean;
+  esDomingo: boolean;
+  festivo?: FestivoEntry;
+}
 
 export interface ReglaCargoServicio {
   categoriaId?: string;

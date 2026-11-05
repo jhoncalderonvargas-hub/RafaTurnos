@@ -194,6 +194,12 @@ export class CuadrantesController {
         where: {
           OR: [{ anio }, { anio: anio - 1, mes: 12 }],
         },
+        select: {
+          servicioId: true,
+          anio: true,
+          mes: true,
+          estado: true,
+        },
       }),
       this.prisma.asignacionTurno.findMany({
         where: {
@@ -201,14 +207,29 @@ export class CuadrantesController {
             OR: [{ anio }, { anio: anio - 1, mes: 12 }],
           },
         },
-        include: {
-          tipoTurno: true,
-          cuadrante: true,
+        select: {
+          empleadoId: true,
+          fecha: true,
+          esRotacion: true,
+          codigoPrevisto: true,
+          servicioEjecutorId: true,
+          tipoTurno: {
+            select: { codigo: true },
+          },
+          cuadrante: {
+            select: { anio: true },
+          },
         },
       }),
       this.prisma.bancoHorasSaldo.findMany({
         where: {
           OR: [{ anio }, { anio: anio - 1, mes: 12 }],
+        },
+        select: {
+          empleadoId: true,
+          anio: true,
+          mes: true,
+          saldoFinalAcumulado: true,
         },
       }),
     ]);
@@ -642,111 +663,176 @@ export class CuadrantesController {
       };
     }
 
+    const docs = [
+      ...new Set(
+        items
+          .map((i: any) => String(i.empleadoDocumento || '').trim())
+          .filter(Boolean)
+      ),
+    ];
+
+    const [empleadosDb, tiposDb] = await Promise.all([
+      this.prisma.empleado.findMany({
+        where: { documento: { in: docs } },
+        select: {
+          id: true,
+          documento: true,
+          nombre: true,
+          servicioBaseId: true,
+          servicioBase: {
+            select: { codigo: true, nombre: true },
+          },
+          categoria: {
+            select: { nombre: true },
+          },
+        },
+      }),
+      this.prisma.tipoTurno.findMany({
+        select: { id: true, codigo: true },
+      }),
+    ]);
+
+    const mapaEmpleados = new Map(empleadosDb.map((e) => [e.documento, e]));
+    const mapaTipos = new Map(
+      tiposDb.map((t) => [t.codigo.toUpperCase(), t.id])
+    );
+
     let celdasBloqueadas = 0;
     const novedadesProcesadas: any[] = [];
 
-    for (const item of items) {
-      const doc = String(item.empleadoDocumento || '').trim();
-      if (!doc) continue;
-
-      const emp = await this.prisma.empleado.findUnique({
-        where: { documento: doc },
-        include: { servicioBase: true, categoria: true },
-      });
-      if (!emp) continue;
-
-      const tipoNov = String(item.tipoNovedad || 'VAC').trim().toUpperCase();
-      const fInicio = new Date(`${item.fechaInicio}T00:00:00.000Z`);
-      const fFin = new Date(`${item.fechaFin}T23:59:59.999Z`);
-
-      // Eliminar registros previos idénticos para no duplicar en reintentos
-      await this.prisma.novedadAusencia.deleteMany({
-        where: {
-          empleadoId: emp.id,
-          tipo: tipoNov,
-          fechaInicio: fInicio,
-        },
-      });
-
-      await this.prisma.novedadAusencia.create({
-        data: {
-          empleadoId: emp.id,
-          tipo: tipoNov,
-          fechaInicio: fInicio,
-          fechaFin: fFin,
-          codigoCie10: item.codigoCie10 || null,
-        },
-      });
-
-      // Resolver el tipo de turno en PostgreSQL (VAC, INC, LIC)
-      const tipoTurnoId = await this.resolverTipoTurnoId(tipoNov);
-
-      // Asegurar que el cuadrante del servicio del empleado exista
-      const cuadrante = await this.prisma.cuadrante.upsert({
-        where: {
-          anio_mes_servicioId: {
-            anio,
-            mes,
-            servicioId: emp.servicioBaseId,
-          },
-        },
-        update: {},
-        create: {
-          anio,
-          mes,
-          servicioId: emp.servicioBaseId,
-          estado: EstadoCuadrante.BORRADOR,
-        },
-      });
-
-      // Bloquear cada día del rango dentro de este mes
-      const cur = new Date(fInicio);
-      while (cur <= fFin) {
-        if (cur.getUTCFullYear() === anio && cur.getUTCMonth() + 1 === mes) {
-          const dia = cur.getUTCDate();
-          const fechaUtc = new Date(Date.UTC(anio, mes - 1, dia));
-
-          await this.prisma.asignacionTurno.upsert({
+    await this.prisma.$transaction(async (tx) => {
+      // Pre-crear o asegurar cuadrantes para cada servicio involucrado en lote
+      const mapaCuadrantes = new Map<string, string>();
+      for (const emp of empleadosDb) {
+        if (!mapaCuadrantes.has(emp.servicioBaseId)) {
+          const cuad = await tx.cuadrante.upsert({
             where: {
-              empleadoId_fecha: {
-                empleadoId: emp.id,
-                fecha: fechaUtc,
+              anio_mes_servicioId: {
+                anio,
+                mes,
+                servicioId: emp.servicioBaseId,
               },
             },
-            update: {
-              cuadranteId: cuadrante.id,
-              tipoTurnoId,
-              servicioEjecutorId: emp.servicioBaseId,
-              esRotacion: false,
-              codigoPrevisto: tipoNov,
-            },
+            update: {},
             create: {
-              cuadranteId: cuadrante.id,
-              empleadoId: emp.id,
-              tipoTurnoId,
-              servicioEjecutorId: emp.servicioBaseId,
-              fecha: fechaUtc,
-              esRotacion: false,
-              codigoPrevisto: tipoNov,
+              anio,
+              mes,
+              servicioId: emp.servicioBaseId,
+              estado: EstadoCuadrante.BORRADOR,
             },
+            select: { id: true },
           });
-          celdasBloqueadas++;
+          mapaCuadrantes.set(emp.servicioBaseId, cuad.id);
         }
-        cur.setUTCDate(cur.getUTCDate() + 1);
       }
 
-      novedadesProcesadas.push({
-        empleadoId: emp.id,
-        empleadoNombre: emp.nombre,
-        documento: emp.documento,
-        tipo: tipoNov,
-        desde: item.fechaInicio,
-        hasta: item.fechaFin,
-        servicioCodigo: emp.servicioBase?.codigo,
-        servicioNombre: emp.servicioBase?.nombre,
-        cargo: emp.categoria?.nombre,
-      });
-    }
+      for (const item of items) {
+        const doc = String(item.empleadoDocumento || '').trim();
+        if (!doc) continue;
+
+        const emp = mapaEmpleados.get(doc);
+        if (!emp) continue;
+
+        const tipoNov = String(item.tipoNovedad || 'VAC').trim().toUpperCase();
+        const fInicio = new Date(`${item.fechaInicio}T00:00:00.000Z`);
+        const fFin = new Date(`${item.fechaFin}T23:59:59.999Z`);
+
+        // Eliminar registros previos idénticos para no duplicar en reintentos
+        await tx.novedadAusencia.deleteMany({
+          where: {
+            empleadoId: emp.id,
+            tipo: tipoNov,
+            fechaInicio: fInicio,
+          },
+        });
+
+        await tx.novedadAusencia.create({
+          data: {
+            empleadoId: emp.id,
+            tipo: tipoNov,
+            fechaInicio: fInicio,
+            fechaFin: fFin,
+            codigoCie10: item.codigoCie10 || null,
+          },
+        });
+
+        // Resolver el tipo de turno en PostgreSQL (VAC, INC, LIC)
+        let tipoTurnoId = mapaTipos.get(tipoNov);
+        if (!tipoTurnoId) {
+          const creado = await tx.tipoTurno.upsert({
+            where: { codigo: tipoNov },
+            update: {},
+            create: {
+              codigo: tipoNov,
+              nombre: `Novedad ${tipoNov}`,
+              horaInicio: '00:00',
+              horaFin: '00:00',
+              horasOrdinarias: 0,
+              horasDiurnas: 0,
+              horasNocturnas: 0,
+              colorHex: '#fee2e2',
+              descuentaBancoHoras: false,
+              esNocturnoPesado: false,
+              visibleEnPaleta: true,
+            },
+            select: { id: true },
+          });
+          tipoTurnoId = creado.id;
+          mapaTipos.set(tipoNov, tipoTurnoId);
+        }
+
+        const cuadranteId = mapaCuadrantes.get(emp.servicioBaseId);
+        if (!cuadranteId) continue;
+
+        // Bloquear cada día del rango dentro de este mes
+        const cur = new Date(fInicio);
+        while (cur <= fFin) {
+          if (cur.getUTCFullYear() === anio && cur.getUTCMonth() + 1 === mes) {
+            const dia = cur.getUTCDate();
+            const fechaUtc = new Date(Date.UTC(anio, mes - 1, dia));
+
+            await tx.asignacionTurno.upsert({
+              where: {
+                empleadoId_fecha: {
+                  empleadoId: emp.id,
+                  fecha: fechaUtc,
+                },
+              },
+              update: {
+                cuadranteId,
+                tipoTurnoId,
+                servicioEjecutorId: emp.servicioBaseId,
+                esRotacion: false,
+                codigoPrevisto: tipoNov,
+              },
+              create: {
+                cuadranteId,
+                empleadoId: emp.id,
+                tipoTurnoId,
+                servicioEjecutorId: emp.servicioBaseId,
+                fecha: fechaUtc,
+                esRotacion: false,
+                codigoPrevisto: tipoNov,
+              },
+            });
+            celdasBloqueadas++;
+          }
+          cur.setUTCDate(cur.getUTCDate() + 1);
+        }
+
+        novedadesProcesadas.push({
+          empleadoId: emp.id,
+          empleadoNombre: emp.nombre,
+          documento: emp.documento,
+          tipo: tipoNov,
+          desde: item.fechaInicio,
+          hasta: item.fechaFin,
+          servicioCodigo: emp.servicioBase?.codigo,
+          servicioNombre: emp.servicioBase?.nombre,
+          cargo: emp.categoria?.nombre,
+        });
+      }
+    });
 
     return {
       ok: true,

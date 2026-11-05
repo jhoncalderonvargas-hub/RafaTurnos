@@ -192,62 +192,78 @@ export class ServiciosAdminController {
       mapaSrv.set(s.id, s.id);
     }
 
+    const docs = [
+      ...new Set(
+        censo
+          .map((item: any) => String(item.documento || '').trim())
+          .filter(Boolean)
+      ),
+    ];
+
+    const existentesDb = await this.prisma.empleado.findMany({
+      where: { documento: { in: docs } },
+      select: { id: true, documento: true, nombre: true },
+    });
+    const mapaExistentes = new Map(existentesDb.map((e) => [e.documento, e]));
+
     let creados = 0;
     let actualizados = 0;
 
-    for (const item of censo) {
-      const doc = String(item.documento || '').trim();
-      if (!doc) continue;
+    await this.prisma.$transaction(async (tx) => {
+      for (const item of censo) {
+        const doc = String(item.documento || '').trim();
+        if (!doc) continue;
 
-      // Resolver categoría
-      const cargoNombre = String(item.cargoNombre || 'Auxiliar de Enfermería').trim();
-      let catId = mapaCat.get(cargoNombre.toLowerCase());
-      if (!catId) {
-        const nuevaCat = await this.prisma.categoriaProfesional.create({
-          data: { nombre: cargoNombre },
-        });
-        catId = nuevaCat.id;
-        mapaCat.set(cargoNombre.toLowerCase(), catId);
+        // Resolver categoría
+        const cargoNombre = String(item.cargoNombre || 'Auxiliar de Enfermería').trim();
+        let catId = mapaCat.get(cargoNombre.toLowerCase());
+        if (!catId) {
+          const nuevaCat = await tx.categoriaProfesional.create({
+            data: { nombre: cargoNombre },
+          });
+          catId = nuevaCat.id;
+          mapaCat.set(cargoNombre.toLowerCase(), catId);
+        }
+
+        // Resolver servicio base
+        const srvCodigo = String(item.servicioCodigo || 'URG').trim().toUpperCase();
+        const srvId = mapaSrv.get(srvCodigo) || serviciosDb[0]?.id;
+        if (!srvId) continue;
+
+        const horasMes = Number(item.horasContratoMes) || 168;
+        const correo = item.correo || `${doc}@hospital.gov.co`;
+
+        const existente = mapaExistentes.get(doc);
+
+        if (!existente) {
+          const nuevo = await tx.empleado.create({
+            data: {
+              documento: doc,
+              nombre: item.nombre || `Colaborador ${doc}`,
+              correo,
+              horasSemanalesLey: 42,
+              horasContratoMes: horasMes,
+              categoriaId: catId,
+              servicioBaseId: srvId,
+            },
+            select: { id: true, documento: true, nombre: true },
+          });
+          mapaExistentes.set(doc, nuevo);
+          creados++;
+        } else {
+          await tx.empleado.update({
+            where: { id: existente.id },
+            data: {
+              nombre: item.nombre || existente.nombre,
+              horasContratoMes: horasMes,
+              categoriaId: catId,
+              ...(item.servicioCodigo ? { servicioBaseId: srvId } : {}),
+            },
+          });
+          actualizados++;
+        }
       }
-
-      // Resolver servicio base
-      const srvCodigo = String(item.servicioCodigo || 'URG').trim().toUpperCase();
-      const srvId = mapaSrv.get(srvCodigo) || serviciosDb[0]?.id;
-      if (!srvId) continue;
-
-      const horasMes = Number(item.horasContratoMes) || 168;
-      const correo = item.correo || `${doc}@hospital.gov.co`;
-
-      const existente = await this.prisma.empleado.findUnique({
-        where: { documento: doc },
-      });
-
-      if (!existente) {
-        await this.prisma.empleado.create({
-          data: {
-            documento: doc,
-            nombre: item.nombre || `Colaborador ${doc}`,
-            correo,
-            horasSemanalesLey: 42,
-            horasContratoMes: horasMes,
-            categoriaId: catId,
-            servicioBaseId: srvId,
-          },
-        });
-        creados++;
-      } else {
-        await this.prisma.empleado.update({
-          where: { id: existente.id },
-          data: {
-            nombre: item.nombre || existente.nombre,
-            horasContratoMes: horasMes,
-            categoriaId: catId,
-            ...(item.servicioCodigo ? { servicioBaseId: srvId } : {}),
-          },
-        });
-        actualizados++;
-      }
-    }
+    });
 
     return {
       ok: true,
@@ -343,82 +359,100 @@ export class ServiciosAdminController {
     const mapaTurnoPorCod = new Map(tiposTurnoDb.map((t) => [t.codigo.trim().toUpperCase(), t.id]));
 
     if (Array.isArray(reglasPorCargo) && reglasPorCargo.length > 0) {
-      for (const regla of reglasPorCargo) {
-        let catId = regla.categoriaId || mapaCatPorNombre.get((regla.categoriaNombre || '').trim().toLowerCase());
-        if (!catId && regla.categoriaNombre) {
-          const creada = await this.prisma.categoriaProfesional.upsert({
-            where: { nombre: regla.categoriaNombre.trim() },
-            update: {},
-            create: { nombre: regla.categoriaNombre.trim() },
-          });
-          catId = creada.id;
-          mapaCatPorNombre.set(creada.nombre.toLowerCase(), creada.id);
-        }
-        if (!catId) continue;
+      await this.prisma.$transaction(async (tx) => {
+        for (const regla of reglasPorCargo) {
+          let catId =
+            regla.categoriaId ||
+            mapaCatPorNombre.get(
+              (regla.categoriaNombre || '').trim().toLowerCase()
+            );
+          if (!catId && regla.categoriaNombre) {
+            const creada = await tx.categoriaProfesional.upsert({
+              where: { nombre: regla.categoriaNombre.trim() },
+              update: {},
+              create: { nombre: regla.categoriaNombre.trim() },
+            });
+            catId = creada.id;
+            mapaCatPorNombre.set(creada.nombre.toLowerCase(), creada.id);
+          }
+          if (!catId) continue;
 
-        const reqM = Math.max(0, Number(regla.reqManana) || 0);
-        const reqT = Math.max(0, Number(regla.reqTarde) || 0);
-        const reqN = Math.max(0, Number(regla.reqNoche) || 0);
-        const reqMFds = regla.reqMananaFds !== undefined ? Math.max(0, Number(regla.reqMananaFds) || 0) : reqM;
-        const reqTFds = regla.reqTardeFds !== undefined ? Math.max(0, Number(regla.reqTardeFds) || 0) : reqT;
-        const reqNFds = regla.reqNocheFds !== undefined ? Math.max(0, Number(regla.reqNocheFds) || 0) : reqN;
+          const reqM = Math.max(0, Number(regla.reqManana) || 0);
+          const reqT = Math.max(0, Number(regla.reqTarde) || 0);
+          const reqN = Math.max(0, Number(regla.reqNoche) || 0);
+          const reqMFds =
+            regla.reqMananaFds !== undefined
+              ? Math.max(0, Number(regla.reqMananaFds) || 0)
+              : reqM;
+          const reqTFds =
+            regla.reqTardeFds !== undefined
+              ? Math.max(0, Number(regla.reqTardeFds) || 0)
+              : reqT;
+          const reqNFds =
+            regla.reqNocheFds !== undefined
+              ? Math.max(0, Number(regla.reqNocheFds) || 0)
+              : reqN;
 
-        await (this.prisma.requerimientoCobertura as any).upsert({
-          where: {
-            servicioId_categoriaId: {
+          await (tx.requerimientoCobertura as any).upsert({
+            where: {
+              servicioId_categoriaId: {
+                servicioId,
+                categoriaId: catId,
+              },
+            },
+            update: {
+              cantidadMinima: Math.max(1, reqM),
+              reqManana: reqM,
+              reqTarde: reqT,
+              reqNoche: reqN,
+              reqMananaFds: reqMFds,
+              reqTardeFds: reqTFds,
+              reqNocheFds: reqNFds,
+            },
+            create: {
               servicioId,
               categoriaId: catId,
+              cantidadMinima: Math.max(1, reqM),
+              aplicaFestivoDom: true,
+              reqManana: reqM,
+              reqTarde: reqT,
+              reqNoche: reqN,
+              reqMananaFds: reqMFds,
+              reqTardeFds: reqTFds,
+              reqNocheFds: reqNFds,
             },
-          },
-          update: {
-            cantidadMinima: Math.max(1, reqM),
-            reqManana: reqM,
-            reqTarde: reqT,
-            reqNoche: reqN,
-            reqMananaFds: reqMFds,
-            reqTardeFds: reqTFds,
-            reqNocheFds: reqNFds,
-          },
-          create: {
-            servicioId,
-            categoriaId: catId,
-            cantidadMinima: Math.max(1, reqM),
-            aplicaFestivoDom: true,
-            reqManana: reqM,
-            reqTarde: reqT,
-            reqNoche: reqN,
-            reqMananaFds: reqMFds,
-            reqTardeFds: reqTFds,
-            reqNocheFds: reqNFds,
-          },
-        });
-
-        const codigosCat =
-          Array.isArray(regla.turnosHabilitados) && regla.turnosHabilitados.length > 0
-            ? regla.turnosHabilitados.map((c) => String(c).trim().toUpperCase())
-            : turnosServicio;
-
-        await this.prisma.servicioTurnoHabilitado.deleteMany({
-          where: { servicioId, categoriaId: catId },
-        });
-
-        const filasTurnos = codigosCat
-          .map((cod) => mapaTurnoPorCod.get(cod))
-          .filter((id): id is string => Boolean(id))
-          .map((tipoTurnoId) => ({
-            servicioId,
-            categoriaId: catId!,
-            tipoTurnoId,
-            habilitado: true,
-          }));
-
-        if (filasTurnos.length > 0) {
-          await this.prisma.servicioTurnoHabilitado.createMany({
-            data: filasTurnos,
-            skipDuplicates: true,
           });
+
+          const codigosCat =
+            Array.isArray(regla.turnosHabilitados) &&
+            regla.turnosHabilitados.length > 0
+              ? regla.turnosHabilitados.map((c) =>
+                  String(c).trim().toUpperCase()
+                )
+              : turnosServicio;
+
+          await tx.servicioTurnoHabilitado.deleteMany({
+            where: { servicioId, categoriaId: catId },
+          });
+
+          const filasTurnos = codigosCat
+            .map((cod) => mapaTurnoPorCod.get(cod))
+            .filter((id): id is string => Boolean(id))
+            .map((tipoTurnoId) => ({
+              servicioId,
+              categoriaId: catId!,
+              tipoTurnoId,
+              habilitado: true,
+            }));
+
+          if (filasTurnos.length > 0) {
+            await tx.servicioTurnoHabilitado.createMany({
+              data: filasTurnos,
+              skipDuplicates: true,
+            });
+          }
         }
-      }
+      });
     }
   }
 
@@ -584,49 +618,52 @@ export class ServiciosAdminController {
       );
     }
 
-    // Se eliminan los vínculos de hermanos
-    await this.prisma.servicioHermano.deleteMany({
-      where: {
-        OR: [{ servicioId: id }, { servicioHermanoId: id }],
-      },
-    });
+    // Se eliminan los vínculos en una sola transacción atómica
+    await this.prisma.$transaction(async (tx) => {
+      await tx.servicioHermano.deleteMany({
+        where: {
+          OR: [{ servicioId: id }, { servicioHermanoId: id }],
+        },
+      });
 
-    await this.prisma.servicioTurnoHabilitado.deleteMany({
-      where: { servicioId: id },
-    });
+      await tx.servicioTurnoHabilitado.deleteMany({
+        where: { servicioId: id },
+      });
 
-    await this.prisma.requerimientoCobertura.deleteMany({
-      where: { servicioId: id },
-    });
+      await tx.requerimientoCobertura.deleteMany({
+        where: { servicioId: id },
+      });
 
-    await this.prisma.servicio.delete({
-      where: { id },
+      await tx.servicio.delete({
+        where: { id },
+      });
     });
 
     return { mensaje: "Servicio '" + servicio.nombre + "' eliminado correctamente." };
   }
 
-  // 3. Enlazar dos "Servicios Hermanos" para habilitar rotación de personal homólogo
+  // 3. Enlazar dos "Servicios Hermanos" para habilitar rotación de personal homólogo (Atómico simétrico)
   @Post(':id/enlace-hermano/:hermanoId')
   async enlazarServiciosHermanos(
     @Param('id') servicioId: string,
     @Param('hermanoId') hermanoId: string
   ) {
-    await this.prisma.servicioHermano.upsert({
-      where: {
-        servicioId_servicioHermanoId: { servicioId, servicioHermanoId: hermanoId },
-      },
-      create: { servicioId, servicioHermanoId: hermanoId },
-      update: {},
-    });
-
-    await this.prisma.servicioHermano.upsert({
-      where: {
-        servicioId_servicioHermanoId: { servicioId: hermanoId, servicioHermanoId: servicioId },
-      },
-      create: { servicioId: hermanoId, servicioHermanoId: servicioId },
-      update: {},
-    });
+    await this.prisma.$transaction([
+      this.prisma.servicioHermano.upsert({
+        where: {
+          servicioId_servicioHermanoId: { servicioId, servicioHermanoId: hermanoId },
+        },
+        create: { servicioId, servicioHermanoId: hermanoId },
+        update: {},
+      }),
+      this.prisma.servicioHermano.upsert({
+        where: {
+          servicioId_servicioHermanoId: { servicioId: hermanoId, servicioHermanoId: servicioId },
+        },
+        create: { servicioId: hermanoId, servicioHermanoId: servicioId },
+        update: {},
+      }),
+    ]);
 
     return { mensaje: 'Servicios enlazados exitosamente como Hermanos para rotación homóloga.' };
   }

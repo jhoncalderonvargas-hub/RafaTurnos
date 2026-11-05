@@ -7,6 +7,7 @@ import {
   CodigoTurno,
   CambioCeldaHistorial,
   EmpleadoHospital,
+  DiaColumna,
   FestivoEntry,
   ModalConfirmacionConfig,
   ModalidadDiasServicio,
@@ -21,15 +22,11 @@ import {
 } from './models';
 import { TurnosApiService } from './turnos-api.service';
 import { FestivosColombiaHelper } from './festivos-colombia.helper';
-
-export interface DiaColumna {
-  dia: number;
-  fechaIso: string;
-  letraDia: string;
-  esSabado: boolean;
-  esDomingo: boolean;
-  festivo?: FestivoEntry;
-}
+import {
+  calcularMetricasMesColaborador,
+  guardarStorageSeguro,
+  leerStorageSeguro,
+} from './calculo-turnos.helper';
 
 export interface InfraccionNormativa {
   empleadoId: string;
@@ -511,33 +508,19 @@ export class AppComponent implements OnInit {
   }
 
   private cargarPermutasDesdeStorage(): PermutaItem[] {
-    try {
-      const guardadas = localStorage.getItem('rafa_turnos_permutas');
-      return guardadas ? JSON.parse(guardadas) : [];
-    } catch {
-      return [];
-    }
+    return leerStorageSeguro<PermutaItem[]>('rafa_turnos_permutas', []);
   }
 
   private guardarPermutasEnStorage(lista: PermutaItem[]): void {
-    try {
-      localStorage.setItem('rafa_turnos_permutas', JSON.stringify(lista));
-    } catch {}
+    guardarStorageSeguro('rafa_turnos_permutas', lista);
   }
 
   private cargarRotadosDesdeStorage(): Record<string, string[]> {
-    try {
-      const raw = localStorage.getItem('rafa_turnos_rotados_servicio');
-      return raw ? JSON.parse(raw) : {};
-    } catch {
-      return {};
-    }
+    return leerStorageSeguro<Record<string, string[]>>('rafa_turnos_rotados_servicio', {});
   }
 
   private guardarRotadosEnStorage(mapa: Record<string, string[]>): void {
-    try {
-      localStorage.setItem('rafa_turnos_rotados_servicio', JSON.stringify(mapa));
-    } catch {}
+    guardarStorageSeguro('rafa_turnos_rotados_servicio', mapa);
   }
 
   private actualizarListaPermutas(lista: PermutaItem[]): void {
@@ -698,8 +681,8 @@ export class AppComponent implements OnInit {
           this.companeroPermutaId.set(primerPar?.id || empInicial.id);
         }
       },
-      error: (err) => {
-        console.error('Error al sincronizar empleados desde PostgreSQL:', err);
+      error: () => {
+        // En caso de reconexión del servidor, conserva el censo previo en memoria
       },
     });
   }
@@ -1020,67 +1003,29 @@ export class AppComponent implements OnInit {
     const dias = this.diasDelMes();
     const matriz = this.asignaciones();
     const listaEmp = this.empleadosServicioSinFiltro();
+    const catalogo = this.catalogoTurnosMap();
+    const saldos = this.saldosConsolidadosMap();
+    const anio = this.anioSeleccionado();
+    const mes = this.mesSeleccionado();
 
     return listaEmp.map(({ emp, esRotado }) => {
       const celdasEmp = matriz[emp.id] || {};
-      let horasTrabajadas = 0;
-      let hod = 0;
-      let hon = 0;
-      let hdfd = 0;
-      let hdfn = 0;
-      let horasAmortizadasComp = 0;
-      let conteoNoches = 0;
-      let conteoDomFest = 0;
-      let diasVac = 0;
-      let diasInc = 0;
-
-      for (const d of dias) {
-        const celda = celdasEmp[d.dia];
-        const cod = celda?.codigo || '';
-        if (!cod) continue;
-
-        const cfg = this.catalogoTurnosMap()[cod];
-        if (!cfg) continue;
-
-        horasTrabajadas += cfg.horasOrdinarias;
-        if (cfg.esNocturnoPesado || cfg.horasNocturnas > 0) {
-          conteoNoches++;
-        }
-        if (cod === 'VAC') diasVac++;
-        if (cod === 'INC') diasInc++;
-        if (cfg.descuentaBancoHoras) {
-          horasAmortizadasComp += 8; // Regla de jornada estándar de 8h
-        }
-
-        const esDiaDominicalOFestivo = d.esDomingo || !!d.festivo;
-        if (esDiaDominicalOFestivo && cfg.horasOrdinarias > 0) {
-          conteoDomFest++;
-          hdfd += cfg.horasDiurnas;
-          hdfn += cfg.horasNocturnas;
-        } else {
-          hod += cfg.horasDiurnas;
-          hon += cfg.horasNocturnas;
-        }
-      }
-
-      const anio = this.anioSeleccionado();
-      const mes = this.mesSeleccionado();
-      const anioPrev = mes === 1 ? anio - 1 : anio;
-      const mesPrev = mes === 1 ? 12 : mes - 1;
-      const saldoKeyPrev = `${emp.id}::${anioPrev}-${mesPrev}`;
-      const saldoAntReal = this.saldosConsolidadosMap()[saldoKeyPrev] !== undefined
-        ? this.saldosConsolidadosMap()[saldoKeyPrev]
-        : emp.saldoBancoAnterior;
+      const metricas = calcularMetricasMesColaborador(
+        emp,
+        celdasEmp,
+        dias,
+        catalogo,
+        saldos,
+        anio,
+        mes
+      );
       const ultimoTurnoPrevReal = this.obtenerUltimoTurnoMesPrevio(
         emp.id,
         emp.ultimoTurnoMesPrevio || 'L'
       );
-
-      const diferenciaMes = horasTrabajadas - emp.horasContratoMes - horasAmortizadasComp;
-      const nuevoSaldoBanco = saldoAntReal + diferenciaMes;
       const empConSaldo = {
         ...emp,
-        saldoBancoAnterior: saldoAntReal,
+        saldoBancoAnterior: metricas.saldoAntReal,
         ultimoTurnoMesPrevio: ultimoTurnoPrevReal,
       };
 
@@ -1088,19 +1033,7 @@ export class AppComponent implements OnInit {
         empleado: empConSaldo,
         esPersonalRotado: esRotado,
         celdas: celdasEmp,
-        horasTrabajadas,
-        hod,
-        hon,
-        hdfd,
-        hdfn,
-        horasAmortizadasComp,
-        diferenciaMes,
-        nuevoSaldoBanco,
-        conteoNoches,
-        conteoDomFest,
-        causaCompensatorioDominical: conteoDomFest >= 3,
-        diasVac,
-        diasInc,
+        ...metricas,
       };
     });
   });
@@ -1493,91 +1426,30 @@ export class AppComponent implements OnInit {
       );
     }
 
+    const anio = this.anioSeleccionado();
+    const mes = this.mesSeleccionado();
+    const saldos = this.saldosConsolidadosMap();
+
     return filtrados.map((emp) => {
       const srvObj = mapaServicios.get(emp.servicioBaseId);
       const servicioNombre = srvObj ? srvObj.nombre : 'Servicio General';
       const celdasEmp = matriz[emp.id] || {};
-
-      let horasTrabajadas = 0;
-      let hod = 0;
-      let hon = 0;
-      let hdfd = 0;
-      let hdfn = 0;
-      let horasAmortizadasComp = 0;
-      let conteoNoches = 0;
-      let conteoDomFest = 0;
-      let diasVac = 0;
-      let diasInc = 0;
-
-      for (const d of dias) {
-        const cod = celdasEmp[d.dia]?.codigo || '';
-        if (!cod) continue;
-        const cfg = catalogo[cod];
-        if (!cfg) continue;
-
-        horasTrabajadas += cfg.horasOrdinarias;
-        if (cfg.esNocturnoPesado || cfg.horasNocturnas > 0) conteoNoches++;
-        if (cod === 'VAC') diasVac++;
-        if (cod === 'INC') diasInc++;
-        if (cfg.descuentaBancoHoras) horasAmortizadasComp += 8;
-
-        const esDomOFest = d.esDomingo || !!d.festivo;
-        if (esDomOFest && cfg.horasOrdinarias > 0) {
-          conteoDomFest++;
-          hdfd += cfg.horasDiurnas;
-          hdfn += cfg.horasNocturnas;
-        } else {
-          hod += cfg.horasDiurnas;
-          hon += cfg.horasNocturnas;
-        }
-      }
-
-      const anio = this.anioSeleccionado();
-      const mes = this.mesSeleccionado();
-      const anioPrev = mes === 1 ? anio - 1 : anio;
-      const mesPrev = mes === 1 ? 12 : mes - 1;
-      const saldoKeyPrev = `${emp.id}::${anioPrev}-${mesPrev}`;
-      const saldoAntReal = this.saldosConsolidadosMap()[saldoKeyPrev] !== undefined
-        ? this.saldosConsolidadosMap()[saldoKeyPrev]
-        : emp.saldoBancoAnterior;
-
-      const diferenciaMes = horasTrabajadas - emp.horasContratoMes - horasAmortizadasComp;
-      const nuevoSaldoBanco = saldoAntReal + diferenciaMes;
-
-      let estadoBanco: 'EQUILIBRADO' | 'ATENCION' | 'CRITICO' = 'EQUILIBRADO';
-      if (nuevoSaldoBanco > 30 || nuevoSaldoBanco < -18) {
-        estadoBanco = 'CRITICO';
-      } else if (nuevoSaldoBanco > 18 || nuevoSaldoBanco < -6) {
-        estadoBanco = 'ATENCION';
-      }
-
-      let nivelFatiga: 'BAJO' | 'MODERADO' | 'ALTO' = 'BAJO';
-      if (conteoNoches >= 5 || (conteoNoches >= 4 && conteoDomFest >= 3)) {
-        nivelFatiga = 'ALTO';
-      } else if (conteoNoches >= 3 || conteoDomFest >= 3) {
-        nivelFatiga = 'MODERADO';
-      }
+      const metricas = calcularMetricasMesColaborador(
+        emp,
+        celdasEmp,
+        dias,
+        catalogo,
+        saldos,
+        anio,
+        mes
+      );
 
       return {
         emp,
         servicioNombre,
-        horasTrabajadas,
         horasContratoMes: emp.horasContratoMes,
-        hod,
-        hon,
-        hdfd,
-        hdfn,
-        horasAmortizadasComp,
-        conteoNoches,
-        conteoDomFest,
-        causaCompensatorioDominical: conteoDomFest >= 3,
-        diasVac,
-        diasInc,
-        saldoBancoAnterior: saldoAntReal,
-        diferenciaMes,
-        nuevoSaldoBanco,
-        estadoBanco,
-        nivelFatiga,
+        saldoBancoAnterior: metricas.saldoAntReal,
+        ...metricas,
       };
     });
   });
@@ -1637,46 +1509,23 @@ export class AppComponent implements OnInit {
 
     const dias = this.diasDelMes();
     const celdasEmp = this.asignaciones()[emp.id] || {};
-    let horasTrabajadas = 0;
-    let horasAmortizadasComp = 0;
-    let conteoNoches = 0;
-    let conteoDomFest = 0;
-
-    for (const d of dias) {
-      const cod = celdasEmp[d.dia]?.codigo || '';
-      const cfg = cod ? this.catalogoTurnosMap()[cod] : undefined;
-      if (!cfg) continue;
-
-      horasTrabajadas += cfg.horasOrdinarias;
-      if (cfg.esNocturnoPesado || cfg.horasNocturnas > 0) conteoNoches++;
-      if ((d.esDomingo || !!d.festivo) && cfg.horasOrdinarias > 0) conteoDomFest++;
-      if (cfg.descuentaBancoHoras) horasAmortizadasComp += 8;
-    }
-
-    const anio = this.anioSeleccionado();
-    const mes = this.mesSeleccionado();
-    const anioPrev = mes === 1 ? anio - 1 : anio;
-    const mesPrev = mes === 1 ? 12 : mes - 1;
-    const saldoKeyPrev = `${emp.id}::${anioPrev}-${mesPrev}`;
-    const saldoAntReal = this.saldosConsolidadosMap()[saldoKeyPrev] !== undefined
-      ? this.saldosConsolidadosMap()[saldoKeyPrev]
-      : emp.saldoBancoAnterior;
-
-    const diferenciaMes = horasTrabajadas - emp.horasContratoMes - horasAmortizadasComp;
-    const nuevoSaldoBanco = saldoAntReal + diferenciaMes;
+    const metricas = calcularMetricasMesColaborador(
+      emp,
+      celdasEmp,
+      dias,
+      this.catalogoTurnosMap(),
+      this.saldosConsolidadosMap(),
+      this.anioSeleccionado(),
+      this.mesSeleccionado()
+    );
     const servicioBase = this.servicios().find((s) => s.id === emp.servicioBaseId) || this.servicioActual();
-    const empConSaldo = { ...emp, saldoBancoAnterior: saldoAntReal };
+    const empConSaldo = { ...emp, saldoBancoAnterior: metricas.saldoAntReal };
 
     return {
       empleado: empConSaldo,
       servicioBase,
       celdas: celdasEmp,
-      horasTrabajadas,
-      horasAmortizadasComp,
-      diferenciaMes,
-      nuevoSaldoBanco,
-      conteoNoches,
-      conteoDomFest,
+      ...metricas,
     };
   });
 

@@ -812,6 +812,7 @@ export class AuditoriasController {
     @Query('servicioId') servicioId?: string,
     @Query('empleadoId') empleadoId?: string,
     @Query('limite') limiteQuery?: string,
+    @Query('page') pageQuery?: string,
     @Req() req?: any,
   ) {
     const usuarioSso = req?.usuarioSso;
@@ -856,18 +857,39 @@ export class AuditoriasController {
     }
 
     const limite = Math.min(Math.max(Number(limiteQuery) || 50, 1), 200);
+    const page = Math.max(Number(pageQuery) || 1, 1);
+    const skip = (page - 1) * limite;
 
     const logs = await this.prisma.auditoriaCambio.findMany({
       where: whereClause,
-      include: {
+      select: {
+        id: true,
+        timestamp: true,
+        actorId: true,
+        turnoAnterior: true,
+        turnoNuevo: true,
+        justificacion: true,
         asignacionTurno: {
-          include: {
-            empleado: true,
-            servicioEjecutor: true,
+          select: {
+            empleadoId: true,
+            fecha: true,
+            servicioEjecutorId: true,
+            empleado: {
+              select: {
+                nombre: true,
+                documento: true,
+              },
+            },
+            servicioEjecutor: {
+              select: {
+                nombre: true,
+              },
+            },
           },
         },
       },
       orderBy: { timestamp: 'desc' },
+      skip,
       take: limite,
     });
 

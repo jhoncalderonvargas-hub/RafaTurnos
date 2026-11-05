@@ -44,7 +44,7 @@ export interface ResultadoBancoYNominaDto {
 }
 
 /** Horas que amortiza cada turno COMP del Banco de Horas (jornada estándar, igual que el frontend). */
-export const HORAS_AMORTIZADAS_POR_COMP = 8;
+const HORAS_AMORTIZADAS_POR_COMP = 8;
 
 @Injectable()
 export class BancoHorasNominaService {
