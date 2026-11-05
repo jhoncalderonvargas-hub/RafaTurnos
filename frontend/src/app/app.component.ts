@@ -9,6 +9,7 @@ import {
   EmpleadoHospital,
   DiaColumna,
   FestivoEntry,
+  InfraccionNormativa,
   ModalConfirmacionConfig,
   ModalidadDiasServicio,
   PasoHistorialEdicion,
@@ -37,13 +38,8 @@ import { ReportesNominaComponent } from './components/reportes-nomina/reportes-n
 import { ConfiguracionFestivosComponent } from './components/configuracion-festivos/configuracion-festivos.component';
 import { ConfiguracionCatalogoTurnosComponent } from './components/configuracion-catalogo-turnos/configuracion-catalogo-turnos.component';
 import { ConfiguracionServiciosComponent } from './components/configuracion-servicios/configuracion-servicios.component';
+import { PlanificadorCuadranteComponent } from './components/planificador-cuadrante/planificador-cuadrante.component';
 
-export interface InfraccionNormativa {
-  empleadoId: string;
-  empleadoNombre: string;
-  dia: number;
-  mensaje: string;
-}
 
 @Component({
   selector: 'app-root',
@@ -60,6 +56,7 @@ export interface InfraccionNormativa {
     ConfiguracionFestivosComponent,
     ConfiguracionCatalogoTurnosComponent,
     ConfiguracionServiciosComponent,
+    PlanificadorCuadranteComponent,
   ],
   templateUrl: './app.component.html',
   styleUrl: './app.component.css',

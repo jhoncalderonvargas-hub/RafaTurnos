@@ -256,4 +256,11 @@ export interface PasoHistorialEdicion {
   cambios: CambioCeldaHistorial[];
 }
 
+export interface InfraccionNormativa {
+  empleadoId: string;
+  empleadoNombre: string;
+  dia: number;
+  mensaje: string;
+}
+
 
