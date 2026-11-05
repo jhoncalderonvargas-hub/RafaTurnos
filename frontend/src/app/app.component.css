@@ -501,6 +501,75 @@ app-modal-rotacion {
   border: 1px solid #bae6fd;
 }
 
+/* CLUSTERS SEMÁNTICOS DE LA PALETA DE TURNOS */
+.palette-clusters-wrapper {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 2px 0;
+}
+
+.palette-cluster {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #ffffff;
+  padding: 6px 10px 8px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.cluster-tools {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+.cluster-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 2px;
+}
+
+.cluster-tag {
+  font-size: 10.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #475569;
+}
+
+.cluster-tag.tag-diurno {
+  color: #0369a1;
+}
+
+.cluster-tag.tag-guardia {
+  color: #6d28d9;
+}
+
+.cluster-tag.tag-descanso {
+  color: #0f766e;
+}
+
+.cluster-tag.tag-ausencia {
+  color: #be185d;
+}
+
+.cluster-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.cluster-divider {
+  width: 1px;
+  background: #cbd5e1;
+  margin: 4px 1px;
+  opacity: 0.6;
+}
+
 .palette-chips {
   display: flex;
   gap: 8px;

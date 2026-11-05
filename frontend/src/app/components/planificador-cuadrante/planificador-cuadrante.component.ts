@@ -134,52 +134,165 @@ import {
         <span>Usa <strong>👆 Puntero</strong> para navegar o teclear turnos (<code>1-8, M, T, N, D, G, S, L, C, V, I, Supr</code>). <span class="badge-ctrl-tip">💡 <strong>Ctrl + Arrastrar</strong> clona el turno de cualquier celda (estilo Excel).</span></span>
       </div>
 
-      <div class="palette-chips">
-        <div
-          class="shift-chip pointer-chip"
-          [class.selected]="turnoPincelActivo === 'POINTER'"
-          (click)="seleccionarPincel.emit('POINTER')"
-          title="Modo Selección / Puntero: Haz clic para navegar o inspeccionar sin sobreescribir">
-          <div class="chip-code">👆</div>
-          <div class="chip-meta">
-            <span class="chip-name">Puntero</span>
-            <span class="chip-hours">Navegar / Teclado</span>
+      <div class="palette-clusters-wrapper">
+        <!-- BLOQUE 1: HERRAMIENTAS (PUNTERO Y BORRADOR) -->
+        <div class="palette-cluster cluster-tools">
+          <div class="cluster-header">
+            <span class="cluster-tag">🛠️ Herramientas</span>
+          </div>
+          <div class="cluster-chips">
+            <div
+              class="shift-chip pointer-chip"
+              [class.selected]="turnoPincelActivo === 'POINTER'"
+              (click)="seleccionarPincel.emit('POINTER')"
+              title="Modo Selección / Puntero: Haz clic para navegar o inspeccionar sin sobreescribir">
+              <div class="chip-code">👆</div>
+              <div class="chip-meta">
+                <span class="chip-name">Puntero</span>
+                <span class="chip-hours">Navegar</span>
+              </div>
+            </div>
+
+            <div
+              class="shift-chip eraser-chip"
+              [class.selected]="turnoPincelActivo === ''"
+              draggable="true"
+              (dragstart)="onDragStartPaleta('', $event)"
+              (click)="seleccionarPincel.emit('')"
+              title="Borrador: Limpiar celda (Supr / Delete)">
+              <div class="chip-code">🧽</div>
+              <div class="chip-meta">
+                <span class="chip-name">Borrador</span>
+                <span class="chip-hours">Limpiar</span>
+              </div>
+            </div>
           </div>
         </div>
 
-        @for (t of listaTurnosPaleta; track t.codigo) {
-          <div
-            class="shift-chip"
-            [class.selected]="turnoPincelActivo === t.codigo"
-            [class.chip-heavy]="t.horasOrdinarias >= 12 || t.codigo === 'G24' || t.codigo === 'N12' || t.codigo === 'D12'"
-            [class.chip-24]="t.codigo === 'G24' || t.horasOrdinarias >= 24"
-            [style.background-color]="t.bgHex"
-            [style.color]="t.textHex"
-            [style.border-color]="t.borderHex"
-            draggable="true"
-            (dragstart)="onDragStartPaleta(t.codigo, $event)"
-            (click)="seleccionarPincel.emit(t.codigo)"
-            title="{{ t.nombre }} ({{ t.horario }}) - {{ t.horasOrdinarias }}h">
-            <div class="chip-code">{{ t.codigo }}</div>
-            <div class="chip-meta">
-              <span class="chip-name">{{ t.nombre }}</span>
-              <span class="chip-hours">{{ t.horario }}</span>
+        <div class="cluster-divider"></div>
+
+        <!-- BLOQUE 2: OPERATIVOS DIURNOS -->
+        @if (turnosDiurnos.length > 0) {
+          <div class="palette-cluster cluster-diurnos">
+            <div class="cluster-header">
+              <span class="cluster-tag tag-diurno">☀️ Diurnos</span>
+            </div>
+            <div class="cluster-chips">
+              @for (t of turnosDiurnos; track t.codigo) {
+                <div
+                  class="shift-chip"
+                  [class.selected]="turnoPincelActivo === t.codigo"
+                  [style.background-color]="t.bgHex"
+                  [style.color]="t.textHex"
+                  [style.border-color]="t.borderHex"
+                  draggable="true"
+                  (dragstart)="onDragStartPaleta(t.codigo, $event)"
+                  (click)="seleccionarPincel.emit(t.codigo)"
+                  title="{{ t.nombre }} ({{ t.horario }}) - {{ t.horasOrdinarias }}h">
+                  <div class="chip-code">{{ t.codigo }}</div>
+                  <div class="chip-meta">
+                    <span class="chip-name">{{ t.nombre }}</span>
+                    <span class="chip-hours">{{ t.horario }}</span>
+                  </div>
+                </div>
+              }
+            </div>
+          </div>
+
+          <div class="cluster-divider"></div>
+        }
+
+        <!-- BLOQUE 3: GUARDIAS Y NOCHES -->
+        @if (turnosGuardiasNoches.length > 0) {
+          <div class="palette-cluster cluster-guardias">
+            <div class="cluster-header">
+              <span class="cluster-tag tag-guardia">🌙 Guardias / Noches</span>
+            </div>
+            <div class="cluster-chips">
+              @for (t of turnosGuardiasNoches; track t.codigo) {
+                <div
+                  class="shift-chip chip-heavy"
+                  [class.selected]="turnoPincelActivo === t.codigo"
+                  [class.chip-24]="t.codigo === 'G24' || t.horasOrdinarias >= 24"
+                  [style.background-color]="t.bgHex"
+                  [style.color]="t.textHex"
+                  [style.border-color]="t.borderHex"
+                  draggable="true"
+                  (dragstart)="onDragStartPaleta(t.codigo, $event)"
+                  (click)="seleccionarPincel.emit(t.codigo)"
+                  title="{{ t.nombre }} ({{ t.horario }}) - {{ t.horasOrdinarias }}h">
+                  <div class="chip-code">{{ t.codigo }}</div>
+                  <div class="chip-meta">
+                    <span class="chip-name">{{ t.nombre }}</span>
+                    <span class="chip-hours">{{ t.horario }}</span>
+                  </div>
+                </div>
+              }
+            </div>
+          </div>
+
+          <div class="cluster-divider"></div>
+        }
+
+        <!-- BLOQUE 4: DESCANSOS Y BANCO -->
+        @if (turnosDescansos.length > 0) {
+          <div class="palette-cluster cluster-descansos">
+            <div class="cluster-header">
+              <span class="cluster-tag tag-descanso">☕ Descanso & Banco</span>
+            </div>
+            <div class="cluster-chips">
+              @for (t of turnosDescansos; track t.codigo) {
+                <div
+                  class="shift-chip"
+                  [class.selected]="turnoPincelActivo === t.codigo"
+                  [style.background-color]="t.bgHex"
+                  [style.color]="t.textHex"
+                  [style.border-color]="t.borderHex"
+                  draggable="true"
+                  (dragstart)="onDragStartPaleta(t.codigo, $event)"
+                  (click)="seleccionarPincel.emit(t.codigo)"
+                  title="{{ t.nombre }} ({{ t.horario }}) - {{ t.horasOrdinarias }}h">
+                  <div class="chip-code">{{ t.codigo }}</div>
+                  <div class="chip-meta">
+                    <span class="chip-name">{{ t.nombre }}</span>
+                    <span class="chip-hours">{{ t.horario }}</span>
+                  </div>
+                </div>
+              }
+            </div>
+          </div>
+
+          <div class="cluster-divider"></div>
+        }
+
+        <!-- BLOQUE 5: AUSENCIAS OFICIALES INTRANET -->
+        @if (turnosAusencias.length > 0) {
+          <div class="palette-cluster cluster-ausencias">
+            <div class="cluster-header">
+              <span class="cluster-tag tag-ausencia">🔒 Ausencias Intranet</span>
+            </div>
+            <div class="cluster-chips">
+              @for (t of turnosAusencias; track t.codigo) {
+                <div
+                  class="shift-chip"
+                  [class.selected]="turnoPincelActivo === t.codigo"
+                  [style.background-color]="t.bgHex"
+                  [style.color]="t.textHex"
+                  [style.border-color]="t.borderHex"
+                  draggable="true"
+                  (dragstart)="onDragStartPaleta(t.codigo, $event)"
+                  (click)="seleccionarPincel.emit(t.codigo)"
+                  title="{{ t.nombre }} ({{ t.horario }}) - Bloqueo Oficial">
+                  <div class="chip-code">{{ t.codigo }}</div>
+                  <div class="chip-meta">
+                    <span class="chip-name">{{ t.nombre }}</span>
+                    <span class="chip-hours">Bloqueo Intranet</span>
+                  </div>
+                </div>
+              }
             </div>
           </div>
         }
-
-        <div
-          class="shift-chip eraser-chip"
-          [class.selected]="turnoPincelActivo === ''"
-          draggable="true"
-          (dragstart)="onDragStartPaleta('', $event)"
-          (click)="seleccionarPincel.emit('')">
-          <div class="chip-code">🧽</div>
-          <div class="chip-meta">
-            <span class="chip-name">Borrador</span>
-            <span class="chip-hours">Limpiar celda</span>
-          </div>
-        </div>
       </div>
     </section>
 
@@ -573,6 +686,43 @@ export class PlanificadorCuadranteComponent {
     return valor > 0 ? `+${valor}` : `${valor}`;
   }
 
+  get turnosDiurnos(): TipoTurnoConfig[] {
+    return this.listaTurnosPaleta.filter((t) => this.clasificarFamilia(t) === 'DIURNO');
+  }
+
+  get turnosGuardiasNoches(): TipoTurnoConfig[] {
+    return this.listaTurnosPaleta.filter((t) => this.clasificarFamilia(t) === 'GUARDIA_NOCHE');
+  }
+
+  get turnosDescansos(): TipoTurnoConfig[] {
+    return this.listaTurnosPaleta.filter((t) => this.clasificarFamilia(t) === 'DESCANSO');
+  }
+
+  get turnosAusencias(): TipoTurnoConfig[] {
+    return this.listaTurnosPaleta.filter((t) => this.clasificarFamilia(t) === 'AUSENCIA');
+  }
+
+  clasificarFamilia(t: TipoTurnoConfig): 'DIURNO' | 'GUARDIA_NOCHE' | 'DESCANSO' | 'AUSENCIA' {
+    if (t.esAusencia || ['VAC', 'INC', 'LIC'].includes((t.codigo || '').toUpperCase())) {
+      return 'AUSENCIA';
+    }
+    if (
+      ['L', 'S', 'COMP', 'DISP'].includes((t.codigo || '').toUpperCase()) ||
+      (t.horasOrdinarias === 0 && !t.esAusencia)
+    ) {
+      return 'DESCANSO';
+    }
+    if (
+      t.esNocturnoPesado ||
+      (t.horasNocturnas || 0) >= 6 ||
+      (t.horasOrdinarias || 0) >= 12 ||
+      ['N8', 'N12', 'G24', 'D12', 'G12'].includes((t.codigo || '').toUpperCase())
+    ) {
+      return 'GUARDIA_NOCHE';
+    }
+    return 'DIURNO';
+  }
+
   construirTooltipCelda(
     emp: EmpleadoHospital,
     d: DiaColumna,
@@ -583,7 +733,18 @@ export class PlanificadorCuadranteComponent {
     if (d.festivo) partes.push(`🇨🇴 Festivo: ${d.festivo.nombre}`);
     if (celda?.codigo) {
       const cfg = this.catalogoTurnosMap[celda.codigo];
-      if (cfg) partes.push(`Turno: ${cfg.nombre} (${cfg.horario})`);
+      if (cfg) {
+        const fam = this.clasificarFamilia(cfg);
+        const famTag =
+          fam === 'GUARDIA_NOCHE'
+            ? '🌙 Guardia / Noche'
+            : fam === 'DIURNO'
+              ? '☀️ Diurno'
+              : fam === 'DESCANSO'
+                ? '☕ Descanso / Banco'
+                : '🔒 Novedad Oficial';
+        partes.push(`${famTag}: ${cfg.nombre} (${cfg.horario})`);
+      }
     } else {
       partes.push('Sin turno asignado');
     }
