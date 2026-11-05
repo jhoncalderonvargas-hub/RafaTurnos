@@ -205,7 +205,7 @@ import {
     }
 
     <div class="grid-container" [class.ctrl-pressed]="teclaCtrlPresionada" [class.is-cloning]="clonandoConCtrl">
-      <table class="schedule-matrix">
+      <table class="schedule-matrix" (mouseleave)="onGridMouseLeave()">
         <thead>
           <tr>
             <th class="col-sticky-emp">Colaborador / Categoría</th>
@@ -214,6 +214,8 @@ import {
               <th
                 class="col-day"
                 [class.col-focused]="celdaEnfocada?.dia === d.dia"
+                [class.col-hovered]="celdaHovered?.dia === d.dia"
+                [class.col-week-end]="d.esDomingo"
                 [class.is-saturday]="d.esSabado"
                 [class.is-sunday]="d.esDomingo"
                 [class.is-holiday]="!!d.festivo"
@@ -249,7 +251,10 @@ import {
                 <td class="group-fill" [attr.colspan]="diasDelMes.length + 10"></td>
               </tr>
             }
-            <tr [class.row-rotacion]="fila.esPersonalRotado" [class.row-focused]="celdaEnfocada?.empId === fila.empleado.id">
+            <tr
+              [class.row-rotacion]="fila.esPersonalRotado"
+              [class.row-focused]="celdaEnfocada?.empId === fila.empleado.id"
+              [class.row-hovered]="celdaHovered?.empId === fila.empleado.id">
               <!-- Info del Empleado (una sola línea) -->
               <td class="col-sticky-emp" [title]="fila.empleado.nombre + ' • ' + fila.empleado.categoria">
                 <div class="emp-cell">
@@ -290,7 +295,9 @@ import {
                   class="matrix-cell"
                   tabindex="0"
                   [class.cell-focused]="celdaEnfocada?.empId === fila.empleado.id && celdaEnfocada?.dia === d.dia"
-                  [class.cell-col-guide]="celdaEnfocada?.dia === d.dia"
+                  [class.cell-hovered]="celdaHovered?.empId === fila.empleado.id && celdaHovered?.dia === d.dia"
+                  [class.cell-col-guide]="celdaEnfocada?.dia === d.dia || celdaHovered?.dia === d.dia"
+                  [class.cell-week-end]="d.esDomingo"
                   [class.cell-saturday]="d.esSabado"
                   [class.cell-sunday]="d.esDomingo"
                   [class.cell-holiday]="!!d.festivo"
@@ -299,7 +306,7 @@ import {
                   [style.background-color]="cfg ? cfg.bgHex : ''"
                   [style.color]="cfg ? cfg.textHex : ''"
                   (mousedown)="iniciarPintadoCelda.emit({ empId: fila.empleado.id, dia: d.dia, event: $event })"
-                  (mouseenter)="continuarPintadoCelda.emit({ empId: fila.empleado.id, dia: d.dia })"
+                  (mouseenter)="onCeldaMouseEnter(fila.empleado.id, d.dia)"
                   (dragover)="dragOverCelda.emit($event)"
                   (drop)="dropCelda.emit({ event: $event, empId: fila.empleado.id, dia: d.dia })"
                   (keydown)="keyDownCelda.emit({ event: $event, empId: fila.empleado.id, dia: d.dia })"
@@ -396,11 +403,11 @@ import {
               @let cob = coberturaPorDia[d.dia];
               @let metas = obtenerMetasDiaServicio(servicioActual, d);
               @if (metas.cerrado || metas.reqManana === 0) {
-                <td class="coverage-cell" style="color: #94a3b8; background: #f8fafc;" title="Servicio sin requerimiento en esta franja / día">
+                <td class="coverage-cell" [class.cell-week-end]="d.esDomingo" style="color: #94a3b8; background: #f8fafc;" title="Servicio sin requerimiento en esta franja / día">
                   —
                 </td>
               } @else {
-                <td class="coverage-cell" [class.cov-ok]="cob.manana >= metas.reqManana" [class.cov-deficit]="cob.manana < metas.reqManana">
+                <td class="coverage-cell" [class.cell-week-end]="d.esDomingo" [class.cov-ok]="cob.manana >= metas.reqManana" [class.cov-deficit]="cob.manana < metas.reqManana">
                   {{ cob.manana }}/{{ metas.reqManana }}
                 </td>
               }
@@ -421,11 +428,11 @@ import {
               @let cob = coberturaPorDia[d.dia];
               @let metas = obtenerMetasDiaServicio(servicioActual, d);
               @if (metas.cerrado || metas.reqTarde === 0) {
-                <td class="coverage-cell" style="color: #94a3b8; background: #f8fafc;" title="Servicio sin requerimiento en esta franja / día">
+                <td class="coverage-cell" [class.cell-week-end]="d.esDomingo" style="color: #94a3b8; background: #f8fafc;" title="Servicio sin requerimiento en esta franja / día">
                   —
                 </td>
               } @else {
-                <td class="coverage-cell" [class.cov-ok]="cob.tarde >= metas.reqTarde" [class.cov-deficit]="cob.tarde < metas.reqTarde">
+                <td class="coverage-cell" [class.cell-week-end]="d.esDomingo" [class.cov-ok]="cob.tarde >= metas.reqTarde" [class.cov-deficit]="cob.tarde < metas.reqTarde">
                   {{ cob.tarde }}/{{ metas.reqTarde }}
                 </td>
               }
@@ -446,11 +453,11 @@ import {
               @let cob = coberturaPorDia[d.dia];
               @let metas = obtenerMetasDiaServicio(servicioActual, d);
               @if (metas.cerrado || metas.reqNoche === 0) {
-                <td class="coverage-cell" style="color: #94a3b8; background: #f8fafc;" title="Servicio sin requerimiento en esta franja / día">
+                <td class="coverage-cell" [class.cell-week-end]="d.esDomingo" style="color: #94a3b8; background: #f8fafc;" title="Servicio sin requerimiento en esta franja / día">
                   —
                 </td>
               } @else {
-                <td class="coverage-cell" [class.cov-ok]="cob.noche >= metas.reqNoche" [class.cov-deficit]="cob.noche < metas.reqNoche">
+                <td class="coverage-cell" [class.cell-week-end]="d.esDomingo" [class.cov-ok]="cob.noche >= metas.reqNoche" [class.cov-deficit]="cob.noche < metas.reqNoche">
                   {{ cob.noche }}/{{ metas.reqNoche }}
                 </td>
               }
@@ -517,6 +524,17 @@ export class PlanificadorCuadranteComponent {
   @Output() dragOverCelda = new EventEmitter<DragEvent>();
   @Output() dropCelda = new EventEmitter<{ event: DragEvent; empId: string; dia: number }>();
   @Output() keyDownCelda = new EventEmitter<{ event: KeyboardEvent; empId: string; dia: number }>();
+
+  celdaHovered: { empId: string; dia: number } | null = null;
+
+  onCeldaMouseEnter(empId: string, dia: number): void {
+    this.celdaHovered = { empId, dia };
+    this.continuarPintadoCelda.emit({ empId, dia });
+  }
+
+  onGridMouseLeave(): void {
+    this.celdaHovered = null;
+  }
 
   onDragStartPaleta(codigo: string, event: DragEvent): void {
     this.dragStartPaleta.emit({ codigo, event });
