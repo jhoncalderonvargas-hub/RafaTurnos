@@ -1,4 +1,4 @@
-type TipoAsistencia =
+export type TipoAsistencia =
   | 'CUIDADOS_INTENSIVOS'
   | 'URGENCIAS'
   | 'QUIRURGICO'

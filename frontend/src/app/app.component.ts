@@ -34,6 +34,9 @@ import { ModalRotacionComponent } from './components/modales/modal-rotacion.comp
 import { DashboardSolicitudesComponent } from './components/dashboard-solicitudes/dashboard-solicitudes.component';
 import { PortalColaboradorComponent } from './components/portal-colaborador/portal-colaborador.component';
 import { ReportesNominaComponent } from './components/reportes-nomina/reportes-nomina.component';
+import { ConfiguracionFestivosComponent } from './components/configuracion-festivos/configuracion-festivos.component';
+import { ConfiguracionCatalogoTurnosComponent } from './components/configuracion-catalogo-turnos/configuracion-catalogo-turnos.component';
+import { ConfiguracionServiciosComponent } from './components/configuracion-servicios/configuracion-servicios.component';
 
 export interface InfraccionNormativa {
   empleadoId: string;
@@ -54,6 +57,9 @@ export interface InfraccionNormativa {
     DashboardSolicitudesComponent,
     PortalColaboradorComponent,
     ReportesNominaComponent,
+    ConfiguracionFestivosComponent,
+    ConfiguracionCatalogoTurnosComponent,
+    ConfiguracionServiciosComponent,
   ],
   templateUrl: './app.component.html',
   styleUrl: './app.component.css',
