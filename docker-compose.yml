@@ -1,16 +1,74 @@
 services:
+  # ========================================================
+  # 1. Base de Datos Relacional PostgreSQL 16
+  # ========================================================
   db:
-    image: postgres:16
-    container_name: postgres-dev
+    image: postgres:16-alpine
+    container_name: rafa-turnos-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: admin123
-      POSTGRES_DB: turnos
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-admin123}
+      POSTGRES_DB: ${POSTGRES_DB:-turnos}
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin} -d ${POSTGRES_DB:-turnos}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rafa-net
+
+  # ========================================================
+  # 2. Backend NestJS + Prisma ORM
+  # ========================================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rafa-turnos-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: 3000
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-admin123}@db:5432/${POSTGRES_DB:-turnos}?schema=public"
+      INTRANET_JWT_SECRET: "${INTRANET_JWT_SECRET:-clave_secreta_compartida_con_intranet_hospitalaria}"
+      INTRANET_RETURN_URL: "${INTRANET_RETURN_URL:-http://localhost:4300}"
+    ports:
+      - "3000:3000"
+    networks:
+      - rafa-net
+
+  # ========================================================
+  # 3. Frontend Angular + Nginx (Reverse Proxy & SPA)
+  # ========================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: rafa-turnos-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "4200:80"
+    networks:
+      - rafa-net
 
 volumes:
   pgdata:
+    driver: local
+
+networks:
+  rafa-net:
+    driver: bridge
+    # NOTA PARA INTEGRACIÓN HOSPITALARIA:
+    # Si la Intranet Hospitalaria ya corre en una red de Docker existente,
+    # descomenta las siguientes 2 líneas y comenta 'driver: bridge':
+    # external: true
+    # name: red_hospitalaria_existente

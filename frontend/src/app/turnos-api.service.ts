@@ -18,7 +18,17 @@ import {
   providedIn: 'root',
 })
 export class TurnosApiService {
-  private readonly baseUrl = 'http://localhost:3000/api/v1';
+  /**
+   * En desarrollo local con 'ng serve' apunta a http://localhost:3000/api/v1.
+   * En contenedor Docker con Nginx o en producción utiliza la ruta relativa '/api/v1'
+   * enrutada automáticamente mediante reverse-proxy interno.
+   */
+  private readonly baseUrl =
+    typeof window !== 'undefined' &&
+    window.location.port === '4200' &&
+    window.location.hostname === 'localhost'
+      ? 'http://localhost:3000/api/v1'
+      : '/api/v1';
 
   constructor(private readonly http: HttpClient) {}
 
