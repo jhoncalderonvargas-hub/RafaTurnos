@@ -28,6 +28,11 @@ import {
   leerStorageSeguro,
 } from './calculo-turnos.helper';
 
+import { ModalConfirmacionComponent } from './components/modales/modal-confirmacion.component';
+import { ModalIcalComponent } from './components/modales/modal-ical.component';
+import { ModalRotacionComponent } from './components/modales/modal-rotacion.component';
+import { DashboardSolicitudesComponent } from './components/dashboard-solicitudes/dashboard-solicitudes.component';
+
 export interface InfraccionNormativa {
   empleadoId: string;
   empleadoNombre: string;
@@ -38,7 +43,14 @@ export interface InfraccionNormativa {
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [
+    CommonModule,
+    FormsModule,
+    ModalConfirmacionComponent,
+    ModalIcalComponent,
+    ModalRotacionComponent,
+    DashboardSolicitudesComponent,
+  ],
   templateUrl: './app.component.html',
   styleUrl: './app.component.css',
 })

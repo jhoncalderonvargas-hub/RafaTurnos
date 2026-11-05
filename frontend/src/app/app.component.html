@@ -641,140 +641,21 @@
   <!-- VISTA 2: CAMBIOS DE TURNO Y BITÁCORA                                    -->
   <!-- ======================================================================= -->
   @if (vistaActual() === 'DASHBOARD') {
-    <div class="dashboard-layout">
-      <div class="kpi-grid">
-        <div class="kpi-card">
-          <div class="kpi-label">Cobertura del Servicio</div>
-          <div class="kpi-value">{{ porcentajeCoberturaGlobal() }}%</div>
-          <div class="kpi-sub">{{ servicioActual().nombre }}</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-label">Alertas de Descanso</div>
-          <div class="kpi-value" [class.text-neg]="infraccionesActivas().length > 0">{{ infraccionesActivas().length }}</div>
-          <div class="kpi-sub">Descanso mínimo: 12 horas</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-label">Balance Banco de Horas</div>
-          <div class="kpi-value">{{ formatearSigno(balanceGlobalBancoServicio()) }}h</div>
-          <div class="kpi-sub">Total acumulado del servicio</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-label">Cambios de Turno Pendientes</div>
-          <div class="kpi-value">{{ notificacionesSolicitudesCount() }}</div>
-          <div class="kpi-sub">{{ esColaborador() ? 'Por responder' : 'Por revisar' }}</div>
-        </div>
-      </div>
-
-      <div class="two-col-panels">
-        <!-- Panel de Cambios de Turno entre compañeros -->
-        <div class="panel-card">
-          <div class="panel-header">
-            <h3>🔄 Solicitudes de Cambio de Turno (Permutas)</h3>
-          </div>
-          <div class="permutas-list">
-            @for (p of permutasVisiblesDashboard(); track p.id) {
-              <div class="permuta-item" [class.permuta-ready]="p.estado === 'PENDIENTE_SUPERVISOR'">
-                <div class="permuta-main">
-                  <div class="permuta-title">
-                    <strong>{{ p.solicitanteNombre }}</strong> (Día {{ p.diaOrigen }}: <code>{{ p.turnoOrigen }}</code>)
-                    ⇄ <strong>{{ p.receptorNombre }}</strong> (Día {{ p.diaDestino }}: <code>{{ p.turnoDestino }}</code>)
-                  </div>
-                  <div class="permuta-meta">
-                    Categoría: <b>{{ p.categoria }}</b> • Solicitud: {{ p.fechaSolicitud }}
-                  </div>
-                  <div class="permuta-validation">
-                    ✅ {{ p.validacionReglas }}
-                  </div>
-                  @if (p.motivoRechazo) {
-                    <div class="permuta-reject-reason">⚠️ {{ p.motivoRechazo }}</div>
-                  }
-                </div>
-                <div class="permuta-actions">
-                  @if (p.estado === 'PENDIENTE_SUPERVISOR') {
-                    @if (!esColaborador()) {
-                      <div class="supervisor-approval-group">
-                        <span class="badge-concertada">🤝 Acuerdo mutuo confirmado</span>
-                        <div class="btn-group-h">
-                          <button class="btn-approve" (click)="aprobarPermuta(p.id)">✔ Aprobar Cambio</button>
-                          <button class="btn-reject" (click)="rechazarPermuta(p.id)">✕ Rechazar</button>
-                        </div>
-                      </div>
-                    } @else {
-                      <span class="status-tag status-tag-par">⏳ En revisión por Coordinador de Servicio</span>
-                    }
-                  } @else if (p.estado === 'PENDIENTE_PAR') {
-                    @if (sesionActual()?.empleadoId === p.receptorId) {
-                      <div class="supervisor-approval-group">
-                        <span class="badge-incoming-par">📬 Propuesta dirigida a ti</span>
-                        <div class="btn-group-h">
-                          <button class="btn-approve" (click)="aceptarPropuestaPar(p.id)">
-                            ✅ Aceptar Propuesta
-                          </button>
-                          <button class="btn-reject" (click)="rechazarPropuestaPar(p.id)">
-                            ❌ Declinar
-                          </button>
-                        </div>
-                      </div>
-                    } @else {
-                      <span class="status-tag status-tag-par">⏳ Esperando respuesta de {{ p.receptorNombre }}</span>
-                    }
-                  } @else if (p.estado === 'APROBADA') {
-                    <span class="status-tag status-tag-ok">✅ Aprobada en Cuadrante</span>
-                  } @else {
-                    <span class="status-tag status-tag-no">❌ Rechazada</span>
-                  }
-                </div>
-              </div>
-            } @empty {
-              <div class="text-muted" style="padding: 16px;">No hay solicitudes de permuta registradas.</div>
-            }
-          </div>
-        </div>
-
-        <!-- Historial de Cambios del Cuadro de Turnos -->
-        <div class="panel-card">
-          <div class="panel-header">
-            <h3>📋 Historial de Cambios del Cuadro de Turnos</h3>
-          </div>
-          <div class="audit-table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Fecha / Hora</th>
-                  <th>Realizado por</th>
-                  <th>Colaborador</th>
-                  <th>Día</th>
-                  <th>Cambio</th>
-                  <th>Motivo</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (log of bitacoraAuditoria(); track log.id) {
-                  <tr>
-                    <td class="font-mono">{{ log.timestamp }}</td>
-                    <td>{{ log.actor }}</td>
-                    <td><strong>{{ log.empleadoNombre }}</strong></td>
-                    <td>{{ log.dia > 0 ? 'Día ' + log.dia : 'Mes completo' }}</td>
-                    <td>
-                      <span class="mini-shift">{{ log.turnoAnterior || 'Vacío' }}</span>
-                      →
-                      <span class="mini-shift">{{ log.turnoNuevo || 'Vacío' }}</span>
-                    </td>
-                    <td>{{ log.motivo }}</td>
-                  </tr>
-                } @empty {
-                  <tr>
-                    <td colspan="6" class="text-muted" style="text-align: center; padding: 22px;">
-                      🛡️ No hay movimientos de auditoría registrados para este servicio.
-                    </td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
+    <app-dashboard-solicitudes
+      [porcentajeCobertura]="porcentajeCoberturaGlobal()"
+      [servicioNombre]="servicioActual().nombre"
+      [infraccionesCount]="infraccionesActivas().length"
+      [balanceBancoHoras]="balanceGlobalBancoServicio()"
+      [notificacionesCount]="notificacionesSolicitudesCount()"
+      [esColaborador]="esColaborador()"
+      [permutas]="permutasVisiblesDashboard()"
+      [bitacoraAuditoria]="bitacoraAuditoria()"
+      [sesionActual]="sesionActual()"
+      (aprobarPermuta)="aprobarPermuta($event)"
+      (rechazarPermuta)="rechazarPermuta($event)"
+      (aceptarPropuestaPar)="aceptarPropuestaPar($event)"
+      (rechazarPropuestaPar)="rechazarPropuestaPar($event)">
+    </app-dashboard-solicitudes>
   }
 
   <!-- ======================================================================= -->
@@ -2301,89 +2182,31 @@
       }
     </div>
   }
-  @if (modalRotacionAbierto()) {
-    <div class="modal-backdrop" (click)="modalRotacionAbierto.set(false)">
-      <div class="modal-box" (click)="$event.stopPropagation()">
-        <div class="modal-header">
-          <h3>🔄 Traer Personal de Apoyo a {{ servicioActual().nombre }}</h3>
-          <button (click)="modalRotacionAbierto.set(false)">✕</button>
-        </div>
-        <div class="modal-body">
-          <p>
-            Selecciona un colaborador de un servicio de apoyo para incluirlo en el cuadro de turnos de <strong>{{ servicioActual().nombre }}</strong>:
-          </p>
-          <div class="rotacion-candidates">
-            @for (cand of candidatosRotacionHomologos(); track cand.id) {
-              <div class="candidate-row">
-                <div>
-                  <strong>{{ cand.nombre }}</strong> ({{ cand.categoria }})
-                  <div class="text-muted">Banco de horas: {{ formatearSigno(cand.saldoBancoAnterior) }}h</div>
-                </div>
-                <button class="btn-primary" (click)="vincularRotacionAlCuadrante(cand)">
-                  ➕ Agregar al Cuadro de Turnos
-                </button>
-              </div>
-            } @empty {
-              <div class="empty-msg">No hay personal de apoyo adicional disponible en este momento.</div>
-            }
-          </div>
-        </div>
-      </div>
-    </div>
-  }
+  <!-- MODAL DE ROTACIÓN / PERSONAL DE APOYO -->
+  <app-modal-rotacion
+    [abierto]="modalRotacionAbierto()"
+    [servicioNombre]="servicioActual().nombre"
+    [candidatos]="candidatosRotacionHomologos()"
+    (cerrar)="modalRotacionAbierto.set(false)"
+    (vincular)="vincularRotacionAlCuadrante($event)">
+  </app-modal-rotacion>
 
-  <!-- MODAL DE VINCULACIÓN CON EL CELULAR -->
-  @if (modalIcalAbierto()) {
-    <div class="modal-backdrop" (click)="modalIcalAbierto.set(false)">
-      <div class="modal-box" (click)="$event.stopPropagation()">
-        <div class="modal-header">
-          <h3>📲 Vincular Calendario — {{ enlaceIcalEmpleadoNombre() }}</h3>
-          <button (click)="modalIcalAbierto.set(false)">✕</button>
-        </div>
-        <div class="modal-body">
-          <p>
-            Copia tu enlace personal único en tu aplicación de calendario (<strong>Google Calendar → Añadir desde URL</strong>, <strong>iPhone</strong> o <strong>Outlook</strong>):
-          </p>
-          <div class="ical-box" style="word-break: break-all;">
-            <code>{{ enlaceIcalHttp() || 'Generando enlace único en PostgreSQL...' }}</code>
-          </div>
-          <ul class="ical-features">
-            <li>✅ Sincroniza automáticamente todos los meses en estado <strong>PUBLICADO</strong> o <strong>CERRADO</strong> (oculta borradores en construcción).</li>
-            <li>✅ Se actualiza solo cuando se publica un mes nuevo o se aprueba una permuta.</li>
-            <li>✅ Incluye horarios exactos de entrada y salida (y novedades VAC / INC / COMP).</li>
-          </ul>
-          <div class="modal-footer" style="display: flex; gap: 10px; justify-content: flex-end;">
-            <button class="btn-outline" (click)="descargarArchivoIcal()">⬇️ Descargar archivo .ics</button>
-            <button class="btn-primary" (click)="copiarEnlaceIcal()">📋 Copiar Enlace al Portapapeles</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  }
+  <!-- MODAL DE VINCULACIÓN CON EL CELULAR (ICAL) -->
+  <app-modal-ical
+    [abierto]="modalIcalAbierto()"
+    [empleadoNombre]="enlaceIcalEmpleadoNombre()"
+    [enlaceHttp]="enlaceIcalHttp()"
+    (cerrar)="modalIcalAbierto.set(false)"
+    (copiar)="copiarEnlaceIcal()"
+    (descargar)="descargarArchivoIcal()">
+  </app-modal-ical>
 
   <!-- MODAL DE CONFIRMACIÓN CENTRADO (VIEWPORT FIJO) -->
-  @if (modalConfirmacion(); as conf) {
-    <div class="modal-backdrop" (click)="cerrarConfirmacion()">
-      <div class="modal-box modal-box-confirm" (click)="$event.stopPropagation()">
-        <div class="modal-header" [class.modal-header-danger]="conf.esPeligroso">
-          <h3>{{ conf.titulo }}</h3>
-          <button (click)="cerrarConfirmacion()">✕</button>
-        </div>
-        <div class="modal-body">
-          <p class="confirm-message-text">{{ conf.mensaje }}</p>
-          <div class="modal-footer modal-footer-confirm">
-            <button class="btn-outline" (click)="cerrarConfirmacion()">Cancelar</button>
-            <button
-              [class.btn-danger]="conf.esPeligroso"
-              [class.btn-primary]="!conf.esPeligroso"
-              (click)="ejecutarConfirmacion()">
-              {{ conf.textoBotonConfirmar || 'Confirmar' }}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  }
+  <app-modal-confirmacion
+    [config]="modalConfirmacion()"
+    (cancelar)="cerrarConfirmacion()"
+    (confirmar)="ejecutarConfirmacion()">
+  </app-modal-confirmacion>
   </main>
 </div>
 }
