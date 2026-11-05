@@ -38,7 +38,9 @@ import { ReportesNominaComponent } from './components/reportes-nomina/reportes-n
 import { ConfiguracionFestivosComponent } from './components/configuracion-festivos/configuracion-festivos.component';
 import { ConfiguracionCatalogoTurnosComponent } from './components/configuracion-catalogo-turnos/configuracion-catalogo-turnos.component';
 import { ConfiguracionServiciosComponent } from './components/configuracion-servicios/configuracion-servicios.component';
+import { ConfiguracionGeneralComponent } from './components/configuracion-general/configuracion-general.component';
 import { PlanificadorCuadranteComponent } from './components/planificador-cuadrante/planificador-cuadrante.component';
+import { SidebarNavegacionComponent } from './components/sidebar-navegacion/sidebar-navegacion.component';
 
 
 @Component({
@@ -56,7 +58,9 @@ import { PlanificadorCuadranteComponent } from './components/planificador-cuadra
     ConfiguracionFestivosComponent,
     ConfiguracionCatalogoTurnosComponent,
     ConfiguracionServiciosComponent,
+    ConfiguracionGeneralComponent,
     PlanificadorCuadranteComponent,
+    SidebarNavegacionComponent,
   ],
   templateUrl: './app.component.html',
   styleUrl: './app.component.css',

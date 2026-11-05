@@ -29,153 +29,23 @@
 } @else {
 <div class="app-shell" (mouseup)="finalizarPintadoRaton()">
   <!-- MENÚ LATERAL IZQUIERDO COLAPSABLE AUTOMÁTICAMENTE POR HOVER (ESTILO THURNI) -->
-  <div class="side-nav-rail" [class.is-pinned]="sidebarFijo()">
-    <aside
-      class="side-nav"
-      [class.collapsed]="sidebarContraido()"
-      [class.is-floating]="!sidebarFijo() && sidebarHovered()"
-      [class.is-pinned]="sidebarFijo()"
-      (mouseenter)="onSidebarMouseEnter()"
-      (mouseleave)="onSidebarMouseLeave()">
-      <div class="side-brand">
-        <div class="logo-badge" (click)="alternarFijarSidebar()" title="Fijar / liberar menú">🏥</div>
-        @if (!sidebarContraido()) {
-          <div class="brand-text">
-            <div class="app-title">RAFA TURNOS</div>
-            <div class="app-subtitle">Gestión de Turnos</div>
-          </div>
-        }
-        <button
-          class="btn-collapse-side"
-          [class.pinned]="sidebarFijo()"
-          (click)="alternarFijarSidebar()"
-          [title]="sidebarFijo() ? 'Desanclar menú (Modo flotante automático)' : 'Fijar menú lateral abierto'">
-          {{ sidebarFijo() ? '📌' : (sidebarContraido() ? '»' : '📌') }}
-        </button>
-      </div>
-
-      <nav class="side-menu">
-        @if (!esColaborador()) {
-          @if (!sidebarContraido()) {
-            <div class="side-section-label">OPERACIÓN</div>
-          }
-          <button
-            class="side-item"
-            [class.active]="vistaActual() === 'PLANIFICADOR'"
-            (click)="onItemNavegacionClick('PLANIFICADOR')"
-            title="Cuadro de Turnos">
-            <span class="side-icon">📅</span>
-            @if (!sidebarContraido()) {
-              <span class="side-label">Cuadro de Turnos</span>
-            }
-          </button>
-        }
-
-        <button
-          class="side-item"
-          [class.active]="vistaActual() === 'DASHBOARD'"
-          (click)="onItemNavegacionClick('DASHBOARD')"
-          title="Solicitudes y Historial">
-          <span class="side-icon">🔄</span>
-          @if (!sidebarContraido()) {
-            <span class="side-label">Solicitudes y Historial</span>
-          }
-          @if (notificacionesSolicitudesCount() > 0) {
-            <span class="pill-count">{{ notificacionesSolicitudesCount() }}</span>
-          }
-        </button>
-
-        @if (!esColaborador()) {
-          <button
-            class="side-item"
-            [class.active]="vistaActual() === 'REPORTES'"
-            (click)="onItemNavegacionClick('REPORTES')"
-            title="Reportes y Analítica">
-            <span class="side-icon">📊</span>
-            @if (!sidebarContraido()) {
-              <span class="side-label">Reportes</span>
-            }
-          </button>
-        }
-
-        @if (!sidebarContraido()) {
-          <div class="side-section-label">COLABORADOR</div>
-        } @else {
-          <div class="side-divider"></div>
-        }
-
-        <button
-          class="side-item"
-          [class.active]="vistaActual() === 'PORTAL_EMPLEADO'"
-          (click)="onItemNavegacionClick('PORTAL_EMPLEADO')"
-          title="Mi Calendario">
-          <span class="side-icon">👩‍⚕️</span>
-          @if (!sidebarContraido()) {
-            <span class="side-label">Mi Calendario</span>
-          }
-          @if (propuestasRecibidasPortal().length > 0) {
-            <span class="pill-count">{{ propuestasRecibidasPortal().length }}</span>
-          }
-        </button>
-
-        @if (esAdminTh()) {
-          @if (!sidebarContraido()) {
-            <div class="side-section-label">CONFIGURACIÓN</div>
-          } @else {
-            <div class="side-divider"></div>
-          }
-
-          <button
-            class="side-item"
-            [class.active]="vistaActual() === 'CONFIGURACION'"
-            (click)="onItemNavegacionClick('CONFIGURACION')"
-            title="Configuración (Servicios, Catálogo de Turnos y Festivos)">
-            <span class="side-icon">⚙️</span>
-            @if (!sidebarContraido()) {
-              <span class="side-label">Configuración</span>
-            }
-          </button>
-        }
-      </nav>
-
-      <div class="side-footer">
-        @if (sesionActual(); as sesion) {
-          <div
-            class="side-footer-btn"
-            style="cursor: default; background: rgba(14, 165, 233, 0.12); border: 1px solid rgba(14, 165, 233, 0.3);"
-            [title]="sesion.nombre + ' • ' + etiquetaRol(sesion.rol) + ' • C.C. ' + sesion.documento">
-            <span class="side-icon">🔐</span>
-            @if (!sidebarContraido()) {
-              <div style="display: flex; flex-direction: column; line-height: 1.2; overflow: hidden;">
-                <strong style="font-size: 11px; white-space: nowrap; text-overflow: ellipsis; overflow: hidden;">{{ sesion.nombre }}</strong>
-                <span style="font-size: 10px; opacity: 0.85;">{{ etiquetaRol(sesion.rol) }}</span>
-              </div>
-            }
-          </div>
-        }
-        <button
-          class="side-footer-btn"
-          (click)="abrirModalIcal()"
-          title="Vincular calendario con el teléfono">
-          <span class="side-icon">📲</span>
-          @if (!sidebarContraido()) {
-            <span>Vincular al Celular</span>
-          }
-        </button>
-
-        <a
-          class="side-footer-btn intranet-link"
-          href="javascript:void(0)"
-          (click)="notificarIntranet()"
-          title="Volver a la Intranet">
-          <span class="side-icon">⬅</span>
-          @if (!sidebarContraido()) {
-            <span>Volver a la Intranet</span>
-          }
-        </a>
-      </div>
-    </aside>
-  </div>
+  <app-sidebar-navegacion
+    [sidebarFijo]="sidebarFijo()"
+    [sidebarContraido]="sidebarContraido()"
+    [sidebarHovered]="sidebarHovered()"
+    [vistaActual]="vistaActual()"
+    [esColaborador]="esColaborador()"
+    [esAdminTh]="esAdminTh()"
+    [notificacionesSolicitudesCount]="notificacionesSolicitudesCount()"
+    [propuestasRecibidasCount]="propuestasRecibidasPortal().length"
+    [sesionActual]="sesionActual()"
+    (alternarFijarSidebar)="alternarFijarSidebar()"
+    (sidebarMouseEnter)="onSidebarMouseEnter()"
+    (sidebarMouseLeave)="onSidebarMouseLeave()"
+    (itemNavegacionClick)="onItemNavegacionClick($event)"
+    (abrirModalIcal)="abrirModalIcal()"
+    (notificarIntranet)="notificarIntranet()"
+  />
 
   <!-- ÁREA DE TRABAJO PRINCIPAL -->
   <main class="main-workspace">
@@ -326,154 +196,91 @@
   <!-- VISTA 4: CONFIGURACIÓN (SERVICIOS | CATÁLOGO DE TURNOS | FESTIVOS)      -->
   <!-- ======================================================================= -->
   @if (vistaActual() === 'CONFIGURACION') {
-    <div class="view-container">
-      <!-- Cabecero Principal Unificado de Configuración -->
-      <div class="config-hero-card">
-        <div class="config-hero-main">
-          <div class="config-hero-brand">
-            <div class="config-icon-badge">⚙️</div>
-            <div class="config-hero-titles">
-              <div class="config-title-row">
-                <h2>Configuración del Sistema</h2>
-                <span class="config-badge-chip">Ajustes Generales</span>
-              </div>
-              <p class="config-hero-desc">
-                Gestión de servicios asistenciales, convenios de apoyo, catálogo de códigos de turno y calendario oficial de festivos
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <nav class="config-nav-tabs" aria-label="Módulos de Configuración">
-          <button
-            type="button"
-            class="config-tab-btn"
-            [class.active]="subVistaConfig() === 'SERVICIOS'"
-            (click)="subVistaConfig.set('SERVICIOS')">
-            <span class="tab-icon">🏥</span>
-            <span class="tab-text">Servicios y Apoyo</span>
-            <span class="tab-count-badge">{{ servicios().length }}</span>
-          </button>
-          <button
-            type="button"
-            class="config-tab-btn"
-            [class.active]="subVistaConfig() === 'CATALOGO_TURNOS'"
-            (click)="subVistaConfig.set('CATALOGO_TURNOS')">
-            <span class="tab-icon">🎨</span>
-            <span class="tab-text">Catálogo de Turnos</span>
-            <span class="tab-count-badge">{{ listaTurnosCatalogo().length }}</span>
-          </button>
-          <button
-            type="button"
-            class="config-tab-btn"
-            [class.active]="subVistaConfig() === 'FESTIVOS'"
-            (click)="subVistaConfig.set('FESTIVOS')">
-            <span class="tab-icon">🇨🇴</span>
-            <span class="tab-text">Calendario de Festivos</span>
-            <span class="tab-count-badge">{{ listaFestivosAnio().length }}</span>
-          </button>
-        </nav>
-      </div>
-
-      <!-- SUB-VISTA A: SERVICIOS Y APOYO -->
-      @if (subVistaConfig() === 'SERVICIOS') {
-        <app-configuracion-servicios
-          [servicios]="servicios()"
-          [empleados]="empleados()"
-          [totalCategoriasUnicas]="totalCategoriasUnicas()"
-          [totalEnlacesApoyo]="totalEnlacesApoyo()"
-          [servicioEditandoId]="servicioEditandoId()"
-          [nuevoServicioCodigo]="nuevoServicioCodigo()"
-          [nuevoServicioNombre]="nuevoServicioNombre()"
-          [nuevoServicioTipoAsistencia]="nuevoServicioTipoAsistencia()"
-          [nuevoServicioModalidadDias]="nuevoServicioModalidadDias()"
-          [nuevoServicioReqManana]="nuevoServicioReqManana()"
-          [nuevoServicioReqTarde]="nuevoServicioReqTarde()"
-          [nuevoServicioReqNoche]="nuevoServicioReqNoche()"
-          [nuevoServicioReqMananaFds]="nuevoServicioReqMananaFds()"
-          [nuevoServicioReqTardeFds]="nuevoServicioReqTardeFds()"
-          [nuevoServicioReqNocheFds]="nuevoServicioReqNocheFds()"
-          [listaTurnosCatalogo]="listaTurnosCatalogo()"
-          [nuevoServicioTurnosHabilitados]="nuevoServicioTurnosHabilitados()"
-          [nuevoServicioReglasPorCargo]="nuevoServicioReglasPorCargo()"
-          [turnosOperativosHabilitadosEnForm]="turnosOperativosHabilitadosEnForm()"
-          [enlaceHermanoSrv1]="enlaceHermanoSrv1()"
-          [enlaceHermanoSrv2]="enlaceHermanoSrv2()"
-          [catalogoTurnosMap]="catalogoTurnosMap()"
-          (cambiarNuevoServicioCodigo)="nuevoServicioCodigo.set($event)"
-          (cambiarNuevoServicioNombre)="nuevoServicioNombre.set($event)"
-          (cambiarNuevoServicioTipoAsistencia)="nuevoServicioTipoAsistencia.set($event)"
-          (cambiarNuevoServicioModalidadDias)="nuevoServicioModalidadDias.set($event)"
-          (cambiarNuevoServicioReqManana)="nuevoServicioReqManana.set($event)"
-          (cambiarNuevoServicioReqTarde)="nuevoServicioReqTarde.set($event)"
-          (cambiarNuevoServicioReqNoche)="nuevoServicioReqNoche.set($event)"
-          (cambiarNuevoServicioReqMananaFds)="nuevoServicioReqMananaFds.set($event)"
-          (cambiarNuevoServicioReqTardeFds)="nuevoServicioReqTardeFds.set($event)"
-          (cambiarNuevoServicioReqNocheFds)="nuevoServicioReqNocheFds.set($event)"
-          (aplicarPlantillaTurnosServicio)="aplicarPlantillaTurnosServicio($event)"
-          (alternarTurnoEnServicioForm)="alternarTurnoEnServicioForm($event)"
-          (actualizarMetaCargoForm)="actualizarMetaCargoForm($event.categoriaNombre, $event.campo, $event.valor)"
-          (alternarTurnoEnCargoForm)="alternarTurnoEnCargoForm($event.categoriaNombre, $event.codigoTurno)"
-          (guardarServicioAutonomo)="guardarServicioAutonomo()"
-          (cancelarEdicionServicio)="cancelarEdicionServicio()"
-          (cambiarEnlaceHermanoSrv1)="enlaceHermanoSrv1.set($event)"
-          (cambiarEnlaceHermanoSrv2)="enlaceHermanoSrv2.set($event)"
-          (guardarEnlaceHermanos)="guardarEnlaceHermanos()"
-          (desenlazarServicioHermano)="desenlazarServicioHermano($event.srvId, $event.hermanoId)"
-          (abrirCuadroServicio)="cambiarServicio($event); vistaActual.set('PLANIFICADOR')"
-          (cargarServicioParaEdicion)="cargarServicioParaEdicion($event)"
-          (eliminarServicioAutonomo)="eliminarServicioAutonomo($event)"
-        />
-      }
-
-      <!-- SUB-VISTA B: CATÁLOGO DE TURNOS -->
-      @if (subVistaConfig() === 'CATALOGO_TURNOS') {
-        <app-configuracion-catalogo-turnos
-          [turnoEditandoCodigo]="turnoEditandoCodigo()"
-          [turnoFormCodigo]="turnoFormCodigo()"
-          [turnoFormNombre]="turnoFormNombre()"
-          [turnoFormModoJornada]="turnoFormModoJornada()"
-          [turnoFormHoraInicio]="turnoFormHoraInicio()"
-          [turnoFormHoraFin]="turnoFormHoraFin()"
-          [turnoFormMinutosAlmuerzo]="turnoFormMinutosAlmuerzo()"
-          [calc]="calculoAutomaticoHorasTurno()"
-          [temasColorTurno]="temasColorTurno"
-          [turnoFormColorKey]="turnoFormColorKey()"
-          [turnoFormNocturnoPesado]="turnoFormNocturnoPesado()"
-          [turnoFormDescuentaBanco]="turnoFormDescuentaBanco()"
-          [listaTurnosCatalogo]="listaTurnosCatalogo()"
-          (limpiarFormularioTurno)="limpiarFormularioTurno()"
-          (cambiarTurnoFormCodigo)="turnoFormCodigo.set($event)"
-          (cambiarTurnoFormNombre)="turnoFormNombre.set($event)"
-          (cambiarTurnoFormModoJornada)="turnoFormModoJornada.set($event)"
-          (cambiarTurnoFormHoraInicio)="turnoFormHoraInicio.set($event)"
-          (cambiarTurnoFormHoraFin)="turnoFormHoraFin.set($event)"
-          (cambiarTurnoFormMinutosAlmuerzo)="turnoFormMinutosAlmuerzo.set($event)"
-          (cambiarTurnoFormColorKey)="turnoFormColorKey.set($event)"
-          (cambiarTurnoFormNocturnoPesado)="turnoFormNocturnoPesado.set($event)"
-          (cambiarTurnoFormDescuentaBanco)="turnoFormDescuentaBanco.set($event)"
-          (guardarTurnoEnCatalogo)="guardarTurnoEnCatalogo()"
-          (alternarVisibilidadTurnoPaleta)="alternarVisibilidadTurnoPaleta($event)"
-          (cargarTurnoParaEdicion)="cargarTurnoParaEdicion($event)"
-        />
-      }
-
-      <!-- SUB-VISTA C: CALENDARIO DE FESTIVOS -->
-      @if (subVistaConfig() === 'FESTIVOS') {
-        <app-configuracion-festivos
-          [anioSeleccionado]="anioSeleccionado()"
-          [listaFestivosAnio]="listaFestivosAnio()"
-          [nuevoFestivoFecha]="nuevoFestivoFecha()"
-          [nuevoFestivoNombre]="nuevoFestivoNombre()"
-          (eliminarDiaCivico)="eliminarDiaCivico($event)"
-          (cambiarNuevoFestivoFecha)="nuevoFestivoFecha.set($event)"
-          (cambiarNuevoFestivoNombre)="nuevoFestivoNombre.set($event)"
-          (agregarDiaCivico)="agregarDiaCivico()"
-        />
-      }
-    </div>
+    <app-configuracion-general
+      [subVistaConfig]="subVistaConfig()"
+      [servicios]="servicios()"
+      [empleados]="empleados()"
+      [totalCategoriasUnicas]="totalCategoriasUnicas()"
+      [totalEnlacesApoyo]="totalEnlacesApoyo()"
+      [servicioEditandoId]="servicioEditandoId()"
+      [nuevoServicioCodigo]="nuevoServicioCodigo()"
+      [nuevoServicioNombre]="nuevoServicioNombre()"
+      [nuevoServicioTipoAsistencia]="nuevoServicioTipoAsistencia()"
+      [nuevoServicioModalidadDias]="nuevoServicioModalidadDias()"
+      [nuevoServicioReqManana]="nuevoServicioReqManana()"
+      [nuevoServicioReqTarde]="nuevoServicioReqTarde()"
+      [nuevoServicioReqNoche]="nuevoServicioReqNoche()"
+      [nuevoServicioReqMananaFds]="nuevoServicioReqMananaFds()"
+      [nuevoServicioReqTardeFds]="nuevoServicioReqTardeFds()"
+      [nuevoServicioReqNocheFds]="nuevoServicioReqNocheFds()"
+      [listaTurnosCatalogo]="listaTurnosCatalogo()"
+      [nuevoServicioTurnosHabilitados]="nuevoServicioTurnosHabilitados()"
+      [nuevoServicioReglasPorCargo]="nuevoServicioReglasPorCargo()"
+      [turnosOperativosHabilitadosEnForm]="turnosOperativosHabilitadosEnForm()"
+      [enlaceHermanoSrv1]="enlaceHermanoSrv1()"
+      [enlaceHermanoSrv2]="enlaceHermanoSrv2()"
+      [catalogoTurnosMap]="catalogoTurnosMap()"
+      [turnoEditandoCodigo]="turnoEditandoCodigo()"
+      [turnoFormCodigo]="turnoFormCodigo()"
+      [turnoFormNombre]="turnoFormNombre()"
+      [turnoFormModoJornada]="turnoFormModoJornada()"
+      [turnoFormHoraInicio]="turnoFormHoraInicio()"
+      [turnoFormHoraFin]="turnoFormHoraFin()"
+      [turnoFormMinutosAlmuerzo]="turnoFormMinutosAlmuerzo()"
+      [calc]="calculoAutomaticoHorasTurno()"
+      [temasColorTurno]="temasColorTurno"
+      [turnoFormColorKey]="turnoFormColorKey()"
+      [turnoFormNocturnoPesado]="turnoFormNocturnoPesado()"
+      [turnoFormDescuentaBanco]="turnoFormDescuentaBanco()"
+      [anioSeleccionado]="anioSeleccionado()"
+      [listaFestivosAnio]="listaFestivosAnio()"
+      [nuevoFestivoFecha]="nuevoFestivoFecha()"
+      [nuevoFestivoNombre]="nuevoFestivoNombre()"
+      (cambiarSubVista)="subVistaConfig.set($event)"
+      (cambiarNuevoServicioCodigo)="nuevoServicioCodigo.set($event)"
+      (cambiarNuevoServicioNombre)="nuevoServicioNombre.set($event)"
+      (cambiarNuevoServicioTipoAsistencia)="nuevoServicioTipoAsistencia.set($event)"
+      (cambiarNuevoServicioModalidadDias)="nuevoServicioModalidadDias.set($event)"
+      (cambiarNuevoServicioReqManana)="nuevoServicioReqManana.set($event)"
+      (cambiarNuevoServicioReqTarde)="nuevoServicioReqTarde.set($event)"
+      (cambiarNuevoServicioReqNoche)="nuevoServicioReqNoche.set($event)"
+      (cambiarNuevoServicioReqMananaFds)="nuevoServicioReqMananaFds.set($event)"
+      (cambiarNuevoServicioReqTardeFds)="nuevoServicioReqTardeFds.set($event)"
+      (cambiarNuevoServicioReqNocheFds)="nuevoServicioReqNocheFds.set($event)"
+      (aplicarPlantillaTurnosServicio)="aplicarPlantillaTurnosServicio($event)"
+      (alternarTurnoEnServicioForm)="alternarTurnoEnServicioForm($event)"
+      (actualizarMetaCargoForm)="actualizarMetaCargoForm($event.categoriaNombre, $event.campo, $event.valor)"
+      (alternarTurnoEnCargoForm)="alternarTurnoEnCargoForm($event.categoriaNombre, $event.codigoTurno)"
+      (guardarServicioAutonomo)="guardarServicioAutonomo()"
+      (cancelarEdicionServicio)="cancelarEdicionServicio()"
+      (cambiarEnlaceHermanoSrv1)="enlaceHermanoSrv1.set($event)"
+      (cambiarEnlaceHermanoSrv2)="enlaceHermanoSrv2.set($event)"
+      (guardarEnlaceHermanos)="guardarEnlaceHermanos()"
+      (desenlazarServicioHermano)="desenlazarServicioHermano($event.srvId, $event.hermanoId)"
+      (abrirCuadroServicio)="cambiarServicio($event); vistaActual.set('PLANIFICADOR')"
+      (cargarServicioParaEdicion)="cargarServicioParaEdicion($event)"
+      (eliminarServicioAutonomo)="eliminarServicioAutonomo($event)"
+      (limpiarFormularioTurno)="limpiarFormularioTurno()"
+      (cambiarTurnoFormCodigo)="turnoFormCodigo.set($event)"
+      (cambiarTurnoFormNombre)="turnoFormNombre.set($event)"
+      (cambiarTurnoFormModoJornada)="turnoFormModoJornada.set($event)"
+      (cambiarTurnoFormHoraInicio)="turnoFormHoraInicio.set($event)"
+      (cambiarTurnoFormHoraFin)="turnoFormHoraFin.set($event)"
+      (cambiarTurnoFormMinutosAlmuerzo)="turnoFormMinutosAlmuerzo.set($event)"
+      (cambiarTurnoFormColorKey)="turnoFormColorKey.set($event)"
+      (cambiarTurnoFormNocturnoPesado)="turnoFormNocturnoPesado.set($event)"
+      (cambiarTurnoFormDescuentaBanco)="turnoFormDescuentaBanco.set($event)"
+      (guardarTurnoEnCatalogo)="guardarTurnoEnCatalogo()"
+      (alternarVisibilidadTurnoPaleta)="alternarVisibilidadTurnoPaleta($event)"
+      (cargarTurnoParaEdicion)="cargarTurnoParaEdicion($event)"
+      (eliminarDiaCivico)="eliminarDiaCivico($event)"
+      (cambiarNuevoFestivoFecha)="nuevoFestivoFecha.set($event)"
+      (cambiarNuevoFestivoNombre)="nuevoFestivoNombre.set($event)"
+      (agregarDiaCivico)="agregarDiaCivico()"
+    />
   }
-  <!-- MODAL DE ROTACIÓN / PERSONAL DE APOYO -->
+
+    <!-- MODAL DE ROTACIÓN / PERSONAL DE APOYO -->
   <app-modal-rotacion
     [abierto]="modalRotacionAbierto()"
     [servicioNombre]="servicioActual().nombre"
