@@ -1183,7 +1183,7 @@
       <div class="kpi-grid">
         <div class="kpi-card">
           <div class="kpi-label">Servicio y Categoría</div>
-          <div class="kpi-value" style="font-size: 20px;">{{ portal.servicioBase?.nombre || 'Servicio Asistencial' }}</div>
+          <div class="kpi-value" style="font-size: 20px;">{{ portal.servicioBase.nombre || 'Servicio Asistencial' }}</div>
           <div class="kpi-sub">{{ portal.empleado.categoria }} • C.C. {{ portal.empleado.documento }}</div>
         </div>
 
@@ -1341,7 +1341,7 @@
 
           <p class="panel-desc" style="margin-top: 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
             <span>Tu turno el <strong>Día {{ diaPermutaSeleccionado() }}</strong>:</span>
-            <span class="mini-shift">{{ portal.celdas[diaPermutaSeleccionado()]?.codigo || 'L' }}</span>
+            <span class="mini-shift">{{ portal.celdas[diaPermutaSeleccionado()].codigo || 'L' }}</span>
             @let srvSel = servicioDiaSeleccionadoPortal();
             <span class="badge-srv-panel" [class.badge-srv-rot]="srvSel.esRotacion" [title]="srvSel.esRotacion ? 'Servicio de apoyo rotado' : 'Servicio base asignado'">
               {{ srvSel.esRotacion ? '🔄 ' : '📍 ' }}{{ srvSel.nombre }}
@@ -1353,7 +1353,7 @@
             @if (companerosParesPortal().length > 0) {
               <select [ngModel]="companeroPermutaId()" (ngModelChange)="companeroPermutaId.set($event)" style="padding: 8px; border-radius: 6px; border: 1px solid #cbd5e1; font-weight: 600;">
                 @for (par of companerosParesPortal(); track par.id) {
-                  @let turnoPar = asignaciones()[par.id]?.[diaPermutaSeleccionado()]?.codigo || 'L';
+                  @let turnoPar = asignaciones()[par.id][diaPermutaSeleccionado()].codigo || 'L';
                   <option [value]="par.id">
                     {{ par.nombre }} — Turno [{{ turnoPar }}] el Día {{ diaPermutaSeleccionado() }}
                   </option>

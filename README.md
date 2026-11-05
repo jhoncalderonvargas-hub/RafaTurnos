@@ -53,13 +53,30 @@ Abre `http://localhost:4200`. Las exportaciones de demostración se descargan co
 ---
 
 ## 🚀 Hoja de Ruta del Proyecto
-- [x] **Fase 1**: Análisis y Especificación de Requisitos (17 documentos clínicos y normativos).
+- [x] **Fase 1**: Análisis y Especificación de Requisitos (20 documentos clínicos y normativos).
 - [x] **Fase 2**: Diseño del Modelo de Datos Relacional y Esquema Prisma.
-- [x] **Fase 3**: Inicialización del Código Base (`backend/` NestJS 10+ y `frontend/` Angular 17+).
-- [x] **Fase 4**: Semilla de Datos Hospitalarios (Servicios, Turnos, Categorías, Coberturas y Festivos 2026).
-- [x] **Fase 5**: Módulos Backend Completos (Novedades, Cliente Intranet SSO + sincronización REST).
+- [x] **Fase 3**: Inicialización del Código Base (`backend/` NestJS 10+ y `frontend/` Angular 18+ con Signals).
+- [x] **Fase 4**: Semilla de Datos Hospitalarios (14 Servicios, Turnos, Categorías, Coberturas y Festivos Colombia 2026-2027).
+- [x] **Fase 5**: Módulos Backend Completos (Novedades, Cliente Intranet SSO con firma criptográfica JWT + sincronización REST).
 - [x] **Fase 6**: Frontend Completo: Dashboard Torre de Control, Planificador Drag & Drop, Servicios y Empleados/Novedades.
-- [ ] **Fase 7**: Instalación de dependencias (npm install) y arranque del servidor de desarrollo.
-- [ ] **Fase 8**: Conexión real con PostgreSQL (migración) y pruebas de integración con la Intranet.
-#   R a f a T u r n o s  
- 
+- [x] **Fase 7**: Instalación de dependencias (`npm install`) y deduplicación de lógica compartida en helpers.
+- [x] **Fase 8**: Conexión real con PostgreSQL 16 (Prisma ORM) y pruebas de integración con el simulador de Intranet.
+- [x] **Fase 9**: Optimización de Base de Datos y Rendimiento (Índices en PostgreSQL, eliminación de N+1 con batch lookups, transacciones atómicas `$transaction`, proyección estricta `select` y paginación `skip`/`take`).
+- [x] **Fase 10**: Validación Integral de Extremo a Extremo (E2E) (Planificación, auditoría forense, permutas entre pares, feeds iCal móviles RFC 5545 y cierre/reapertura de nómina).
+- [x] **Fase 11**: Empaquetado y Despliegue en Docker (Contenedores multi-stage para NestJS y Angular + Nginx reverse proxy, orquestados mediante `docker-compose.yml` y documentados en [**DEPLOY.md**](./DEPLOY.md)).
+
+---
+
+## 📦 Despliegue Rápido con Docker
+
+Para poner en marcha todo el ecosistema (PostgreSQL 16 + Backend + Frontend Nginx) en un solo comando:
+
+```bash
+docker compose up -d --build
+```
+
+- **Frontend**: [http://localhost:4200](http://localhost:4200)
+- **Backend API**: [http://localhost:3000/api/v1/health](http://localhost:3000/api/v1/health)
+- **Simulador Intranet**: [http://localhost:4300](http://localhost:4300)
+
+Consulta la guía completa de integración hospitalaria en [**DEPLOY.md**](./DEPLOY.md).
