@@ -32,6 +32,7 @@ import { ModalConfirmacionComponent } from './components/modales/modal-confirmac
 import { ModalIcalComponent } from './components/modales/modal-ical.component';
 import { ModalRotacionComponent } from './components/modales/modal-rotacion.component';
 import { DashboardSolicitudesComponent } from './components/dashboard-solicitudes/dashboard-solicitudes.component';
+import { PortalColaboradorComponent } from './components/portal-colaborador/portal-colaborador.component';
 
 export interface InfraccionNormativa {
   empleadoId: string;
@@ -50,6 +51,7 @@ export interface InfraccionNormativa {
     ModalIcalComponent,
     ModalRotacionComponent,
     DashboardSolicitudesComponent,
+    PortalColaboradorComponent,
   ],
   templateUrl: './app.component.html',
   styleUrl: './app.component.css',
