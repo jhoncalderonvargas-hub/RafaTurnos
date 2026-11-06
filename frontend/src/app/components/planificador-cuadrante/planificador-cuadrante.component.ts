@@ -55,9 +55,12 @@ import {
           } @else if (estadoCuadrante === 'PUBLICADO') {
             <span class="badge-dot dot-success"></span>
             <span>Publicado</span>
-          } @else {
+          } @else if (estadoCuadrante === 'CERRADO_NOMINA') {
             <span class="badge-dot dot-locked"></span>
             <span>Cerrado Nómina</span>
+          } @else {
+            <span class="badge-dot dot-neutral"></span>
+            <span>Sin Planificar</span>
           }
         </div>
       </div>
@@ -133,9 +136,11 @@ import {
           class="btn-cta-primary"
           [attr.data-estado]="estadoCuadrante"
           (click)="cambiarEstadoCuadrante.emit()"
-          [disabled]="esCoordinador && estadoCuadrante !== 'BORRADOR'"
-          [title]="esCoordinador && estadoCuadrante !== 'BORRADOR' ? 'Solo Talento Humano / Nómina puede cerrar o reabrir meses publicados' : ''">
-          @if (estadoCuadrante === 'BORRADOR') {
+          [disabled]="esCoordinador && (estadoCuadrante === 'PUBLICADO' || estadoCuadrante === 'CERRADO_NOMINA')"
+          [title]="esCoordinador && (estadoCuadrante === 'PUBLICADO' || estadoCuadrante === 'CERRADO_NOMINA') ? 'Solo Talento Humano / Nómina puede cerrar o reabrir meses publicados' : ''">
+          @if (estadoCuadrante === 'SIN_PLANIFICAR') {
+            📝 Iniciar Borrador
+          } @else if (estadoCuadrante === 'BORRADOR') {
             🚀 Publicar Cuadro
           } @else if (estadoCuadrante === 'PUBLICADO') {
             🔒 Cerrar Nómina

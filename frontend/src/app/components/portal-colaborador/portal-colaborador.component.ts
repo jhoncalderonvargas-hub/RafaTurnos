@@ -35,29 +35,106 @@ export interface DatosEmpleadoPortal {
           <div class="logo-badge">👩‍⚕️</div>
           <div>
             <h2>Mi Calendario Personal de Turnos</h2>
+            <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px; flex-wrap: wrap;">
+              <span class="periodo-tag">📅 {{ nombreMesSeleccionado }} {{ anioSeleccionado }}</span>
+              @if (estadoCuadrante === 'PUBLICADO') {
+                <span class="periodo-tag" style="background: #ecfdf5; color: #047857; border-color: #a7f3d0;">🟢 Publicado Oficial</span>
+              } @else if (estadoCuadrante === 'CERRADO_NOMINA') {
+                <span class="periodo-tag" style="background: #f5f3ff; color: #6d28d9; border-color: #ddd6fe;">🔒 Cerrado Nómina</span>
+              } @else if (estadoCuadrante === 'BORRADOR') {
+                <span class="periodo-tag" style="background: #fffbeb; color: #b45309; border-color: #fde68a;">📝 En Borrador (No Oficial)</span>
+              } @else {
+                <span class="periodo-tag" style="background: #f1f5f9; color: #475569; border-color: #cbd5e1;">⚪ Sin Planificar</span>
+              }
+              <span style="font-size: 12px; color: #64748b;">Programación individual y gestión de permutas</span>
+            </div>
           </div>
         </div>
 
-        @if (esAdminTh) {
+        <div class="portal-header-controls">
           <div class="control-item">
-            <label>Ver calendario de:</label>
-            <select [ngModel]="empleadoPortalId" (ngModelChange)="cambiarEmpleadoPortal.emit($event)">
-              @for (e of empleados; track e.id) {
-                <option [value]="e.id">{{ e.nombre }} ({{ e.categoria }})</option>
-              }
-            </select>
+            <label>Mes:</label>
+            <div class="month-stepper">
+              <button
+                type="button"
+                class="btn-nav-month"
+                [disabled]="!puedeRetrocederMes"
+                (click)="retrocederMes()"
+                title="Ir al mes anterior">
+                ◀
+              </button>
+              <select
+                class="select-month-input"
+                [disabled]="mesesDisponibles.length === 0"
+                [ngModel]="mesSeleccionado"
+                (ngModelChange)="cambiarMes.emit(+$event)">
+                @for (m of mesesDisponibles; track m.valor) {
+                  <option [value]="m.valor">{{ m.nombre }} {{ anioSeleccionado }}</option>
+                } @empty {
+                  <option [value]="mesSeleccionado">Sin meses publicados</option>
+                }
+              </select>
+              <button
+                type="button"
+                class="btn-nav-month"
+                [disabled]="!puedeAvanzarMes"
+                (click)="avanzarMes()"
+                title="Ir al mes siguiente">
+                ▶
+              </button>
+            </div>
           </div>
-        } @else {
-          <div class="control-item">
-            <span class="badge-personal" style="padding: 8px 14px; font-size: 13px;">
-              🔐 Sesión Intranet: <strong>{{ portal.empleado.nombre }}</strong> ({{ etiquetaRol(rolActual) }})
-            </span>
-          </div>
-        }
+
+          @if (esAdminTh || esCoordinador) {
+            <div class="control-item">
+              <label>{{ esAdminTh ? 'Ver calendario de:' : 'Supervisar colaborador:' }}</label>
+              <select [ngModel]="empleadoPortalId" (ngModelChange)="cambiarEmpleadoPortal.emit($event)">
+                @for (e of empleados; track e.id) {
+                  <option [value]="e.id">{{ e.nombre }} ({{ e.categoria }})</option>
+                }
+              </select>
+            </div>
+          } @else {
+            <div class="control-item">
+              <span class="badge-personal" style="padding: 8px 14px; font-size: 13px;">
+                🔐 Sesión Intranet: <strong>{{ portal.empleado.nombre }}</strong> ({{ etiquetaRol(rolActual) }})
+              </span>
+            </div>
+          }
+        </div>
       </div>
 
-      <!-- Bloque 1: Tarjetas de Resumen Personal y Mi Banco de Horas -->
-      <div class="kpi-grid">
+      <!-- Banner de Advertencia de Estado del Cuadrante -->
+      @if (estadoCuadrante === 'BORRADOR') {
+        <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; display: flex; align-items: center; gap: 12px; font-size: 13px; color: #92400e;">
+          <span style="font-size: 20px;">⚠️</span>
+          <div>
+            <strong>Cuadrante en Elaboración (Borrador):</strong> La programación de <strong>{{ nombreMesSeleccionado }} {{ anioSeleccionado }}</strong> para el servicio <strong>{{ portal.servicioBase?.nombre }}</strong> está en fase de diseño por la coordinación y aún no es oficial. Los turnos asignados son preliminares y no admiten permutas hasta su publicación oficial.
+          </div>
+        </div>
+      } @else if (estadoCuadrante === 'SIN_PLANIFICAR') {
+        <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; display: flex; align-items: center; gap: 12px; font-size: 13px; color: #475569;">
+          <span style="font-size: 20px;">⚪</span>
+          <div>
+            <strong>Periodo Sin Planificar:</strong> Aún no se ha iniciado la planificación del cuadrante de <strong>{{ nombreMesSeleccionado }} {{ anioSeleccionado }}</strong> para <strong>{{ portal.servicioBase?.nombre }}</strong>. No hay turnos asignados para este mes.
+          </div>
+        </div>
+      }
+
+      @if (mesesDisponibles.length === 0) {
+        <div class="empty-portal-container">
+          <div style="font-size: 48px; margin-bottom: 12px;">📅</div>
+          <h3 style="font-size: 18px; font-weight: 800; color: #1e293b; margin-bottom: 8px;">Sin Cuadrantes Publicados</h3>
+          <p style="font-size: 14px; color: #64748b; max-width: 540px; margin: 0 auto 12px; line-height: 1.5;">
+            El servicio <strong>{{ portal.servicioBase?.nombre || 'asignado' }}</strong> no tiene programación de turnos publicada oficialmente para el año {{ anioSeleccionado }}.
+          </p>
+          <div style="font-size: 13px; color: #94a3b8;">
+            Tan pronto como la coordinación publique el cuadrante oficial del mes, tus turnos, horarios y la gestión de permutas estarán disponibles aquí.
+          </div>
+        </div>
+      } @else {
+        <!-- Bloque 1: Tarjetas de Resumen Personal y Mi Banco de Horas -->
+        <div class="kpi-grid">
         <div class="kpi-card">
           <div class="kpi-label">Servicio y Cargo</div>
           <div class="kpi-value" style="font-size: 20px;">{{ portal.servicioBase?.nombre || 'Servicio Asistencial' }}</div>
@@ -65,7 +142,7 @@ export interface DatosEmpleadoPortal {
         </div>
 
         <div class="kpi-card">
-          <div class="kpi-label">Horas Programadas en el Mes</div>
+          <div class="kpi-label">Horas Programadas en {{ nombreMesSeleccionado }}</div>
           <div class="kpi-value">{{ portal.horasTrabajadas }}h <span style="font-size: 15px; color: #64748b;">/ {{ portal.empleado.horasContratoMes }}h</span></div>
           <div class="kpi-sub">🌙 {{ portal.conteoNoches }} Noches • ☀️ {{ portal.conteoDomFest }} Domingos/Festivos</div>
         </div>
@@ -76,7 +153,7 @@ export interface DatosEmpleadoPortal {
             {{ formatearSigno(portal.nuevoSaldoBanco) }}h
           </div>
           <div class="kpi-sub">
-            Saldo ant: <b>{{ formatearSigno(portal.empleado.saldoBancoAnterior) }}h</b> • Este mes: <b>{{ formatearSigno(portal.diferenciaMes) }}h</b>
+            Saldo ant: <b>{{ formatearSigno(portal.empleado.saldoBancoAnterior) }}h</b> • En {{ nombreMesSeleccionado }}: <b>{{ formatearSigno(portal.diferenciaMes) }}h</b>
           </div>
         </div>
 
@@ -91,9 +168,30 @@ export interface DatosEmpleadoPortal {
 
       <!-- Bloque 2: Mi Calendario Mensual Personal ( Cuadrícula Semanal Lunes a Domingo ) -->
       <div class="panel-card">
-        <div class="panel-header">
-          <h3>📅 Turnos del Mes (Selecciona un día para ver tu equipo o solicitar un cambio)</h3>
-          <span class="badge-info">Día {{ diaPermutaSeleccionado }}</span>
+        <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <h3>📅 Turnos de {{ nombreMesSeleccionado }} {{ anioSeleccionado }}</h3>
+            <div class="month-stepper">
+              <button
+                type="button"
+                class="btn-month-pill"
+                [disabled]="!puedeRetrocederMes"
+                (click)="retrocederMes()"
+                title="Ver mes anterior">
+                ◀ {{ mesAnteriorNombre }}
+              </button>
+              <span class="pill-month-active">{{ nombreMesSeleccionado }}</span>
+              <button
+                type="button"
+                class="btn-month-pill"
+                [disabled]="!puedeAvanzarMes"
+                (click)="avanzarMes()"
+                title="Ver mes siguiente">
+                {{ mesSiguienteNombre }} ▶
+              </button>
+            </div>
+          </div>
+          <span class="badge-info">Día {{ diaPermutaSeleccionado }} de {{ nombreMesSeleccionado }} Seleccionado</span>
         </div>
 
         <div class="weekly-calendar-grid">
@@ -138,23 +236,30 @@ export interface DatosEmpleadoPortal {
                 }
               </div>
 
-              <div
-                class="emp-shift-pill"
-                [style.background-color]="cfgMio ? cfgMio.bgHex : '#f8fafc'"
-                [style.color]="cfgMio ? cfgMio.textHex : '#64748b'"
-                [style.border-color]="cfgMio ? cfgMio.borderHex : '#cbd5e1'">
-                <span class="emp-day-code">{{ celdaMia?.codigo || 'L' }}</span>
-                <span class="emp-day-name">{{ cfgMio ? cfgMio.nombre : 'Libre' }}</span>
-              </div>
+              @if (celdaMia && celdaMia.codigo) {
+                <div
+                  class="emp-shift-pill"
+                  [style.background-color]="cfgMio ? cfgMio.bgHex : '#f8fafc'"
+                  [style.color]="cfgMio ? cfgMio.textHex : '#64748b'"
+                  [style.border-color]="cfgMio ? cfgMio.borderHex : '#cbd5e1'">
+                  <span class="emp-day-code">{{ celdaMia.codigo }}</span>
+                  <span class="emp-day-name">{{ cfgMio ? cfgMio.nombre : celdaMia.codigo }}</span>
+                </div>
 
-              <div class="emp-day-hours">
-                {{ cfgMio ? cfgMio.horario : 'Descanso' }}
-              </div>
+                <div class="emp-day-hours">
+                  {{ cfgMio ? cfgMio.horario : 'Turno asignado' }}
+                </div>
 
-              @if (srvDia) {
-                <div class="emp-day-service" [class.srv-rotado]="srvDia.esRotacion" [title]="'Servicio asignado: ' + srvDia.nombre">
-                  <span class="srv-icon">{{ srvDia.esRotacion ? '🔄' : '📍' }}</span>
-                  <span class="srv-text">{{ srvDia.nombre }}</span>
+                @if (srvDia) {
+                  <div class="emp-day-service" [class.srv-rotado]="srvDia.esRotacion" [title]="'Servicio asignado: ' + srvDia.nombre">
+                    <span class="srv-icon">{{ srvDia.esRotacion ? '🔄' : '📍' }}</span>
+                    <span class="srv-text">{{ srvDia.nombre }}</span>
+                  </div>
+                }
+              } @else {
+                <div class="emp-shift-unassigned">
+                  <span class="unassigned-dash">—</span>
+                  <span class="unassigned-text">Sin turno</span>
                 </div>
               }
             </div>
@@ -217,21 +322,33 @@ export interface DatosEmpleadoPortal {
           }
 
           <p class="panel-desc" style="margin-top: 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-            <span>Tu turno el <strong>Día {{ diaPermutaSeleccionado }}</strong>:</span>
-            <span class="mini-shift">{{ portal.celdas[diaPermutaSeleccionado].codigo || 'L' }}</span>
-            <span class="badge-srv-panel" [class.badge-srv-rot]="servicioDiaSeleccionado.esRotacion" [title]="servicioDiaSeleccionado.esRotacion ? 'Servicio de apoyo rotado' : 'Servicio base asignado'">
-              {{ servicioDiaSeleccionado.esRotacion ? '🔄 ' : '📍 ' }}{{ servicioDiaSeleccionado.nombre }}
-            </span>
+            <span>Tu turno el <strong>Día {{ diaPermutaSeleccionado }} de {{ nombreMesSeleccionado }}</strong>:</span>
+            @if (portal.celdas[diaPermutaSeleccionado].codigo) {
+              <span class="mini-shift">{{ portal.celdas[diaPermutaSeleccionado].codigo }}</span>
+              <span class="badge-srv-panel" [class.badge-srv-rot]="servicioDiaSeleccionado.esRotacion" [title]="servicioDiaSeleccionado.esRotacion ? 'Servicio de apoyo rotado' : 'Servicio base asignado'">
+                {{ servicioDiaSeleccionado.esRotacion ? '🔄 ' : '📍 ' }}{{ servicioDiaSeleccionado.nombre }}
+              </span>
+            } @else {
+              <span class="badge-srv-panel" style="background: #f1f5f9; color: #64748b; border: 1px dashed #cbd5e1;">Sin turno asignado</span>
+            }
           </p>
 
           <div class="form-stack">
-            <label>Proponer cambio de turno a un compañero el Día {{ diaPermutaSeleccionado }}:</label>
-            @if (companerosPares.length > 0) {
+            <label>Proponer cambio de turno a un compañero el Día {{ diaPermutaSeleccionado }} de {{ nombreMesSeleccionado }}:</label>
+            @if (estadoCuadrante !== 'PUBLICADO') {
+              <div style="background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px; padding: 12px; font-size: 13px; color: #64748b; line-height: 1.5;">
+                🔒 <strong>Permutas no disponibles:</strong> Solo se pueden tramitar solicitudes de intercambio de turnos cuando el cuadrante del mes se encuentra <strong>PUBLICADO</strong> oficialmente. Estado actual de {{ nombreMesSeleccionado }}: <em>{{ estadoCuadrante === 'BORRADOR' ? 'En Borrador' : (estadoCuadrante === 'CERRADO_NOMINA' ? 'Cerrado para Nómina' : 'Sin Planificar') }}</em>.
+              </div>
+            } @else if (!portal.celdas[diaPermutaSeleccionado].codigo) {
+              <div style="background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px; padding: 12px; font-size: 13px; color: #64748b;">
+                ℹ️ <strong>Día sin turno asignado:</strong> No tienes un turno programado en el Día {{ diaPermutaSeleccionado }}. Solo puedes permutar días en los que tengas un turno oficial asignado.
+              </div>
+            } @else if (companerosPares.length > 0) {
               <select [ngModel]="companeroPermutaId" (ngModelChange)="cambiarCompaneroPermuta.emit($event)" style="padding: 8px; border-radius: 6px; border: 1px solid #cbd5e1; font-weight: 600;">
                 @for (par of companerosPares; track par.id) {
-                  @let turnoPar = asignaciones[par.id][diaPermutaSeleccionado].codigo || 'L';
+                  @let turnoPar = asignaciones[par.id][diaPermutaSeleccionado].codigo;
                   <option [value]="par.id">
-                    {{ par.nombre }} — Turno [{{ turnoPar }}] el Día {{ diaPermutaSeleccionado }}
+                    {{ par.nombre }} — Turno {{ turnoPar ? '[' + turnoPar + ']' : '[Sin turno]' }} el Día {{ diaPermutaSeleccionado }}
                   </option>
                 }
               </select>
@@ -316,15 +433,21 @@ export interface DatosEmpleadoPortal {
           </table>
         </div>
       </div>
+      }
     </div>
   `,
 })
 export class PortalColaboradorComponent {
   @Input({ required: true }) portal!: DatosEmpleadoPortal;
   @Input() esAdminTh = false;
+  @Input() esCoordinador = false;
+  @Input() estadoCuadrante: 'BORRADOR' | 'PUBLICADO' | 'CERRADO_NOMINA' | 'SIN_PLANIFICAR' = 'PUBLICADO';
   @Input() empleadoPortalId = '';
   @Input() empleados: EmpleadoHospital[] = [];
   @Input() rolActual: RolUsuarioSso = 'COLABORADOR';
+  @Input() mesSeleccionado = 8;
+  @Input() anioSeleccionado = 2026;
+  @Input() mesesDisponibles: Array<{ valor: number; nombre: string }> = [];
   @Input() diaPermutaSeleccionado = 1;
   @Input() celdasOffsetInicioMes: number[] = [];
   @Input() celdasOffsetFinMes: number[] = [];
@@ -343,6 +466,7 @@ export class PortalColaboradorComponent {
   @Input() misSolicitudesEnviadas: PermutaItem[] = [];
   @Input() equipoDeGuardiaDia: Array<{ empleado: EmpleadoHospital; turno: string }> = [];
 
+  @Output() cambiarMes = new EventEmitter<number>();
   @Output() cambiarEmpleadoPortal = new EventEmitter<string>();
   @Output() abrirModalIcal = new EventEmitter<void>();
   @Output() seleccionarDiaEnPortal = new EventEmitter<number>();
@@ -350,6 +474,51 @@ export class PortalColaboradorComponent {
   @Output() rechazarPropuestaPar = new EventEmitter<string>();
   @Output() cambiarCompaneroPermuta = new EventEmitter<string>();
   @Output() enviarSolicitudPermuta = new EventEmitter<void>();
+
+  get nombreMesSeleccionado(): string {
+    const mesObj = this.mesesDisponibles.find((m) => m.valor === this.mesSeleccionado);
+    if (mesObj) return mesObj.nombre;
+    const nombres = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+    return nombres[this.mesSeleccionado - 1] || `Mes ${this.mesSeleccionado}`;
+  }
+
+  get puedeRetrocederMes(): boolean {
+    if (this.mesesDisponibles.length <= 1) return false;
+    const idx = this.mesesDisponibles.findIndex((m) => m.valor === this.mesSeleccionado);
+    return idx > 0;
+  }
+
+  get puedeAvanzarMes(): boolean {
+    if (this.mesesDisponibles.length <= 1) return false;
+    const idx = this.mesesDisponibles.findIndex((m) => m.valor === this.mesSeleccionado);
+    return idx >= 0 && idx < this.mesesDisponibles.length - 1;
+  }
+
+  get mesAnteriorNombre(): string {
+    const idx = this.mesesDisponibles.findIndex((m) => m.valor === this.mesSeleccionado);
+    if (idx > 0) return this.mesesDisponibles[idx - 1].nombre;
+    return 'Anterior';
+  }
+
+  get mesSiguienteNombre(): string {
+    const idx = this.mesesDisponibles.findIndex((m) => m.valor === this.mesSeleccionado);
+    if (idx >= 0 && idx < this.mesesDisponibles.length - 1) return this.mesesDisponibles[idx + 1].nombre;
+    return 'Siguiente';
+  }
+
+  retrocederMes(): void {
+    const idx = this.mesesDisponibles.findIndex((m) => m.valor === this.mesSeleccionado);
+    if (idx > 0) {
+      this.cambiarMes.emit(this.mesesDisponibles[idx - 1].valor);
+    }
+  }
+
+  avanzarMes(): void {
+    const idx = this.mesesDisponibles.findIndex((m) => m.valor === this.mesSeleccionado);
+    if (idx >= 0 && idx < this.mesesDisponibles.length - 1) {
+      this.cambiarMes.emit(this.mesesDisponibles[idx + 1].valor);
+    }
+  }
 
   formatearSigno(n?: number): string {
     const val = Number(n) || 0;

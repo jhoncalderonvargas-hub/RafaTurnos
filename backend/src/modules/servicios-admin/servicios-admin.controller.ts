@@ -357,6 +357,7 @@ export class ServiciosAdminController {
 
     const mapaCatPorNombre = new Map(categoriasDb.map((c) => [c.nombre.trim().toLowerCase(), c.id]));
     const mapaTurnoPorCod = new Map(tiposTurnoDb.map((t) => [t.codigo.trim().toUpperCase(), t.id]));
+    const mapaTurnoPorId = new Map(tiposTurnoDb.map((t) => [t.id, t]));
 
     if (Array.isArray(reglasPorCargo) && reglasPorCargo.length > 0) {
       await this.prisma.$transaction(async (tx) => {
@@ -377,21 +378,47 @@ export class ServiciosAdminController {
           }
           if (!catId) continue;
 
-          const reqM = Math.max(0, Number(regla.reqManana) || 0);
-          const reqT = Math.max(0, Number(regla.reqTarde) || 0);
-          const reqN = Math.max(0, Number(regla.reqNoche) || 0);
-          const reqMFds =
-            regla.reqMananaFds !== undefined
+          const codigosCat =
+            Array.isArray(regla.turnosHabilitados) &&
+            regla.turnosHabilitados.length > 0
+              ? regla.turnosHabilitados.map((c) =>
+                  String(c).trim().toUpperCase()
+                )
+              : turnosServicio;
+
+          const turnosObjCat = codigosCat
+            .map((cod) => mapaTurnoPorCod.get(cod))
+            .filter((id): id is string => Boolean(id))
+            .map((id) => mapaTurnoPorId.get(id));
+
+          const tieneNocheCat = turnosObjCat.some(
+            (t) => t && (t.esNocturnoPesado || t.horasNocturnas >= 6)
+          );
+          const tieneTardeCat = turnosObjCat.some(
+            (t) => t && (t.horasDiurnas > 0 || (t.horaFin && parseInt(t.horaFin.split(':')[0], 10) >= 15))
+          );
+          const tieneMananaCat = turnosObjCat.some(
+            (t) => t && (t.horasDiurnas > 0 || (t.horaInicio && parseInt(t.horaInicio.split(':')[0], 10) < 12))
+          );
+
+          const reqM = tieneMananaCat ? Math.max(0, Number(regla.reqManana) || 0) : 0;
+          const reqT = tieneTardeCat ? Math.max(0, Number(regla.reqTarde) || 0) : 0;
+          const reqN = tieneNocheCat ? Math.max(0, Number(regla.reqNoche) || 0) : 0;
+          const reqMFds = tieneMananaCat
+            ? regla.reqMananaFds !== undefined
               ? Math.max(0, Number(regla.reqMananaFds) || 0)
-              : reqM;
-          const reqTFds =
-            regla.reqTardeFds !== undefined
+              : reqM
+            : 0;
+          const reqTFds = tieneTardeCat
+            ? regla.reqTardeFds !== undefined
               ? Math.max(0, Number(regla.reqTardeFds) || 0)
-              : reqT;
-          const reqNFds =
-            regla.reqNocheFds !== undefined
+              : reqT
+            : 0;
+          const reqNFds = tieneNocheCat
+            ? regla.reqNocheFds !== undefined
               ? Math.max(0, Number(regla.reqNocheFds) || 0)
-              : reqN;
+              : reqN
+            : 0;
 
           await (tx.requerimientoCobertura as any).upsert({
             where: {
@@ -422,14 +449,6 @@ export class ServiciosAdminController {
               reqNocheFds: reqNFds,
             },
           });
-
-          const codigosCat =
-            Array.isArray(regla.turnosHabilitados) &&
-            regla.turnosHabilitados.length > 0
-              ? regla.turnosHabilitados.map((c) =>
-                  String(c).trim().toUpperCase()
-                )
-              : turnosServicio;
 
           await tx.servicioTurnoHabilitado.deleteMany({
             where: { servicioId, categoriaId: catId },
@@ -560,6 +579,16 @@ export class ServiciosAdminController {
       ? Array.from(new Set(data.turnosHabilitados.map((t) => String(t).trim().toUpperCase()).filter(Boolean)))
       : undefined;
 
+    const tiposTurnoDb = await this.prisma.tipoTurno.findMany();
+    const mapaTurnoPorCod = new Map(tiposTurnoDb.map((t) => [t.codigo.trim().toUpperCase(), t]));
+
+    const tieneNocheSrv = turnosLimpios
+      ? turnosLimpios.some((c) => {
+          const t = mapaTurnoPorCod.get(c);
+          return t && (t.esNocturnoPesado || t.horasNocturnas >= 6);
+        })
+      : true;
+
     const actualizado = await this.prisma.servicio.update({
       where: { id },
       data: {
@@ -568,11 +597,11 @@ export class ServiciosAdminController {
         tipoAsistencia: normalizarTipoAsistencia(data.tipoAsistencia),
         ...(data.reqManana !== undefined ? { reqManana: Math.max(0, Number(data.reqManana) || 0) } : {}),
         ...(data.reqTarde !== undefined ? { reqTarde: Math.max(0, Number(data.reqTarde) || 0) } : {}),
-        ...(data.reqNoche !== undefined ? { reqNoche: Math.max(0, Number(data.reqNoche) || 0) } : {}),
+        ...(data.reqNoche !== undefined ? { reqNoche: tieneNocheSrv ? Math.max(0, Number(data.reqNoche) || 0) : 0 } : {}),
         ...(data.modalidadDias !== undefined ? { modalidadDias: data.modalidadDias } : {}),
         ...(data.reqMananaFds !== undefined ? { reqMananaFds: Math.max(0, Number(data.reqMananaFds) || 0) } : {}),
         ...(data.reqTardeFds !== undefined ? { reqTardeFds: Math.max(0, Number(data.reqTardeFds) || 0) } : {}),
-        ...(data.reqNocheFds !== undefined ? { reqNocheFds: Math.max(0, Number(data.reqNocheFds) || 0) } : {}),
+        ...(data.reqNocheFds !== undefined ? { reqNocheFds: tieneNocheSrv ? Math.max(0, Number(data.reqNocheFds) || 0) : 0 } : {}),
         ...(turnosLimpios !== undefined ? { turnosHabilitadosCodigos: turnosLimpios } : {}),
       } as any,
     });

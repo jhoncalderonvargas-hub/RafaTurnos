@@ -137,7 +137,7 @@ const HTML_PORTAL = `<!DOCTYPE html>
       <div class="role-card">
         <div>
           <h3>👩‍⚕️ 1. Perfil Colaborador</h3>
-          <p style="margin: 6px 0;">Médicos, enfermeros, auxiliares y operativos.</p>
+          <p style="margin: 6px 0;">Médicos, enfermeros, auxiliares y técnicos.</p>
           <ul>
             <li>Aterriza directo en <b>Mi Calendario</b></li>
             <li>No puede cambiar de empleado en el selector</li>
@@ -145,9 +145,14 @@ const HTML_PORTAL = `<!DOCTYPE html>
             <li>Solo solicita/acepta sus propias permutas</li>
           </ul>
         </div>
-        <button class="btn-quick" onclick="lanzarRapido('COLABORADOR')">
-          🚀 Entrar como Colaborador
-        </button>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <button class="btn-quick" onclick="lanzarDirecto('1010001018', 'COLABORADOR')">
+            🏥 Urgencias: Bernardo Castro
+          </button>
+          <button class="btn-quick" style="background: #334155;" onclick="lanzarDirecto('1010001144', 'COLABORADOR')">
+            🔧 Mantenimiento: Jaime Londoño
+          </button>
+        </div>
       </div>
 
       <div class="role-card">
@@ -156,14 +161,19 @@ const HTML_PORTAL = `<!DOCTYPE html>
           <p style="margin: 6px 0;">Jefe de Servicio Asistencial / Supervisora.</p>
           <ul>
             <li>Gestiona su servicio base y servicios hermanos</li>
+            <li>Supervisa el calendario de sus colaboradores</li>
             <li>Aprueba o rechaza permutas de su servicio</li>
             <li>Publica el cuadrante mensual</li>
-            <li>No puede cerrar/reabrir Nómina ni entrar a Configuración</li>
           </ul>
         </div>
-        <button class="btn-quick coord" onclick="lanzarRapido('COORDINADOR')">
-          🚀 Entrar como Coordinador
-        </button>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <button class="btn-quick coord" onclick="lanzarDirecto('1010001022', 'COORDINADOR')">
+            🏥 Urgencias: Alfonso Mora
+          </button>
+          <button class="btn-quick coord" style="background: #b45309;" onclick="lanzarDirecto('1037645182', 'COORDINADOR')">
+            🔧 Mantenimiento: Jhon Alexander Calderon
+          </button>
+        </div>
       </div>
 
       <div class="role-card">
@@ -171,9 +181,9 @@ const HTML_PORTAL = `<!DOCTYPE html>
           <h3>🏛️ 3. Perfil Talento Humano</h3>
           <p style="margin: 6px 0;">Dirección Asistencial / Nómina / Administrador.</p>
           <ul>
-            <li>Acceso completo a los 14 servicios del hospital</li>
+            <li>Acceso completo a todos los servicios del hospital</li>
             <li>Cierra y reabre meses para Nómina</li>
-            <li>Audita Mi Calendario de cualquier colaborador</li>
+            <li>Supervisa Mi Calendario de cualquier colaborador</li>
             <li>Administra Servicios, Turnos y Días Cívicos</li>
           </ul>
         </div>
@@ -281,6 +291,10 @@ const HTML_PORTAL = `<!DOCTYPE html>
       const rol = document.getElementById('selRol').value;
       if (!doc) return;
       emitirYRedirigir(doc, rol);
+    }
+
+    function lanzarDirecto(documento, rol) {
+      emitirYRedirigir(documento, rol);
     }
 
     function lanzarRapido(rol) {

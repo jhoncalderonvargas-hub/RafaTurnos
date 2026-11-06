@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output, ViewEncapsulation } from '@angular/core';
+import { Component, EventEmitter, Input, Output, ViewEncapsulation, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
@@ -393,9 +393,19 @@ import {
 
     <!-- Directorio de Servicios Configurados -->
     <div class="panel-card">
-      <div class="panel-header">
-        <h3>📋 Directorio de Servicios</h3>
-        <span class="badge-count">{{ servicios.length }} Servicios</span>
+      <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <h3>📋 Directorio de Servicios</h3>
+          <span class="badge-count">{{ servicios.length }} Servicios</span>
+        </div>
+        <button
+          type="button"
+          class="btn-sm-secondary"
+          (click)="expandirTodosLosServicios()"
+          style="font-size: 11px; padding: 4px 10px; cursor: pointer; border-radius: 6px; border: 1px solid #cbd5e1; background: #f8fafc; color: #334155; font-weight: 600;"
+        >
+          {{ serviciosExpandidos().size === servicios.length && servicios.length > 0 ? '▲ Colapsar Todo el Personal' : '👥 Desplegar Todo el Personal' }}
+        </button>
       </div>
       <div class="table-responsive">
         <table class="data-table">
@@ -458,7 +468,19 @@ import {
                   </div>
                 </td>
                 <td>
-                  <span class="badge-personal">{{ srv.empleadosCount || 0 }} colaboradores</span>
+                  <button
+                    type="button"
+                    (click)="alternarDesplieguePersonal(srv.id)"
+                    class="badge-personal"
+                    [style.background]="serviciosExpandidos().has(srv.id) ? '#dbeafe' : '#f1f5f9'"
+                    [style.borderColor]="serviciosExpandidos().has(srv.id) ? '#3b82f6' : '#cbd5e1'"
+                    [style.color]="serviciosExpandidos().has(srv.id) ? '#1d4ed8' : '#334155'"
+                    style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; font-size: 11.5px; font-weight: 600; cursor: pointer; transition: all 0.15s ease; border: 1px solid;"
+                    [title]="serviciosExpandidos().has(srv.id) ? 'Clic para ocultar el personal' : 'Clic para desplegar el personal de ' + srv.nombre"
+                  >
+                    <span>👥 {{ srv.empleadosCount || obtenerEmpleadosDelServicio(srv.id).length }}</span>
+                    <span style="font-size: 9.5px; opacity: 0.85;">{{ serviciosExpandidos().has(srv.id) ? '▲ Ocultar' : '▼ Ver personal' }}</span>
+                  </button>
                 </td>
                 <td>
                   @if (srv.hermanos && srv.hermanos.length > 0) {
@@ -505,6 +527,77 @@ import {
                   </div>
                 </td>
               </tr>
+              @if (serviciosExpandidos().has(srv.id)) {
+                <tr class="row-personal-desplegado">
+                  <td colspan="8" style="background: #f8fafc; padding: 12px 18px; border-bottom: 2px solid #cbd5e1;">
+                    <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                          <span style="font-size: 15px;">👥</span>
+                          <strong style="font-size: 13px; color: #0f172a;">
+                            Personal Adscrito a {{ srv.nombre }} ({{ srv.codigo }})
+                          </strong>
+                          <span style="background: #e0f2fe; color: #0369a1; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 12px;">
+                            {{ obtenerEmpleadosDelServicio(srv.id).length }} colaboradores
+                          </span>
+                        </div>
+                        <small style="color: #64748b; font-size: 11px;">
+                          Censo Oficial de Personal
+                        </small>
+                      </div>
+
+                      @if (obtenerEmpleadosDelServicio(srv.id).length === 0) {
+                        <div style="padding: 14px; text-align: center; color: #94a3b8; font-size: 12px;">
+                          ⚠️ Este servicio no cuenta con personal adscrito actualmente.
+                        </div>
+                      } @else {
+                        <div style="display: flex; flex-direction: column; gap: 10px;">
+                          @for (grupo of obtenerEmpleadosAgrupadosPorCargo(srv.id); track grupo.cargo) {
+                            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 12px;">
+                              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                                <strong style="font-size: 11.5px; color: #1e293b; display: flex; align-items: center; gap: 5px;">
+                                  <span style="color: #2563eb;">🏷️</span> {{ grupo.cargo }}
+                                </strong>
+                                <span style="font-size: 10.5px; color: #64748b; font-weight: 600;">
+                                  {{ grupo.colaboradores.length }} {{ grupo.colaboradores.length === 1 ? 'colaborador' : 'colaboradores' }}
+                                </span>
+                              </div>
+
+                              <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px;">
+                                @for (colab of grupo.colaboradores; track colab.id) {
+                                  <div style="background: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                                    <div style="display: flex; flex-direction: column; gap: 1px; min-width: 0;">
+                                      <span style="font-size: 12px; font-weight: 700; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" [title]="colab.nombre">
+                                        {{ colab.nombre }}
+                                      </span>
+                                      <span style="font-size: 10.5px; color: #64748b; font-family: monospace;">
+                                        CC: {{ colab.documento }}
+                                      </span>
+                                    </div>
+                                    <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 2px;">
+                                      <span style="font-size: 10.5px; background: #f1f5f9; color: #334155; padding: 1px 6px; border-radius: 4px; font-weight: 600;" title="Horas de contrato mensual">
+                                        ⏱️ {{ colab.horasContratoMes || 168 }}h/mes
+                                      </span>
+                                      <span
+                                        style="font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px;"
+                                        [style.background]="(colab.saldoBancoAnterior || 0) < 0 ? '#fee2e2' : (colab.saldoBancoAnterior || 0) > 0 ? '#dcfce7' : '#f1f5f9'"
+                                        [style.color]="(colab.saldoBancoAnterior || 0) < 0 ? '#b91c1c' : (colab.saldoBancoAnterior || 0) > 0 ? '#15803d' : '#475569'"
+                                        title="Saldo en Banco de Horas"
+                                      >
+                                        🏦 {{ (colab.saldoBancoAnterior || 0) > 0 ? '+' : '' }}{{ colab.saldoBancoAnterior || 0 }}h
+                                      </span>
+                                    </div>
+                                  </div>
+                                }
+                              </div>
+                            </div>
+                          }
+                        </div>
+                      }
+                    </div>
+                  </td>
+                </tr>
+              }
             }
           </tbody>
         </table>
@@ -559,6 +652,49 @@ export class ConfiguracionServiciosComponent {
   @Output() abrirCuadroServicio = new EventEmitter<string>();
   @Output() cargarServicioParaEdicion = new EventEmitter<ServicioHospitalario>();
   @Output() eliminarServicioAutonomo = new EventEmitter<ServicioHospitalario>();
+
+  serviciosExpandidos = signal<Set<string>>(new Set<string>());
+
+  alternarDesplieguePersonal(servicioId: string): void {
+    this.serviciosExpandidos.update((set) => {
+      const nuevo = new Set(set);
+      if (nuevo.has(servicioId)) {
+        nuevo.delete(servicioId);
+      } else {
+        nuevo.add(servicioId);
+      }
+      return nuevo;
+    });
+  }
+
+  expandirTodosLosServicios(): void {
+    if (this.serviciosExpandidos().size === this.servicios.length) {
+      this.serviciosExpandidos.set(new Set());
+    } else {
+      this.serviciosExpandidos.set(new Set(this.servicios.map((s) => s.id)));
+    }
+  }
+
+  obtenerEmpleadosDelServicio(servicioId: string): EmpleadoHospital[] {
+    return (this.empleados || []).filter((e) => e.servicioBaseId === servicioId);
+  }
+
+  obtenerEmpleadosAgrupadosPorCargo(servicioId: string): { cargo: string; colaboradores: EmpleadoHospital[] }[] {
+    const emps = this.obtenerEmpleadosDelServicio(servicioId);
+    const grupos = new Map<string, EmpleadoHospital[]>();
+    for (const emp of emps) {
+      const cat = emp.categoria || 'Sin cargo asignado';
+      const list = grupos.get(cat) || [];
+      list.push(emp);
+      grupos.set(cat, list);
+    }
+    return Array.from(grupos.entries())
+      .map(([cargo, colaboradores]) => ({
+        cargo,
+        colaboradores: colaboradores.sort((a, b) => a.nombre.localeCompare(b.nombre)),
+      }))
+      .sort((a, b) => a.cargo.localeCompare(b.cargo));
+  }
 
   esTurnoHabilitadoEnServicioForm(codigo: string): boolean {
     return this.nuevoServicioTurnosHabilitados.includes(codigo.toUpperCase());

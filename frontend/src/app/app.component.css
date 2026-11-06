@@ -2136,6 +2136,93 @@ app-configuracion-festivos {
   font-size: 12.5px;
 }
 
+/* NAVEGACIÓN Y SELECTOR DE MES EN PORTAL DEL COLABORADOR */
+.portal-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.month-stepper {
+  display: inline-flex;
+  align-items: center;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 2px;
+  gap: 3px;
+}
+
+.month-stepper-header {
+  background: #f8fafc;
+}
+
+.btn-nav-month,
+.btn-month-pill {
+  background: #ffffff;
+  border: 1px solid transparent;
+  color: #334155;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.btn-nav-month:hover:not(:disabled),
+.btn-month-pill:hover:not(:disabled) {
+  background: #e0f2fe;
+  color: #0369a1;
+  border-color: #bae6fd;
+}
+
+.btn-nav-month:disabled,
+.btn-month-pill:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: transparent;
+}
+
+.select-month-input {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f172a;
+  cursor: pointer;
+  height: 29px;
+}
+
+.periodo-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #e0f2fe;
+  color: #0369a1;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 99px;
+  border: 1px solid #bae6fd;
+}
+
+.pill-month-active {
+  background: #0284c7;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 5px;
+}
+
 .col-highlight-banco {
   background: #f0f9ff;
 }
@@ -2436,6 +2523,41 @@ app-configuracion-festivos {
   padding: 5px 8px;
   border-radius: 6px;
   border: 1.5px solid transparent;
+}
+
+.emp-shift-unassigned {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 8px 6px;
+  border-radius: 6px;
+  background-color: #f8fafc;
+  border: 1px dashed #cbd5e1;
+}
+
+.unassigned-dash {
+  font-size: 16px;
+  font-weight: 700;
+  color: #94a3b8;
+  line-height: 1;
+}
+
+.unassigned-text {
+  font-size: 10px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.empty-portal-container {
+  background: white;
+  border: 1.5px dashed #cbd5e1;
+  border-radius: 12px;
+  padding: 56px 24px;
+  text-align: center;
+  margin-top: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
 .emp-day-code {

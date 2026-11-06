@@ -178,8 +178,53 @@ export interface TemaColorTurno {
       <div class="panel-card catalogo-table-card">
         <div class="panel-header">
           <h3>🎨 Turnos Configurados</h3>
-          <span class="badge-count">{{ listaTurnosCatalogo.length }} Turnos</span>
+          <span class="badge-count">{{ turnosFiltrados.length }} de {{ listaTurnosCatalogo.length }} Turnos</span>
         </div>
+
+        <!-- Filtros y Búsqueda en Catálogo -->
+        <div class="panel-filter-bar">
+          <div class="filter-tabs">
+            <button
+              type="button"
+              class="filter-tab"
+              [class.active]="filtroFamiliaTurno === 'TODOS'"
+              (click)="filtroFamiliaTurno = 'TODOS'">
+              Todos ({{ listaTurnosCatalogo.length }})
+            </button>
+            <button
+              type="button"
+              class="filter-tab"
+              [class.active]="filtroFamiliaTurno === 'ORDINARIOS'"
+              (click)="filtroFamiliaTurno = 'ORDINARIOS'">
+              ☀️ Ordinarios
+            </button>
+            <button
+              type="button"
+              class="filter-tab"
+              [class.active]="filtroFamiliaTurno === 'GUARDIAS'"
+              (click)="filtroFamiliaTurno = 'GUARDIAS'">
+              🌙 Guardias
+            </button>
+            <button
+              type="button"
+              class="filter-tab"
+              [class.active]="filtroFamiliaTurno === 'DESCANSOS'"
+              (click)="filtroFamiliaTurno = 'DESCANSOS'">
+              🛌 Descansos
+            </button>
+          </div>
+          <div class="search-input-wrap" style="min-width: 140px; max-width: 180px;">
+            <input
+              type="text"
+              [(ngModel)]="busquedaTurno"
+              placeholder="🔍 Buscar turno..."
+              class="filter-search-input" />
+            @if (busquedaTurno) {
+              <button class="btn-clear-search" (click)="busquedaTurno = ''">✕</button>
+            }
+          </div>
+        </div>
+
         <div class="table-responsive">
           <table class="data-table catalogo-table">
             <thead>
@@ -192,7 +237,7 @@ export interface TemaColorTurno {
               </tr>
             </thead>
             <tbody>
-              @for (t of listaTurnosCatalogo; track t.codigo) {
+              @for (t of turnosFiltrados; track t.codigo) {
                 <tr>
                   <td class="col-turno">
                     <div class="turno-cell-cluster">
@@ -261,6 +306,12 @@ export interface TemaColorTurno {
                     </div>
                   </td>
                 </tr>
+              } @empty {
+                <tr>
+                  <td colspan="5" class="text-muted empty-state-box" style="text-align: center; padding: 22px;">
+                    🔍 No se encontraron turnos que coincidan con la búsqueda "{{ busquedaTurno }}".
+                  </td>
+                </tr>
               }
             </tbody>
           </table>
@@ -270,6 +321,31 @@ export interface TemaColorTurno {
   `,
 })
 export class ConfiguracionCatalogoTurnosComponent {
+  busquedaTurno = '';
+  filtroFamiliaTurno: 'TODOS' | 'ORDINARIOS' | 'GUARDIAS' | 'DESCANSOS' = 'TODOS';
+
+  get turnosFiltrados(): TipoTurnoConfig[] {
+    const q = this.busquedaTurno.trim().toLowerCase();
+    const f = this.filtroFamiliaTurno;
+    return this.listaTurnosCatalogo.filter((t) => {
+      if (f === 'ORDINARIOS') {
+        if (t.horasOrdinarias <= 0 || t.esAusencia || t.horasOrdinarias > 10) return false;
+      } else if (f === 'GUARDIAS') {
+        if (t.horasOrdinarias <= 10 || t.esAusencia) return false;
+      } else if (f === 'DESCANSOS') {
+        if (t.horasOrdinarias > 0 && !t.esAusencia) return false;
+      }
+      if (q) {
+        const match =
+          t.codigo.toLowerCase().includes(q) ||
+          t.nombre.toLowerCase().includes(q) ||
+          (t.horario || '').toLowerCase().includes(q);
+        if (!match) return false;
+      }
+      return true;
+    });
+  }
+
   @Input() turnoEditandoCodigo: string | null = null;
   @Input() turnoFormCodigo = '';
   @Input() turnoFormNombre = '';
