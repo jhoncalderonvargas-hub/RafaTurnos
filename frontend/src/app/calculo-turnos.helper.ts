@@ -35,7 +35,8 @@ export function calcularMetricasMesColaborador(
   catalogo: Record<string, TipoTurnoConfig>,
   saldosConsolidados: Record<string, number>,
   anio: number,
-  mes: number
+  mes: number,
+  saldoAnteriorCalculado?: number
 ): MetricasMesColaborador {
   const celdas = celdasEmp || {};
   let horasTrabajadas = 0;
@@ -82,9 +83,11 @@ export function calcularMetricasMesColaborador(
   const mesPrev = mes === 1 ? 12 : mes - 1;
   const saldoKeyPrev = `${emp.id}::${anioPrev}-${mesPrev}`;
   const saldoAntReal =
-    saldosConsolidados[saldoKeyPrev] !== undefined
-      ? saldosConsolidados[saldoKeyPrev]
-      : emp.saldoBancoAnterior;
+    saldoAnteriorCalculado !== undefined
+      ? saldoAnteriorCalculado
+      : (saldosConsolidados[saldoKeyPrev] !== undefined
+          ? saldosConsolidados[saldoKeyPrev]
+          : emp.saldoBancoAnterior);
 
   const diferenciaMes = horasTrabajadas - emp.horasContratoMes - horasAmortizadasComp;
   const nuevoSaldoBanco = saldoAntReal + diferenciaMes;

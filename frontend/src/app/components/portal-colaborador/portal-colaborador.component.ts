@@ -97,7 +97,7 @@ export interface DatosEmpleadoPortal {
           } @else {
             <div class="control-item">
               <span class="badge-personal" style="padding: 8px 14px; font-size: 13px;">
-                🔐 Sesión Intranet: <strong>{{ portal.empleado.nombre }}</strong> ({{ etiquetaRol(rolActual) }})
+                🔐 Sesión Intranet: <strong>{{ portal.empleado?.nombre }}</strong> ({{ etiquetaRol(rolActual) }})
               </span>
             </div>
           }
@@ -138,12 +138,12 @@ export interface DatosEmpleadoPortal {
         <div class="kpi-card">
           <div class="kpi-label">Servicio y Cargo</div>
           <div class="kpi-value" style="font-size: 20px;">{{ portal.servicioBase?.nombre || 'Servicio Asistencial' }}</div>
-          <div class="kpi-sub">{{ portal.empleado.categoria }} • C.C. {{ portal.empleado.documento }}</div>
+          <div class="kpi-sub">{{ portal.empleado?.categoria }} • C.C. {{ portal.empleado?.documento }}</div>
         </div>
 
         <div class="kpi-card">
           <div class="kpi-label">Horas Programadas en {{ nombreMesSeleccionado }}</div>
-          <div class="kpi-value">{{ portal.horasTrabajadas }}h <span style="font-size: 15px; color: #64748b;">/ {{ portal.empleado.horasContratoMes }}h</span></div>
+          <div class="kpi-value">{{ portal.horasTrabajadas }}h <span style="font-size: 15px; color: #64748b;">/ {{ portal.empleado?.horasContratoMes }}h</span></div>
           <div class="kpi-sub">🌙 {{ portal.conteoNoches }} Noches • ☀️ {{ portal.conteoDomFest }} Domingos/Festivos</div>
         </div>
 
@@ -153,7 +153,7 @@ export interface DatosEmpleadoPortal {
             {{ formatearSigno(portal.nuevoSaldoBanco) }}h
           </div>
           <div class="kpi-sub">
-            Saldo ant: <b>{{ formatearSigno(portal.empleado.saldoBancoAnterior) }}h</b> • En {{ nombreMesSeleccionado }}: <b>{{ formatearSigno(portal.diferenciaMes) }}h</b>
+            Saldo ant: <b>{{ formatearSigno(portal.empleado?.saldoBancoAnterior) }}h</b> • En {{ nombreMesSeleccionado }}: <b>{{ formatearSigno(portal.diferenciaMes) }}h</b>
           </div>
         </div>
 
@@ -215,9 +215,9 @@ export interface DatosEmpleadoPortal {
 
           <!-- Días reales del mes en filas semanales de 7 columnas -->
           @for (d of diasDelMes; track d.dia) {
-            @let celdaMia = portal.celdas[d.dia];
+            @let celdaMia = portal.celdas ? portal.celdas[d.dia] : undefined;
             @let cfgMio = obtenerConfigTurno(celdaMia?.codigo || '');
-            @let srvDia = obtenerServicioDiaPortal(celdaMia, portal.empleado.servicioBaseId);
+            @let srvDia = obtenerServicioDiaPortal(celdaMia, portal.empleado?.servicioBaseId);
             <div
               class="emp-day-card"
               [class.selected-day]="diaPermutaSeleccionado === d.dia"
@@ -283,7 +283,7 @@ export interface DatosEmpleadoPortal {
         <div class="panel-card">
           <div class="panel-header">
             <h3>🔄 Solicitar Cambio de Turno — Día {{ diaPermutaSeleccionado }}</h3>
-            <span class="badge-law">{{ portal.empleado.categoria }}</span>
+            <span class="badge-law">{{ portal.empleado?.categoria }}</span>
           </div>
 
           <!-- 1. BLOQUE DE PROPUESTAS RECIBIDAS (ACCIÓN REQUERIDA DEL COMPAÑERO RECEPTOR) -->
@@ -323,10 +323,10 @@ export interface DatosEmpleadoPortal {
 
           <p class="panel-desc" style="margin-top: 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
             <span>Tu turno el <strong>Día {{ diaPermutaSeleccionado }} de {{ nombreMesSeleccionado }}</strong>:</span>
-            @if (portal.celdas[diaPermutaSeleccionado].codigo) {
+            @if (portal.celdas?.[diaPermutaSeleccionado]?.codigo) {
               <span class="mini-shift">{{ portal.celdas[diaPermutaSeleccionado].codigo }}</span>
-              <span class="badge-srv-panel" [class.badge-srv-rot]="servicioDiaSeleccionado.esRotacion" [title]="servicioDiaSeleccionado.esRotacion ? 'Servicio de apoyo rotado' : 'Servicio base asignado'">
-                {{ servicioDiaSeleccionado.esRotacion ? '🔄 ' : '📍 ' }}{{ servicioDiaSeleccionado.nombre }}
+              <span class="badge-srv-panel" [class.badge-srv-rot]="servicioDiaSeleccionado?.esRotacion" [title]="servicioDiaSeleccionado?.esRotacion ? 'Servicio de apoyo rotado' : 'Servicio base asignado'">
+                {{ servicioDiaSeleccionado?.esRotacion ? '🔄 ' : '📍 ' }}{{ servicioDiaSeleccionado?.nombre }}
               </span>
             } @else {
               <span class="badge-srv-panel" style="background: #f1f5f9; color: #64748b; border: 1px dashed #cbd5e1;">Sin turno asignado</span>
@@ -339,14 +339,14 @@ export interface DatosEmpleadoPortal {
               <div style="background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px; padding: 12px; font-size: 13px; color: #64748b; line-height: 1.5;">
                 🔒 <strong>Permutas no disponibles:</strong> Solo se pueden tramitar solicitudes de intercambio de turnos cuando el cuadrante del mes se encuentra <strong>PUBLICADO</strong> oficialmente. Estado actual de {{ nombreMesSeleccionado }}: <em>{{ estadoCuadrante === 'BORRADOR' ? 'En Borrador' : (estadoCuadrante === 'CERRADO_NOMINA' ? 'Cerrado para Nómina' : 'Sin Planificar') }}</em>.
               </div>
-            } @else if (!portal.celdas[diaPermutaSeleccionado].codigo) {
+            } @else if (!portal.celdas?.[diaPermutaSeleccionado]?.codigo) {
               <div style="background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px; padding: 12px; font-size: 13px; color: #64748b;">
                 ℹ️ <strong>Día sin turno asignado:</strong> No tienes un turno programado en el Día {{ diaPermutaSeleccionado }}. Solo puedes permutar días en los que tengas un turno oficial asignado.
               </div>
             } @else if (companerosPares.length > 0) {
               <select [ngModel]="companeroPermutaId" (ngModelChange)="cambiarCompaneroPermuta.emit($event)" style="padding: 8px; border-radius: 6px; border: 1px solid #cbd5e1; font-weight: 600;">
                 @for (par of companerosPares; track par.id) {
-                  @let turnoPar = asignaciones[par.id][diaPermutaSeleccionado].codigo;
+                  @let turnoPar = asignaciones[par.id]?.[diaPermutaSeleccionado]?.codigo;
                   <option [value]="par.id">
                     {{ par.nombre }} — Turno {{ turnoPar ? '[' + turnoPar + ']' : '[Sin turno]' }} el Día {{ diaPermutaSeleccionado }}
                   </option>
@@ -399,7 +399,7 @@ export interface DatosEmpleadoPortal {
         <!-- ¿Quién está de turno conmigo ese día? -->
         <div class="panel-card">
           <div class="panel-header">
-            <h3>🏥 Compañeros de Turno — Día {{ diaPermutaSeleccionado }} ({{ servicioDiaSeleccionado.nombre }})</h3>
+            <h3>🏥 Compañeros de Turno — Día {{ diaPermutaSeleccionado }} ({{ servicioDiaSeleccionado?.nombre || 'Servicio' }})</h3>
           </div>
 
           <table class="data-table">

@@ -271,22 +271,6 @@ import {
       </div>
     </section>
 
-    <!-- BARRA DE ALERTAS EN VIVO -->
-    @if (infraccionesActivas.length > 0) {
-      <div class="alert-bar-violations">
-        <div class="alert-title">
-          ⚠️ <strong>{{ infraccionesActivas.length }} Alertas de descanso detectadas:</strong>
-        </div>
-        <div class="alert-list">
-          @for (inf of infraccionesActivas.slice(0, 4); track $index) {
-            <span class="violation-pill" (click)="enfocarCelda.emit({ empId: inf.empleadoId, dia: inf.dia })">
-              {{ inf.mensaje }}
-            </span>
-          }
-        </div>
-      </div>
-    }
-
     <!-- MATRIZ DEL CUADRANTE MENSUAL -->
     @if (clonandoConCtrl) {
       <div class="floating-clone-badge">
@@ -420,9 +404,6 @@ import {
                     }
                     @if (celda?.esRotacion) {
                       <span class="rotacion-mini-tag">🔄</span>
-                    }
-                    @if (conflicto) {
-                      <span class="conflict-indicator">!</span>
                     }
                     @if (cambioDiff) {
                       <span class="diff-triangle" title="Previsto original: {{ celda?.previsto || 'Vacío' }}"></span>
@@ -863,7 +844,7 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
       partes.push('Sin turno asignado');
     }
     if (conflicto) partes.push(`⚠️ ALERTA: ${conflicto.mensaje}`);
-    return partes.join(' | ');
+    return partes.join('\n');
   }
 
   obtenerMetasDiaServicio(

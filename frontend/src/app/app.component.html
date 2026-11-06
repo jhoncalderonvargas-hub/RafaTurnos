@@ -161,6 +161,22 @@
   }
 
   <!-- ======================================================================= -->
+  <!-- VISTA: AUDITORÍA Y TRAZABILIDAD MÉDICO-LEGAL                            -->
+  <!-- ======================================================================= -->
+  @if (vistaActual() === 'AUDITORIA') {
+    <app-auditoria-trazabilidad
+      [bitacoraAuditoria]="bitacoraAuditoria()"
+      [servicios]="servicios()"
+      [servicioActualId]="servicioSeleccionadoId()"
+      [esAdminTh]="esAdminTh()"
+      [esCoordinador]="esCoordinador()"
+      [sesionActual]="sesionActual()"
+      (refrescarBitacora)="sincronizarAuditoriasDesdePostgres($event || undefined)"
+      (filtrarServicio)="sincronizarAuditoriasDesdePostgres($event)"
+    />
+  }
+
+  <!-- ======================================================================= -->
   <!-- VISTA 3: MI CALENDARIO (PORTAL DEL COLABORADOR)                         -->
   <!-- ======================================================================= -->
   @if (vistaActual() === 'PORTAL_EMPLEADO') {
@@ -206,7 +222,7 @@
     <app-configuracion-general
       [subVistaConfig]="subVistaConfig()"
       [servicios]="servicios()"
-      [empleados]="empleados()"
+      [empleados]="empleadosConSaldoActualizado()"
       [totalCategoriasUnicas]="totalCategoriasUnicas()"
       [totalEnlacesApoyo]="totalEnlacesApoyo()"
       [servicioEditandoId]="servicioEditandoId()"

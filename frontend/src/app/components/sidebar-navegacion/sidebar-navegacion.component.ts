@@ -2,7 +2,7 @@ import { Component, EventEmitter, Input, Output, ViewEncapsulation } from '@angu
 import { CommonModule } from '@angular/common';
 import { RolUsuarioSso, SesionUsuarioSso } from '../../models';
 
-export type VistaApp = 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'PORTAL_EMPLEADO' | 'CONFIGURACION';
+export type VistaApp = 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'AUDITORIA' | 'PORTAL_EMPLEADO' | 'CONFIGURACION';
 
 @Component({
   selector: 'app-sidebar-navegacion',
@@ -56,10 +56,10 @@ export type VistaApp = 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'PORTAL_EMPLE
             class="side-item"
             [class.active]="vistaActual === 'DASHBOARD'"
             (click)="itemNavegacionClick.emit('DASHBOARD')"
-            title="Solicitudes y Historial">
+            title="Solicitudes de Permuta">
             <span class="side-icon">🔄</span>
             @if (!sidebarContraido) {
-              <span class="side-label">Solicitudes y Historial</span>
+              <span class="side-label">Solicitudes</span>
             }
             @if (notificacionesSolicitudesCount > 0) {
               <span class="pill-count">{{ notificacionesSolicitudesCount }}</span>
@@ -75,6 +75,17 @@ export type VistaApp = 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'PORTAL_EMPLE
               <span class="side-icon">📊</span>
               @if (!sidebarContraido) {
                 <span class="side-label">Reportes</span>
+              }
+            </button>
+
+            <button
+              class="side-item"
+              [class.active]="vistaActual === 'AUDITORIA'"
+              (click)="itemNavegacionClick.emit('AUDITORIA')"
+              title="Auditoría y Trazabilidad Médico-Legal">
+              <span class="side-icon">🛡️</span>
+              @if (!sidebarContraido) {
+                <span class="side-label">Auditoría</span>
               }
             </button>
           }

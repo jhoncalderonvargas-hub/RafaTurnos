@@ -41,6 +41,7 @@ import { ConfiguracionServiciosComponent } from './components/configuracion-serv
 import { ConfiguracionGeneralComponent } from './components/configuracion-general/configuracion-general.component';
 import { PlanificadorCuadranteComponent } from './components/planificador-cuadrante/planificador-cuadrante.component';
 import { SidebarNavegacionComponent } from './components/sidebar-navegacion/sidebar-navegacion.component';
+import { AuditoriaTrazabilidadComponent } from './components/auditoria-trazabilidad/auditoria-trazabilidad.component';
 
 export const NOMBRES_MESES: Record<number, string> = {
   1: 'Enero',
@@ -90,6 +91,7 @@ export const TODOS_LOS_MESES: Array<{ valor: number; nombre: string }> = [
     ConfiguracionGeneralComponent,
     PlanificadorCuadranteComponent,
     SidebarNavegacionComponent,
+    AuditoriaTrazabilidadComponent,
   ],
   templateUrl: './app.component.html',
   styleUrl: './app.component.css',
@@ -98,7 +100,7 @@ export const TODOS_LOS_MESES: Array<{ valor: number; nombre: string }> = [
 export class AppComponent implements OnInit {
   // Navegación principal (Menú lateral izquierdo colapsable automáticamente por hover)
   vistaActual = signal<
-    'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'PORTAL_EMPLEADO' | 'CONFIGURACION'
+    'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'AUDITORIA' | 'PORTAL_EMPLEADO' | 'CONFIGURACION'
   >('PLANIFICADOR');
   subVistaConfig = signal<'SERVICIOS' | 'CATALOGO_TURNOS' | 'FESTIVOS'>('SERVICIOS');
   subVistaReportes = signal<'PRE_NOMINA' | 'EQUIDAD' | 'BANCO_HORAS' | 'AUSENTISMO'>('PRE_NOMINA');
@@ -120,8 +122,10 @@ export class AppComponent implements OnInit {
     return this.estadosPorCuadrante()[key] || 'SIN_PLANIFICAR';
   });
   estadoCuadrantePortal = computed<'BORRADOR' | 'PUBLICADO' | 'CERRADO_NOMINA' | 'SIN_PLANIFICAR'>(() => {
-    const portal = this.datosEmpleadoPortal();
-    const srvId = portal.empleado?.servicioBaseId || this.servicioSeleccionadoId();
+    const empId = this.empleadoPortalId();
+    const sesion = this.sesionActual();
+    const emp = this.empleados().find((e) => e.id === empId);
+    const srvId = emp?.servicioBaseId || sesion?.servicioBaseId || this.servicioSeleccionadoId();
     const mes = this.mesSeleccionadoPortal();
     const key = `${srvId}::${this.anioSeleccionado()}-${mes}`;
     return this.estadosPorCuadrante()[key] || 'SIN_PLANIFICAR';
@@ -348,9 +352,10 @@ export class AppComponent implements OnInit {
 
   // El Portal del Colaborador únicamente muestra meses con programación PUBLICADA o CERRADA de su servicio
   mesesDisponiblesPortal = computed<Array<{ valor: number; nombre: string }>>(() => {
-    const portal = this.datosEmpleadoPortal();
-    const emp = portal.empleado;
-    const srvId = emp?.servicioBaseId || this.servicioSeleccionadoId();
+    const empId = this.empleadoPortalId();
+    const sesion = this.sesionActual();
+    const emp = this.empleados().find((e) => e.id === empId);
+    const srvId = emp?.servicioBaseId || sesion?.servicioBaseId || this.servicioSeleccionadoId();
     const anio = this.anioSeleccionado();
     const estados = this.estadosPorCuadrante();
 
@@ -691,9 +696,14 @@ export class AppComponent implements OnInit {
     this.guardarPermutasEnStorage(lista);
   }
 
-  sincronizarAuditoriasDesdePostgres(): void {
-    const srvId = this.servicioSeleccionadoId();
-    this.api.obtenerAuditorias(srvId).subscribe({
+  sincronizarAuditoriasDesdePostgres(filtroSrv?: string): void {
+    const srvId =
+      filtroSrv !== undefined
+        ? filtroSrv
+        : this.esAdminTh()
+          ? 'TODOS'
+          : this.servicioSeleccionadoId();
+    this.api.obtenerAuditorias(srvId, 250).subscribe({
       next: (logs) => {
         this.bitacoraAuditoria.set(logs || []);
         try {
@@ -1178,6 +1188,97 @@ export class AppComponent implements OnInit {
     return (codPrev || fallback) as CodigoTurno;
   }
 
+  // Mapa dinámico y continuo de Banco de Horas consolidado por empleado y periodo (empId::anio-mes)
+  // Calcula el saldo acumulado real encadenando mes a mes a partir de los turnos asignados en cada periodo.
+  // Garantiza que el 'Nuevo Banco' de un mes sea de forma exacta e infalible el 'Banco Ant.' del mes siguiente.
+  mapaSaldosContinuos = computed<Record<string, { saldoInicial: number; saldoFinal: number }>>(() => {
+    const emps = this.empleados();
+    const catalogo = this.catalogoTurnosMap();
+    const asignaciones = this.asignacionesPorPeriodo();
+    const saldosOficialesDb = this.saldosConsolidadosMap();
+    const estados = this.estadosPorCuadrante();
+    const anio = this.anioSeleccionado();
+
+    const mapa: Record<string, { saldoInicial: number; saldoFinal: number }> = {};
+
+    for (const emp of emps) {
+      let saldoAcumulado = 0;
+
+      // Si existe un saldo oficial cerrado de diciembre del año anterior, arrancar desde allí
+      const keyPrevAnio = `${emp.id}::${anio - 1}-12`;
+      if (saldosOficialesDb[keyPrevAnio] !== undefined) {
+        saldoAcumulado = saldosOficialesDb[keyPrevAnio];
+      }
+
+      for (let m = 1; m <= 12; m++) {
+        const periodoKey = `${anio}-${m}`;
+        const saldoKey = `${emp.id}::${periodoKey}`;
+        const celdasEmp = asignaciones[periodoKey]?.[emp.id];
+
+        let tieneTurnos = false;
+        let horasTrabajadas = 0;
+        let horasAmortizadasComp = 0;
+
+        if (celdasEmp) {
+          for (const celda of Object.values(celdasEmp)) {
+            if (celda && celda.codigo && celda.codigo !== '' && celda.codigo !== 'BLANCO') {
+              tieneTurnos = true;
+              const cfg = catalogo[celda.codigo];
+              if (cfg) {
+                horasTrabajadas += cfg.horasOrdinarias;
+                if (cfg.descuentaBancoHoras) {
+                  horasAmortizadasComp += 8;
+                }
+              }
+            }
+          }
+        }
+
+        const saldoInicialMes = saldoAcumulado;
+        let saldoFinalMes = saldoInicialMes;
+
+        if (tieneTurnos) {
+          const diferenciaMes = horasTrabajadas - emp.horasContratoMes - horasAmortizadasComp;
+          saldoFinalMes = saldoInicialMes + diferenciaMes;
+          saldoAcumulado = saldoFinalMes;
+        } else {
+          const estadoCuadrante = estados[`${emp.servicioBaseId}::${periodoKey}`];
+          if (estadoCuadrante === 'CERRADO_NOMINA' && saldosOficialesDb[saldoKey] !== undefined) {
+            saldoFinalMes = saldosOficialesDb[saldoKey];
+            saldoAcumulado = saldoFinalMes;
+          } else {
+            saldoFinalMes = saldoInicialMes;
+          }
+        }
+
+        mapa[saldoKey] = {
+          saldoInicial: saldoInicialMes,
+          saldoFinal: saldoFinalMes,
+        };
+      }
+    }
+
+    return mapa;
+  });
+
+  // Empleados enriquecidos con su saldo del Banco de Horas del mes actual (para Directorio de Servicios y perfiles)
+  empleadosConSaldoActualizado = computed<EmpleadoHospital[]>(() => {
+    const emps = this.empleados();
+    const mapa = this.mapaSaldosContinuos();
+    const anio = this.anioSeleccionado();
+    const mes = this.mesSeleccionado();
+
+    return emps.map((e) => {
+      const key = `${e.id}::${anio}-${mes}`;
+      const saldoObj = mapa[key];
+      const saldoReal = saldoObj !== undefined ? saldoObj.saldoInicial : e.saldoBancoAnterior;
+      return {
+        ...e,
+        saldoBancoAnterior: saldoReal,
+      };
+    });
+  });
+
   // Filas calculadas completas de todo el servicio (sin filtro visual de categoría), usadas para Cierre de Nómina y Exportación
   filasServicioCompletas = computed(() => {
     const dias = this.diasDelMes();
@@ -1187,9 +1288,13 @@ export class AppComponent implements OnInit {
     const saldos = this.saldosConsolidadosMap();
     const anio = this.anioSeleccionado();
     const mes = this.mesSeleccionado();
+    const mapaContinuo = this.mapaSaldosContinuos();
 
     return listaEmp.map(({ emp, esRotado }) => {
       const celdasEmp = matriz[emp.id] || {};
+      const keyPeriodo = `${emp.id}::${anio}-${mes}`;
+      const saldoCalculado = mapaContinuo[keyPeriodo]?.saldoInicial;
+
       const metricas = calcularMetricasMesColaborador(
         emp,
         celdasEmp,
@@ -1197,7 +1302,8 @@ export class AppComponent implements OnInit {
         catalogo,
         saldos,
         anio,
-        mes
+        mes,
+        saldoCalculado
       );
       const ultimoTurnoPrevReal = this.obtenerUltimoTurnoMesPrevio(
         emp.id,
@@ -1644,11 +1750,15 @@ export class AppComponent implements OnInit {
     const anio = this.anioSeleccionado();
     const mes = this.mesSeleccionado();
     const saldos = this.saldosConsolidadosMap();
+    const mapaContinuo = this.mapaSaldosContinuos();
 
     return filtrados.map((emp) => {
       const srvObj = mapaServicios.get(emp.servicioBaseId);
       const servicioNombre = srvObj ? srvObj.nombre : 'Servicio General';
       const celdasEmp = matriz[emp.id] || {};
+      const keyPeriodo = `${emp.id}::${anio}-${mes}`;
+      const saldoCalculado = mapaContinuo[keyPeriodo]?.saldoInicial;
+
       const metricas = calcularMetricasMesColaborador(
         emp,
         celdasEmp,
@@ -1656,7 +1766,8 @@ export class AppComponent implements OnInit {
         catalogo,
         saldos,
         anio,
-        mes
+        mes,
+        saldoCalculado
       );
 
       return {
@@ -1711,21 +1822,38 @@ export class AppComponent implements OnInit {
   // Datos para el Portal del Empleado
   datosEmpleadoPortal = computed(() => {
     const id = this.empleadoPortalId();
-    const emp = this.empleados().find((e) => e.id === id) || this.empleados()[0] || {
-      id: 'emp-001',
-      documento: '1010001001',
-      nombre: 'Personal Asistencial',
-      categoria: 'Personal Asistencial',
-      servicioBaseId: 'srv-urg',
-      horasContratoMes: 168,
-      saldoBancoAnterior: 0,
-      ultimoTurnoMesPrevio: 'L' as CodigoTurno,
-    };
+    const sesion = this.sesionActual();
+    const emp =
+      this.empleados().find((e) => e.id === id) ||
+      (sesion && (sesion.empleadoId === id || sesion.documento === id)
+        ? {
+            id: sesion.empleadoId,
+            documento: sesion.documento,
+            nombre: sesion.nombre,
+            categoria: sesion.categoria,
+            servicioBaseId: sesion.servicioBaseId,
+            horasContratoMes: 168,
+            saldoBancoAnterior: 0,
+            ultimoTurnoMesPrevio: 'L' as CodigoTurno,
+          }
+        : this.empleados()[0] || {
+            id: 'emp-001',
+            documento: '1010001001',
+            nombre: 'Personal Asistencial',
+            categoria: 'Personal Asistencial',
+            servicioBaseId: 'srv-urg',
+            horasContratoMes: 168,
+            saldoBancoAnterior: 0,
+            ultimoTurnoMesPrevio: 'L' as CodigoTurno,
+          });
 
     const anio = this.anioSeleccionado();
     const mes = this.mesSeleccionadoPortal();
     const dias = this.diasDelMesPortal();
     const celdasEmp = this.asignacionesMesPortal()[emp.id] || {};
+    const keyPeriodo = `${emp.id}::${anio}-${mes}`;
+    const saldoCalculado = this.mapaSaldosContinuos()[keyPeriodo]?.saldoInicial;
+
     const metricas = calcularMetricasMesColaborador(
       emp,
       celdasEmp,
@@ -1733,7 +1861,8 @@ export class AppComponent implements OnInit {
       this.catalogoTurnosMap(),
       this.saldosConsolidadosMap(),
       anio,
-      mes
+      mes,
+      saldoCalculado
     );
     const servicioBase = this.servicios().find((s) => s.id === emp.servicioBaseId) || this.servicioActual();
     const empConSaldo = { ...emp, saldoBancoAnterior: metricas.saldoAntReal };
@@ -1769,8 +1898,8 @@ export class AppComponent implements OnInit {
   servicioDiaSeleccionadoPortal = computed<{ id: string; nombre: string; esRotacion: boolean }>(() => {
     const portal = this.datosEmpleadoPortal();
     const dia = this.diaPermutaSeleccionado();
-    const celda = portal.celdas[dia];
-    const srvBaseId = portal.empleado.servicioBaseId;
+    const celda = portal.celdas?.[dia];
+    const srvBaseId = portal.empleado?.servicioBaseId || this.servicioSeleccionadoId();
     const srvEjeId = celda?.servicioEjecutorId || srvBaseId;
     const srv = this.servicios().find((s) => s.id === srvEjeId) || portal.servicioBase;
     const esRotacion = Boolean(
@@ -1784,7 +1913,19 @@ export class AppComponent implements OnInit {
   });
 
   companerosParesPortal = computed<EmpleadoHospital[]>(() => {
-    const actual = this.datosEmpleadoPortal().empleado;
+    const empId = this.empleadoPortalId();
+    const sesion = this.sesionActual();
+    const actual =
+      this.empleados().find((e) => e.id === empId) ||
+      (sesion && (sesion.empleadoId === empId || sesion.documento === empId)
+        ? {
+            id: sesion.empleadoId,
+            servicioBaseId: sesion.servicioBaseId,
+            categoria: sesion.categoria,
+          }
+        : null);
+    if (!actual) return [];
+
     return this.empleados().filter(
       (e) =>
         e.id !== actual.id &&
@@ -4148,9 +4289,9 @@ export class AppComponent implements OnInit {
   }
 
   onItemNavegacionClick(
-    vista: 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'PORTAL_EMPLEADO' | 'CONFIGURACION'
+    vista: 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'AUDITORIA' | 'PORTAL_EMPLEADO' | 'CONFIGURACION'
   ): void {
-    if (this.esColaborador() && (vista === 'PLANIFICADOR' || vista === 'REPORTES' || vista === 'CONFIGURACION')) {
+    if (this.esColaborador() && (vista === 'PLANIFICADOR' || vista === 'REPORTES' || vista === 'CONFIGURACION' || vista === 'AUDITORIA')) {
       this.mostrarNotificacion('Acceso restringido: tu perfil de Colaborador solo tiene acceso a Mi Calendario y Solicitudes.');
       return;
     }
@@ -4159,7 +4300,7 @@ export class AppComponent implements OnInit {
       return;
     }
     this.vistaActual.set(vista);
-    if (vista === 'DASHBOARD') {
+    if (vista === 'DASHBOARD' || vista === 'AUDITORIA') {
       this.sincronizarAuditoriasDesdePostgres();
       this.sincronizarPermutasDesdePostgres();
     }
@@ -4373,7 +4514,7 @@ export class AppComponent implements OnInit {
 
     // Consolidar siempre la totalidad del personal de planta del servicio (ignorando cualquier filtro visual de categoría)
     const saldosConsolidados =
-      nuevoEstado === 'CERRADO_NOMINA'
+      nuevoEstado === 'CERRADO_NOMINA' || nuevoEstado === 'PUBLICADO'
         ? this.filasServicioCompletas()
             .filter((f) => !f.esPersonalRotado)
             .map((f) => ({
@@ -4421,6 +4562,10 @@ export class AppComponent implements OnInit {
       return;
     }
     this.empleadoPortalId.set(nuevoId);
+    const emp = this.empleados().find((e) => e.id === nuevoId);
+    if (emp) {
+      this.servicioSeleccionadoId.set(emp.servicioBaseId);
+    }
     const pares = this.companerosParesPortal();
     this.companeroPermutaId.set(pares.length > 0 ? pares[0].id : '');
   }
@@ -4699,7 +4844,7 @@ export class AppComponent implements OnInit {
       partes.push('Sin turno asignado');
     }
     if (conflicto) partes.push(`⚠️ ALERTA: ${conflicto.mensaje}`);
-    return partes.join(' | ');
+    return partes.join('\n');
   }
 
   private mostrarNotificacion(msg: string): void {

@@ -122,12 +122,18 @@ export interface PermutaItem {
 export interface RegistroAuditoria {
   id: string;
   timestamp: string;
+  timestampIso?: string;
   actor: string;
+  tipoAccion?: 'EDICION_TURNO' | 'PERMUTA' | 'ESTADO_CUADRANTE' | 'ACCION_MASIVA' | string;
+  empleadoId?: string;
   empleadoNombre: string;
+  empleadoDocumento?: string;
+  servicioId?: string;
   servicioNombre: string;
   dia: number;
-  turnoAnterior: CodigoTurno;
-  turnoNuevo: CodigoTurno;
+  fechaIso?: string;
+  turnoAnterior: CodigoTurno | string;
+  turnoNuevo: CodigoTurno | string;
   motivo: string;
 }
 

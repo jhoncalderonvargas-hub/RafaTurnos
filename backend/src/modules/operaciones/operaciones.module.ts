@@ -197,7 +197,7 @@ export class PermutasController {
    *  4. Registra la auditoría de ambos cambios y marca la solicitud como APROBADA.
    */
   @Patch(':id/aprobar')
-  async aprobarPermuta(@Param('id') id: string) {
+  async aprobarPermuta(@Param('id') id: string, @Req() req?: any) {
     const permuta = await this.prisma.solicitudPermuta.findUnique({
       where: { id },
       include: { solicitante: true, receptor: true },
@@ -281,22 +281,32 @@ export class PermutasController {
       const nuevaSolicitante = await aplicar(permuta.solicitanteId, fechaOrigen, tipoParaSolicitante, actualSolicitante);
       const nuevaReceptor = await aplicar(permuta.receptorId, fechaDestino, tipoParaReceptor, actualReceptor);
 
-      // 4. Auditoría y cierre de la solicitud
+      const actorNombre = req?.usuarioSso?.nombre
+        ? `${req.usuarioSso.nombre} (${req.usuarioSso.rol === 'ADMIN_TH' ? 'Talento Humano' : 'Coordinador'})`
+        : 'Coordinación Asistencial';
+
+      // 4. Auditoría y cierre de la solicitud (Registro limpio sin UUIDs ilegibles)
       await tx.auditoriaCambio.createMany({
         data: [
           {
             asignacionTurnoId: nuevaSolicitante.id,
-            actorId: 'SUPERVISOR',
+            servicioId: permuta.servicioId,
+            empleadoId: permuta.solicitanteId,
+            actorId: actorNombre,
+            tipoAccion: 'PERMUTA',
             turnoAnterior: actualSolicitante,
             turnoNuevo: normalizarCodigo(permuta.turnoDestino),
-            justificacion: `Permuta ${permuta.id} aprobada con ${permuta.receptor.nombre}`,
+            justificacion: `Permuta aprobada con ${permuta.receptor.nombre} (Día ${permuta.diaOrigen}: [${permuta.turnoOrigen}] ⇄ Día ${permuta.diaDestino}: [${permuta.turnoDestino}])`,
           },
           {
             asignacionTurnoId: nuevaReceptor.id,
-            actorId: 'SUPERVISOR',
+            servicioId: permuta.servicioId,
+            empleadoId: permuta.receptorId,
+            actorId: actorNombre,
+            tipoAccion: 'PERMUTA',
             turnoAnterior: actualReceptor,
             turnoNuevo: normalizarCodigo(permuta.turnoOrigen),
-            justificacion: `Permuta ${permuta.id} aprobada con ${permuta.solicitante.nombre}`,
+            justificacion: `Permuta aprobada con ${permuta.solicitante.nombre} (Día ${permuta.diaDestino}: [${permuta.turnoDestino}] ⇄ Día ${permuta.diaOrigen}: [${permuta.turnoOrigen}])`,
           },
         ],
       });
@@ -811,6 +821,9 @@ export class AuditoriasController {
   async listarAuditorias(
     @Query('servicioId') servicioId?: string,
     @Query('empleadoId') empleadoId?: string,
+    @Query('tipoAccion') tipoAccion?: string,
+    @Query('fechaInicio') fechaInicio?: string,
+    @Query('fechaFin') fechaFin?: string,
     @Query('limite') limiteQuery?: string,
     @Query('page') pageQuery?: string,
     @Req() req?: any,
@@ -819,56 +832,83 @@ export class AuditoriasController {
     const esColaborador = usuarioSso?.rol === 'COLABORADOR';
     const esCoordinador = usuarioSso?.rol === 'COORDINADOR';
 
-    const whereClause: any = {};
+    const andConditions: any[] = [];
 
     // 1. Regla de Privacidad: COLABORADOR solo ve sus propios movimientos
     if (esColaborador && (usuarioSso?.empleadoId || usuarioSso?.documento)) {
-      whereClause.asignacionTurno = {
+      andConditions.push({
         OR: [
-          ...(usuarioSso?.empleadoId ? [{ empleadoId: usuarioSso.empleadoId }] : []),
-          ...(usuarioSso?.documento ? [{ empleado: { documento: String(usuarioSso.documento) } }] : []),
+          ...(usuarioSso?.empleadoId
+            ? [{ empleadoId: usuarioSso.empleadoId }, { asignacionTurno: { empleadoId: usuarioSso.empleadoId } }]
+            : []),
+          ...(usuarioSso?.documento
+            ? [
+                { empleado: { documento: String(usuarioSso.documento) } },
+                { asignacionTurno: { empleado: { documento: String(usuarioSso.documento) } } },
+              ]
+            : []),
         ],
-      };
-    } else if (empleadoId) {
-      whereClause.asignacionTurno = {
-        OR: [{ empleadoId }, { empleado: { documento: empleadoId } }],
-      };
+      });
+    } else if (empleadoId && empleadoId !== 'TODOS') {
+      andConditions.push({
+        OR: [
+          { empleadoId },
+          { empleado: { documento: empleadoId } },
+          { asignacionTurno: { empleadoId } },
+          { asignacionTurno: { empleado: { documento: empleadoId } } },
+        ],
+      });
     }
 
-    // 2. Filtro por servicio:
+    // 2. Filtro por servicio
     if (esCoordinador && Array.isArray(usuarioSso?.serviciosCoordinados) && usuarioSso.serviciosCoordinados.length > 0) {
       const permitidos = usuarioSso.serviciosCoordinados;
-      if (servicioId && permitidos.includes(servicioId)) {
-        whereClause.asignacionTurno = {
-          ...(whereClause.asignacionTurno || {}),
-          servicioEjecutorId: servicioId,
-        };
+      if (servicioId && permitidos.includes(servicioId) && servicioId !== 'TODOS') {
+        andConditions.push({
+          OR: [{ servicioId }, { asignacionTurno: { servicioEjecutorId: servicioId } }],
+        });
       } else {
-        whereClause.asignacionTurno = {
-          ...(whereClause.asignacionTurno || {}),
-          servicioEjecutorId: { in: permitidos },
-        };
+        andConditions.push({
+          OR: [
+            { servicioId: { in: permitidos } },
+            { asignacionTurno: { servicioEjecutorId: { in: permitidos } } },
+          ],
+        });
       }
     } else if (servicioId && servicioId !== 'TODOS') {
-      whereClause.asignacionTurno = {
-        ...(whereClause.asignacionTurno || {}),
-        servicioEjecutorId: servicioId,
-      };
+      andConditions.push({
+        OR: [{ servicioId }, { asignacionTurno: { servicioEjecutorId: servicioId } }],
+      });
     }
 
-    const limite = Math.min(Math.max(Number(limiteQuery) || 50, 1), 200);
+    // 3. Filtro por tipo de acción
+    if (tipoAccion && tipoAccion !== 'TODAS') {
+      andConditions.push({ tipoAccion });
+    }
+
+    // 4. Filtro por rango de fechas
+    if (fechaInicio || fechaFin) {
+      const tsFilter: any = {};
+      if (fechaInicio) tsFilter.gte = new Date(`${fechaInicio}T00:00:00.000Z`);
+      if (fechaFin) tsFilter.lte = new Date(`${fechaFin}T23:59:59.999Z`);
+      andConditions.push({ timestamp: tsFilter });
+    }
+
+    const whereClause: any = andConditions.length > 0 ? { AND: andConditions } : {};
+
+    const limite = Math.min(Math.max(Number(limiteQuery) || 100, 1), 500);
     const page = Math.max(Number(pageQuery) || 1, 1);
     const skip = (page - 1) * limite;
 
     const logs = await this.prisma.auditoriaCambio.findMany({
       where: whereClause,
-      select: {
-        id: true,
-        timestamp: true,
-        actorId: true,
-        turnoAnterior: true,
-        turnoNuevo: true,
-        justificacion: true,
+      include: {
+        servicio: {
+          select: { id: true, nombre: true, codigo: true },
+        },
+        empleado: {
+          select: { id: true, nombre: true, documento: true },
+        },
         asignacionTurno: {
           select: {
             empleadoId: true,
@@ -876,13 +916,16 @@ export class AuditoriasController {
             servicioEjecutorId: true,
             empleado: {
               select: {
+                id: true,
                 nombre: true,
                 documento: true,
               },
             },
             servicioEjecutor: {
               select: {
+                id: true,
                 nombre: true,
+                codigo: true,
               },
             },
           },
@@ -904,17 +947,46 @@ export class AuditoriasController {
         ' ' +
         tsDate.toLocaleTimeString('es-CO', { timeZone: 'America/Bogota', hour12: true });
 
+      // Limpieza infalible de UUIDs residuales en motivos de permuta
+      const motivoLimpio = (log.justificacion || 'Modificación registrada')
+        .replace(/Permuta [0-9a-fA-F\-]{36} aprobada con /g, 'Permuta aprobada con ');
+
+      const empNombre =
+        log.empleado?.nombre ||
+        log.asignacionTurno?.empleado?.nombre ||
+        (log.tipoAccion === 'ESTADO_CUADRANTE' ? 'Todo el Personal del Servicio' : 'Colaborador');
+
+      const empDoc =
+        log.empleado?.documento ||
+        log.asignacionTurno?.empleado?.documento ||
+        '';
+
+      const srvNombre =
+        log.servicio?.nombre ||
+        log.asignacionTurno?.servicioEjecutor?.nombre ||
+        'Servicio Asistencial';
+
+      const srvId =
+        log.servicioId ||
+        log.asignacionTurno?.servicioEjecutorId ||
+        '';
+
       return {
         id: log.id,
         timestamp: timestampFormateado,
-        actor: log.actorId || 'Supervisión',
-        empleadoId: log.asignacionTurno?.empleadoId,
-        empleadoNombre: log.asignacionTurno?.empleado?.nombre || 'Colaborador',
-        servicioNombre: log.asignacionTurno?.servicioEjecutor?.nombre || 'Servicio Asistencial',
+        timestampIso: log.timestamp.toISOString(),
+        actor: log.actorId || 'Supervisión Asistencial',
+        tipoAccion: log.tipoAccion || 'EDICION_TURNO',
+        empleadoId: log.empleadoId || log.asignacionTurno?.empleadoId,
+        empleadoNombre: empNombre,
+        empleadoDocumento: empDoc,
+        servicioId: srvId,
+        servicioNombre: srvNombre,
         dia,
-        turnoAnterior: log.turnoAnterior,
-        turnoNuevo: log.turnoNuevo,
-        motivo: log.justificacion || 'Modificación registrada',
+        fechaIso: fechaUtc ? fechaUtc.toISOString().slice(0, 10) : undefined,
+        turnoAnterior: log.turnoAnterior || '—',
+        turnoNuevo: log.turnoNuevo || '—',
+        motivo: motivoLimpio,
       };
     });
   }

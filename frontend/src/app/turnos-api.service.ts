@@ -333,10 +333,29 @@ export class TurnosApiService {
   }
 
   // 8. Bitácora forense de auditoría médico-legal (PostgreSQL)
-  obtenerAuditorias(servicioId?: string, limite = 50): Observable<RegistroAuditoria[]> {
+  obtenerAuditorias(
+    servicioId?: string,
+    limite = 150,
+    tipoAccion?: string,
+    fechaInicio?: string,
+    fechaFin?: string,
+    empleadoId?: string,
+  ): Observable<RegistroAuditoria[]> {
     let url = `${this.baseUrl}/auditorias?limite=${limite}`;
     if (servicioId && servicioId !== 'TODOS') {
       url += `&servicioId=${encodeURIComponent(servicioId)}`;
+    }
+    if (tipoAccion && tipoAccion !== 'TODAS') {
+      url += `&tipoAccion=${encodeURIComponent(tipoAccion)}`;
+    }
+    if (fechaInicio) {
+      url += `&fechaInicio=${encodeURIComponent(fechaInicio)}`;
+    }
+    if (fechaFin) {
+      url += `&fechaFin=${encodeURIComponent(fechaFin)}`;
+    }
+    if (empleadoId && empleadoId !== 'TODOS') {
+      url += `&empleadoId=${encodeURIComponent(empleadoId)}`;
     }
     return this.http.get<RegistroAuditoria[]>(url);
   }

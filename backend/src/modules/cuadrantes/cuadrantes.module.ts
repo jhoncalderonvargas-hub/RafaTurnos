@@ -298,8 +298,23 @@ export class CuadrantesController {
    * y si pasa a CERRADO_NOMINA, consolida los saldos en banco_horas_saldos.
    */
   @Put('estado')
-  async actualizarEstadoCuadrante(@Body() dto: ActualizarEstadoCuadranteDto) {
+  async actualizarEstadoCuadrante(
+    @Body() dto: ActualizarEstadoCuadranteDto,
+    @Req() req?: any,
+  ) {
     const estadoEnum = dto.estado as EstadoCuadrante;
+
+    const cuadrantePrevio = await this.prisma.cuadrante.findUnique({
+      where: {
+        anio_mes_servicioId: {
+          anio: Number(dto.anio),
+          mes: Number(dto.mes),
+          servicioId: dto.servicioId,
+        },
+      },
+      select: { estado: true },
+    });
+    const estadoAnterior = cuadrantePrevio?.estado || 'SIN_PLANIFICAR';
 
     const cuadrante = await this.prisma.cuadrante.upsert({
       where: {
@@ -320,6 +335,39 @@ export class CuadrantesController {
       },
     });
 
+    // Auditoría de Cambio de Estado Oficial del Cuadrante (Publicación / Cierre Nómina / Reapertura)
+    if (estadoAnterior !== estadoEnum) {
+      const srv = await this.prisma.servicio.findUnique({ where: { id: dto.servicioId } });
+      const srvNombre = srv?.nombre || dto.servicioId;
+      const usuario = req?.usuarioSso;
+      const actor = usuario?.nombre
+        ? `${usuario.nombre} (${usuario.rol === 'ADMIN_TH' ? 'Talento Humano' : 'Coordinador'})`
+        : 'Supervisión Asistencial / Nómina';
+
+      const mesesNombres = ['', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+      const mesNom = mesesNombres[Number(dto.mes)] || String(dto.mes);
+
+      let accionDetalle = `Cambio oficial de estado: ${estadoAnterior} → ${estadoEnum}`;
+      if (estadoEnum === 'PUBLICADO') {
+        accionDetalle = `Publicación oficial del cuadrante de ${mesNom} ${dto.anio} (${srvNombre})`;
+      } else if (estadoEnum === 'CERRADO_NOMINA') {
+        accionDetalle = `Cierre para Nómina y consolidación de horas de ${mesNom} ${dto.anio} (${srvNombre})`;
+      } else if (estadoEnum === 'BORRADOR') {
+        accionDetalle = `Reapertura a Borrador de ${mesNom} ${dto.anio} (${srvNombre})`;
+      }
+
+      await this.prisma.auditoriaCambio.create({
+        data: {
+          servicioId: dto.servicioId,
+          actorId: actor,
+          tipoAccion: 'ESTADO_CUADRANTE',
+          turnoAnterior: estadoAnterior,
+          turnoNuevo: estadoEnum,
+          justificacion: accionDetalle,
+        },
+      });
+    }
+
     // Al publicar el cuadrante, congelar la foto oficial del Turno Previsto (codigoPrevisto = turno actual)
     if (dto.estado === 'PUBLICADO') {
       await this.prisma.$executeRaw`
@@ -332,7 +380,7 @@ export class CuadrantesController {
     }
 
     if (
-      dto.estado === 'CERRADO_NOMINA' &&
+      (dto.estado === 'CERRADO_NOMINA' || dto.estado === 'PUBLICADO') &&
       Array.isArray(dto.saldosConsolidados) &&
       dto.saldosConsolidados.length > 0
     ) {
@@ -473,17 +521,20 @@ export class CuadrantesController {
       codigoAnterior !== codigoNuevo
     ) {
       const actor = req?.usuarioSso?.nombre
-        ? `${req.usuarioSso.nombre} (Supervisor)`
-        : 'SUPERVISOR';
+        ? `${req.usuarioSso.nombre} (${req.usuarioSso.rol === 'ADMIN_TH' ? 'Talento Humano' : 'Coordinador'})`
+        : 'Supervisión Asistencial';
       await this.prisma.auditoriaCambio.create({
         data: {
           asignacionTurnoId: asignacion.id,
+          servicioId: dto.servicioId,
+          empleadoId: dto.empleadoId,
           actorId: actor,
+          tipoAccion: 'EDICION_TURNO',
           turnoAnterior: codigoAnterior,
           turnoNuevo: codigoNuevo,
           justificacion:
             dto.justificacion ||
-            'Modificación manual de turno sobre cuadrante publicado',
+            `Modificación manual de turno (Día ${dto.dia}: [${codigoAnterior}] → [${codigoNuevo}]) sobre cuadrante publicado`,
         },
       });
     }
@@ -496,7 +547,10 @@ export class CuadrantesController {
    * Respeta y protege de forma estricta las celdas con novedades oficiales de Intranet.
    */
   @Put('lote')
-  async guardarLote(@Body() dto: GuardarLoteCuadranteDto) {
+  async guardarLote(
+    @Body() dto: GuardarLoteCuadranteDto,
+    @Req() req?: any,
+  ) {
     const anio = Number(dto.anio);
     const mes = Number(dto.mes);
 
@@ -590,6 +644,22 @@ export class CuadrantesController {
         });
       })
     );
+
+    if (cuadrante.estado === EstadoCuadrante.PUBLICADO && celdasFiltradas.length > 0) {
+      const actor = req?.usuarioSso?.nombre
+        ? `${req.usuarioSso.nombre} (${req.usuarioSso.rol === 'ADMIN_TH' ? 'Talento Humano' : 'Coordinador'})`
+        : 'Supervisión Asistencial';
+      await this.prisma.auditoriaCambio.create({
+        data: {
+          servicioId: dto.servicioId,
+          actorId: actor,
+          tipoAccion: 'ACCION_MASIVA',
+          turnoAnterior: 'LOTE',
+          turnoNuevo: 'LOTE',
+          justificacion: `Ajuste en bloque sobre cuadrante publicado: ${celdasFiltradas.length} turnos actualizados en ${mes}/${anio}`,
+        },
+      });
+    }
 
     return { ok: true, totalGuardadas: celdasFiltradas.length };
   }

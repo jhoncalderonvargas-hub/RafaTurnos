@@ -50,6 +50,7 @@ model Servicio {
   coberturas             RequerimientoCobertura[]
   turnosHabilitados      ServicioTurnoHabilitado[]
   permutas               SolicitudPermuta[]
+  auditorias             AuditoriaCambio[]        @relation("AuditoriasServicio")
 
   // Relación de Servicios Hermanos (Afinidad clínica para rotación)
   serviciosHermanosOrigen ServicioHermano[]       @relation("ServicioOrigen")
@@ -111,6 +112,7 @@ model Empleado {
   tokensCalendario    TokenCalendario[]
   permutasSolicitadas SolicitudPermuta[]   @relation("PermutasSolicitadas")
   permutasRecibidas   SolicitudPermuta[]   @relation("PermutasRecibidas")
+  auditorias          AuditoriaCambio[]    @relation("AuditoriasEmpleado")
 
   @@index([servicioBaseId])
   @@index([categoriaId])
@@ -247,17 +249,25 @@ model NovedadAusencia {
 }
 
 model AuditoriaCambio {
-  id                String          @id @default(uuid())
-  asignacionTurnoId String
-  asignacionTurno   AsignacionTurno @relation(fields: [asignacionTurnoId], references: [id])
+  id                String           @id @default(uuid())
+  asignacionTurnoId String?
+  asignacionTurno   AsignacionTurno? @relation(fields: [asignacionTurnoId], references: [id], onDelete: SetNull)
+  servicioId        String?
+  servicio          Servicio?        @relation("AuditoriasServicio", fields: [servicioId], references: [id], onDelete: SetNull)
+  empleadoId        String?
+  empleado          Empleado?        @relation("AuditoriasEmpleado", fields: [empleadoId], references: [id], onDelete: SetNull)
   actorId           String
   ipAddress         String?
-  turnoAnterior     String
-  turnoNuevo        String
+  tipoAccion        String           @default("EDICION_TURNO")
+  turnoAnterior     String?
+  turnoNuevo        String?
   justificacion     String
-  timestamp         DateTime        @default(now())
+  timestamp         DateTime         @default(now())
 
   @@index([asignacionTurnoId])
+  @@index([servicioId])
+  @@index([empleadoId])
+  @@index([tipoAccion])
   @@index([timestamp])
   @@map("auditorias_cambio")
 }
