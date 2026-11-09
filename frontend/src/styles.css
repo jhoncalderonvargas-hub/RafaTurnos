@@ -1,20 +1,22 @@
 :root {
-  --bg-app: #f1f5f9;
+  --bg-app: #f8fafc;
   --bg-card: #ffffff;
   --border-subtle: #e2e8f0;
   --border-strong: #cbd5e1;
   --text-main: #0f172a;
   --text-muted: #475569;
   --text-light: #64748b;
-  --primary: #0284c7;
-  --primary-dark: #0369a1;
-  --primary-light: #e0f2fe;
+  --primary: #7c3aed;
+  --primary-dark: #6d28d9;
+  --primary-light: #ede9fe;
   --success: #16a34a;
   --success-bg: #dcfce7;
   --warning: #d97706;
   --warning-bg: #fef3c7;
   --danger: #dc2626;
   --danger-bg: #fee2e2;
+  --brand-yolombo-green: #a5cb3c;
+  --brand-yolombo-blue: #1a91c5;
 }
 
 * {

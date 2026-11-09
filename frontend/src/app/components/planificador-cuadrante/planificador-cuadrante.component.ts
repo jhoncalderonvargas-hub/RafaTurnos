@@ -132,6 +132,16 @@ import {
           📊 Excel
         </button>
 
+        @if (!esCoordinador && estadoCuadrante === 'PUBLICADO') {
+          <button
+            class="btn-tool"
+            style="border-color: #fcd34d; background: #fffbeb; color: #92400e; font-weight: 700;"
+            (click)="revertirABorrador.emit()"
+            title="Devolver este cuadrante a estado Borrador (Exclusivo Talento Humano)">
+            ↩️ A Borrador
+          </button>
+        }
+
         <button
           class="btn-cta-primary"
           [attr.data-estado]="estadoCuadrante"
@@ -601,6 +611,7 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
   @Output() rehacerUltimaAccion = new EventEmitter<void>();
   @Output() limpiarCuadranteCompleto = new EventEmitter<void>();
   @Output() cambiarEstadoCuadrante = new EventEmitter<void>();
+  @Output() revertirABorrador = new EventEmitter<void>();
   @Output() exportarExcelNomina = new EventEmitter<void>();
   @Output() seleccionarPincel = new EventEmitter<string>();
   @Output() dragStartPaleta = new EventEmitter<{ codigo: string; event: DragEvent }>();

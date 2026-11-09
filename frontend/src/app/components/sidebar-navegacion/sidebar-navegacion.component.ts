@@ -19,11 +19,13 @@ export type VistaApp = 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'AUDITORIA' |
         (mouseenter)="sidebarMouseEnter.emit()"
         (mouseleave)="sidebarMouseLeave.emit()">
         <div class="side-brand">
-          <div class="logo-badge" (click)="alternarFijarSidebar.emit()" title="Fijar / liberar menú">🏥</div>
+          <div class="logo-badge" (click)="alternarFijarSidebar.emit()" title="ESE Hospital San Rafael Yolombó">
+            <img src="assets/logo-hospital-yolombo.jpg" alt="Logo Hospital San Rafael Yolombó" class="logo-yolombo-img" />
+          </div>
           @if (!sidebarContraido) {
             <div class="brand-text">
-              <div class="app-title">RAFA TURNOS</div>
-              <div class="app-subtitle">Gestión de Turnos</div>
+              <div class="app-title">HOSPITAL SAN RAFAEL</div>
+              <div class="app-subtitle">YOLOMBÓ <span class="badge-sello-vida">• Turnos</span></div>
             </div>
           }
           <button

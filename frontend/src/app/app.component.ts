@@ -4546,7 +4546,50 @@ export class AppComponent implements OnInit {
         estado: nuevoEstado,
         saldosConsolidados,
       })
-      .subscribe();
+      .subscribe({
+        next: () => this.sincronizarAuditoriasDesdePostgres(),
+      });
+  }
+
+  revertirCuadranteABorrador(): void {
+    if (!this.esAdminTh()) {
+      this.mostrarNotificacion('Solo Talento Humano puede devolver un cuadrante publicado a estado Borrador.');
+      return;
+    }
+    if (this.estadoCuadrante() !== 'PUBLICADO') {
+      return;
+    }
+
+    const srvId = this.servicioSeleccionadoId();
+    const anio = this.anioSeleccionado();
+    const mes = this.mesSeleccionado();
+    const key = `${srvId}::${anio}-${mes}`;
+    const mesNombre =
+      this.mesesDisponibles().find((m) => m.valor === mes)?.nombre || String(mes);
+    const srvNombre = this.servicioActual().nombre;
+
+    this.abrirConfirmacion({
+      titulo: '↩️ Devolver Cuadrante a Borrador',
+      mensaje: `¿Seguro que deseas devolver el cuadrante de "${srvNombre}" (${mesNombre} ${anio}) a estado BORRADOR?\n\nMientras esté en Borrador, los cambios realizados no generarán registros individuales de auditoría post-publicación, pero esta reapertura quedará registrada en la bitácora oficial.`,
+      textoBotonConfirmar: 'Sí, Volver a Borrador',
+      esPeligroso: false,
+      onConfirmar: () => {
+        this.estadosPorCuadrante.update((m) => ({ ...m, [key]: 'BORRADOR' }));
+        this.mostrarNotificacion(
+          `Cuadro de turnos de ${srvNombre} (${mesNombre} ${anio}) devuelto a Borrador.`
+        );
+        this.api
+          .actualizarEstadoCuadrante({
+            servicioId: srvId,
+            anio,
+            mes,
+            estado: 'BORRADOR',
+          })
+          .subscribe({
+            next: () => this.sincronizarAuditoriasDesdePostgres(),
+          });
+      },
+    });
   }
 
   seleccionarDiaEnPortal(dia: number): void {

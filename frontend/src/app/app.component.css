@@ -42,13 +42,13 @@ app-modal-rotacion {
 
 .side-nav {
   width: 62px;
-  background: #0f172a;
+  background: linear-gradient(165deg, #4a2096 0%, #351570 55%, #250d52 100%);
   color: #ffffff;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  border-right: 1px solid #1e293b;
-  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.12);
+  border-right: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 4px 0 24px rgba(25, 7, 56, 0.32);
   z-index: 50;
   transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s ease, border-color 0.2s ease;
   position: sticky;
@@ -61,8 +61,8 @@ app-modal-rotacion {
 
 .side-nav.is-floating {
   width: 230px;
-  box-shadow: 8px 0 28px rgba(0, 0, 0, 0.45);
-  border-right: 1px solid #334155;
+  box-shadow: 8px 0 32px rgba(20, 5, 45, 0.6);
+  border-right: 1px solid rgba(255, 255, 255, 0.18);
   z-index: 50;
 }
 
@@ -77,12 +77,13 @@ app-modal-rotacion {
 }
 
 .side-brand {
-  padding: 12px 10px;
+  padding: 11px 8px 11px 9px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  border-bottom: 1px solid #1e293b;
+  gap: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .side-nav.collapsed .side-brand {
@@ -94,43 +95,78 @@ app-modal-rotacion {
 .brand-text {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
+  padding-right: 2px;
 }
 
 .logo-badge {
-  font-size: 20px;
-  background: #1e293b;
-  width: 36px;
-  height: 36px;
-  border-radius: 9px;
+  width: 35px;
+  height: 35px;
+  border-radius: 50%;
+  background: #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid #334155;
+  border: 2px solid rgba(255, 255, 255, 0.7);
+  box-shadow: 0 0 12px rgba(165, 203, 60, 0.4), 0 2px 6px rgba(0, 0, 0, 0.25);
   cursor: pointer;
   flex-shrink: 0;
+  overflow: hidden;
+  padding: 1px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.logo-badge:hover {
+  transform: scale(1.06);
+  box-shadow: 0 0 16px rgba(165, 203, 60, 0.6), 0 3px 10px rgba(0, 0, 0, 0.35);
+}
+
+.logo-yolombo-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 50%;
+  display: block;
 }
 
 .app-title {
-  font-size: 14px;
+  font-size: 10.5px;
   font-weight: 800;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.15px;
+  color: #ffffff;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.25;
 }
 
 .app-subtitle {
-  font-size: 10.5px;
-  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 800;
+  color: #a5cb3c;
+  letter-spacing: 0.3px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.badge-sello-vida {
+  color: #c4b5fd;
+  font-weight: 600;
+  font-size: 9px;
 }
 
 .btn-collapse-side {
-  background: #1e293b;
-  color: #cbd5e1;
-  border: 1px solid #334155;
+  background: rgba(255, 255, 255, 0.08);
+  color: #e0e7ff;
+  border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 6px;
-  width: 26px;
-  height: 26px;
-  font-size: 14px;
+  width: 24px;
+  height: 24px;
+  font-size: 12px;
   font-weight: 800;
   line-height: 1;
   cursor: pointer;
@@ -138,17 +174,22 @@ app-modal-rotacion {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  margin-left: auto;
+  position: relative;
+  z-index: 2;
+  transition: all 0.15s ease;
 }
 
 .btn-collapse-side:hover {
-  background: #334155;
+  background: rgba(255, 255, 255, 0.18);
   color: #ffffff;
 }
 
 .btn-collapse-side.pinned {
-  background: #0284c7;
+  background: #7c3aed;
   color: #ffffff;
-  border-color: #38bdf8;
+  border-color: #a78bfa;
+  box-shadow: 0 0 8px rgba(124, 58, 237, 0.4);
 }
 
 .side-menu {
@@ -160,7 +201,7 @@ app-modal-rotacion {
   overflow-y: auto;
   overflow-x: hidden !important;
   scrollbar-width: thin;
-  scrollbar-color: #334155 transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
 }
 
 .side-menu::-webkit-scrollbar {
@@ -173,12 +214,12 @@ app-modal-rotacion {
 }
 
 .side-menu::-webkit-scrollbar-thumb {
-  background: #334155 !important;
+  background: rgba(255, 255, 255, 0.18) !important;
   border-radius: 4px;
 }
 
 .side-menu::-webkit-scrollbar-thumb:hover {
-  background: #475569 !important;
+  background: rgba(255, 255, 255, 0.28) !important;
 }
 
 .side-menu::-webkit-scrollbar-horizontal {
@@ -191,28 +232,29 @@ app-modal-rotacion {
 }
 
 .side-section-label {
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 800;
-  color: #64748b;
-  letter-spacing: 0.6px;
+  color: #c4b5fd;
+  letter-spacing: 0.8px;
   padding: 10px 8px 3px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-transform: uppercase;
 }
 
 .side-divider {
   height: 1px;
-  background: #1e293b;
+  background: rgba(255, 255, 255, 0.10);
   margin: 6px 4px;
 }
 
 .side-item {
   background: transparent;
-  color: #cbd5e1;
+  color: #e0e7ff;
   border: none;
   padding: 9px 10px;
-  border-radius: 7px;
+  border-radius: 8px;
   font-size: 12.5px;
   font-weight: 600;
   display: flex;
@@ -220,7 +262,7 @@ app-modal-rotacion {
   gap: 10px;
   cursor: pointer;
   text-align: left;
-  transition: background 0.15s, color 0.15s;
+  transition: all 0.15s ease;
   position: relative;
 }
 
@@ -231,12 +273,15 @@ app-modal-rotacion {
 
 .side-item:hover {
   color: #ffffff;
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.10);
+  backdrop-filter: blur(4px);
 }
 
 .side-item.active {
-  background: #0284c7;
+  background: linear-gradient(90deg, #7c3aed 0%, #6d28d9 100%);
   color: #ffffff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 3px 10px rgba(109, 40, 217, 0.45);
+  border-left: 3px solid #a78bfa;
 }
 
 .side-icon {
@@ -253,12 +298,13 @@ app-modal-rotacion {
 }
 
 .pill-count {
-  background: #ef4444;
+  background: #ec4899;
   color: #fff;
   font-size: 10px;
-  padding: 1px 6px;
+  padding: 2px 6px;
   border-radius: 99px;
-  font-weight: 700;
+  font-weight: 800;
+  box-shadow: 0 2px 6px rgba(236, 72, 153, 0.4);
 }
 
 .side-nav.collapsed .pill-count {
@@ -271,7 +317,8 @@ app-modal-rotacion {
 
 .side-footer {
   padding: 10px 8px;
-  border-top: 1px solid #1e293b;
+  border-top: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(0, 0, 0, 0.12);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -279,9 +326,9 @@ app-modal-rotacion {
 }
 
 .side-footer-btn {
-  background: #1e293b;
-  color: #e2e8f0;
-  border: 1px solid #334155;
+  background: rgba(255, 255, 255, 0.06);
+  color: #e0e7ff;
+  border: 1px solid rgba(255, 255, 255, 0.10);
   padding: 8px 10px;
   border-radius: 6px;
   font-size: 12px;
@@ -292,6 +339,7 @@ app-modal-rotacion {
   cursor: pointer;
   text-decoration: none;
   white-space: nowrap;
+  transition: all 0.15s ease;
 }
 
 .side-nav.collapsed .side-footer-btn {
@@ -300,8 +348,9 @@ app-modal-rotacion {
 }
 
 .side-footer-btn:hover {
-  background: #334155;
+  background: rgba(255, 255, 255, 0.14);
   color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.22);
 }
 
 /* ÁREA DE TRABAJO DERECHA */
@@ -721,12 +770,14 @@ app-modal-rotacion {
 }
 
 .btn-primary {
-  background: #0284c7;
+  background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
   color: #fff;
+  box-shadow: 0 2px 6px rgba(124, 58, 237, 0.28);
 }
 
 .btn-primary:hover {
-  background: #0369a1;
+  background: linear-gradient(135deg, #6d28d9 0%, #5b21b6 100%);
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.4);
 }
 
 .btn-secondary {
@@ -3364,7 +3415,7 @@ app-configuracion-festivos {
 .reportes-title-block h2 {
   margin: 0;
   font-size: 18px;
-  color: #0f172a;
+  color: #5b21b6;
 }
 
 .reportes-period-tag {
@@ -3545,7 +3596,7 @@ app-configuracion-festivos {
   margin: 0 0 4px 0;
   font-size: 19px;
   font-weight: 700;
-  color: #0f172a;
+  color: #5b21b6;
 }
 
 .auditoria-header-desc {
