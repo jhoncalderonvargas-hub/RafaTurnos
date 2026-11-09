@@ -1,7 +1,7 @@
 import { Component, EventEmitter, Input, Output, ViewEncapsulation } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { PermutaItem, RegistroAuditoria, SesionUsuarioSso } from '../../models';
+import { PermutaItem, RegistroAuditoria, ServicioHospitalario, SesionUsuarioSso } from '../../models';
 
 @Component({
   selector: 'app-dashboard-solicitudes',
@@ -19,7 +19,22 @@ import { PermutaItem, RegistroAuditoria, SesionUsuarioSso } from '../../models';
           </p>
         </div>
         <div class="dashboard-header-actions">
-          <span class="badge-service-pill">🏥 {{ servicioNombre || 'Hospital' }}</span>
+          @if (!esColaborador && serviciosVisibles.length > 1) {
+            <div class="control-item" style="display: flex; align-items: center; gap: 8px; background: #f8fafc; border: 1px solid #cbd5e1; padding: 5px 12px; border-radius: 999px;">
+              <span style="font-size: 13px;">🏥</span>
+              <label style="font-size: 12px; font-weight: 700; color: #475569; margin: 0;">Servicio:</label>
+              <select
+                style="border: none; background: transparent; font-weight: 700; font-size: 13px; color: #0f172a; cursor: pointer; outline: none;"
+                [ngModel]="servicioSeleccionadoId"
+                (ngModelChange)="cambiarServicio.emit($event)">
+                @for (srv of serviciosVisibles; track srv.id) {
+                  <option [value]="srv.id">{{ srv.nombre }}</option>
+                }
+              </select>
+            </div>
+          } @else {
+            <span class="badge-service-pill">🏥 {{ servicioNombre || 'Hospital' }}</span>
+          }
           <button class="btn-outline-refresh" (click)="refrescarDatos.emit()" title="Actualizar datos desde el servidor">
             🔄 Actualizar
           </button>
@@ -241,6 +256,8 @@ import { PermutaItem, RegistroAuditoria, SesionUsuarioSso } from '../../models';
 })
 export class DashboardSolicitudesComponent {
   @Input() porcentajeCobertura = 0;
+  @Input() servicioSeleccionadoId = '';
+  @Input() serviciosVisibles: ServicioHospitalario[] = [];
   @Input() servicioNombre = '';
   @Input() infraccionesCount = 0;
   @Input() balanceBancoHoras = 0;
@@ -250,6 +267,7 @@ export class DashboardSolicitudesComponent {
   @Input() bitacoraAuditoria: RegistroAuditoria[] = [];
   @Input() sesionActual: SesionUsuarioSso | null = null;
 
+  @Output() cambiarServicio = new EventEmitter<string>();
   @Output() aprobarPermuta = new EventEmitter<string>();
   @Output() rechazarPermuta = new EventEmitter<string | { id: string; motivo: string }>();
   @Output() aceptarPropuestaPar = new EventEmitter<string>();
@@ -307,8 +325,13 @@ export class DashboardSolicitudesComponent {
 
   get auditoriasFiltradas(): RegistroAuditoria[] {
     const q = this.busquedaAuditoria.trim().toLowerCase();
-    if (!q) return this.bitacoraAuditoria;
-    return this.bitacoraAuditoria.filter(
+    const porServicio = this.servicioSeleccionadoId
+      ? this.bitacoraAuditoria.filter(
+          (log) => !log.servicioId || log.servicioId === this.servicioSeleccionadoId
+        )
+      : this.bitacoraAuditoria;
+    if (!q) return porServicio;
+    return porServicio.filter(
       (log) =>
         log.empleadoNombre?.toLowerCase().includes(q) ||
         log.actor?.toLowerCase().includes(q) ||

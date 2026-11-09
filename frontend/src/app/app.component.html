@@ -63,6 +63,7 @@
     <app-planificador-cuadrante
       [servicioSeleccionadoId]="servicioSeleccionadoId()"
       [serviciosVisibles]="serviciosVisibles()"
+      [servicios]="servicios()"
       [mesSeleccionado]="mesSeleccionado()"
       [mesesDisponibles]="mesesDisponiblesPlanificador()"
       [anioSeleccionado]="anioSeleccionado()"
@@ -122,6 +123,8 @@
   @if (vistaActual() === 'DASHBOARD') {
     <app-dashboard-solicitudes
       [porcentajeCobertura]="porcentajeCoberturaGlobal()"
+      [servicioSeleccionadoId]="servicioSeleccionadoId()"
+      [serviciosVisibles]="serviciosVisibles()"
       [servicioNombre]="servicioActual().nombre"
       [infraccionesCount]="infraccionesActivas().length"
       [balanceBancoHoras]="balanceGlobalBancoServicio()"
@@ -130,6 +133,7 @@
       [permutas]="permutasVisiblesDashboard()"
       [bitacoraAuditoria]="bitacoraAuditoria()"
       [sesionActual]="sesionActual()"
+      (cambiarServicio)="cambiarServicio($event)"
       (aprobarPermuta)="aprobarPermuta($event)"
       (rechazarPermuta)="rechazarPermuta($event)"
       (aceptarPropuestaPar)="aceptarPropuestaPar($event)"
@@ -308,9 +312,13 @@
   <app-modal-rotacion
     [abierto]="modalRotacionAbierto()"
     [servicioNombre]="servicioActual().nombre"
+    [hermanos]="servicioActual().hermanos || []"
+    [esAdminTh]="esAdminTh()"
     [candidatos]="candidatosRotacionHomologos()"
     (cerrar)="modalRotacionAbierto.set(false)"
-    (vincular)="vincularRotacionAlCuadrante($event)">
+    (vincular)="vincularRotacionAlCuadrante($event)"
+    (vincularTodos)="vincularTodoEquipoApoyo()"
+    (configurarApoyo)="irAConfigurarServiciosApoyo()">
   </app-modal-rotacion>
 
   <!-- MODAL DE VINCULACIÓN CON EL CELULAR (ICAL) -->

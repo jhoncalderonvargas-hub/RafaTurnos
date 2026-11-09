@@ -20,27 +20,24 @@ import {
     <section class="toolbar-controls toolbar-eje3">
       <!-- BLOQUE 1: CONTEXTO Y ESTADO CLÍNICO (IZQUIERDA) -->
       <div class="toolbar-zone toolbar-zone-context">
-        <div class="control-item">
-          <label>Servicio:</label>
-          <select [ngModel]="servicioSeleccionadoId" (ngModelChange)="cambiarServicio.emit($event)">
+        <div class="control-item" title="Servicio hospitalario activo">
+          <select class="select-context select-servicio" [ngModel]="servicioSeleccionadoId" (ngModelChange)="cambiarServicio.emit($event)">
             @for (srv of serviciosVisibles; track srv.id) {
               <option [value]="srv.id">{{ srv.nombre }}</option>
             }
           </select>
         </div>
 
-        <div class="control-item">
-          <label>Mes:</label>
-          <select [ngModel]="mesSeleccionado" (ngModelChange)="cambiarMes.emit($event)">
+        <div class="control-item" title="Periodo mensual de planificación">
+          <select class="select-context select-mes" [ngModel]="mesSeleccionado" (ngModelChange)="cambiarMes.emit($event)">
             @for (m of mesesDisponibles; track m.valor) {
               <option [value]="m.valor">{{ m.nombre }} {{ anioSeleccionado }}</option>
             }
           </select>
         </div>
 
-        <div class="control-item">
-          <label>Cargo:</label>
-          <select [ngModel]="filtroCategoriaActiva" (ngModelChange)="cambiarFiltroCategoria.emit($event)">
+        <div class="control-item" title="Filtrar cuadrante por cargo / especialidad">
+          <select class="select-context select-cargo" [ngModel]="filtroCategoriaActiva" (ngModelChange)="cambiarFiltroCategoria.emit($event)">
             <option value="TODAS">Todos los cargos ({{ categoriasEnServicioActual.length }})</option>
             @for (cat of categoriasEnServicioActual; track cat) {
               <option [value]="cat">{{ cat }}</option>
@@ -93,11 +90,11 @@ import {
         </button>
 
         <button class="btn-tool btn-tool-apoyo" (click)="abrirModalRotacion.emit()" title="Solicitar o traer personal de apoyo homólogo de otros servicios">
-          🔄 Traer Apoyo
+          🔄 Apoyo
         </button>
 
         <button class="btn-tool btn-tool-limpiar" (click)="limpiarCuadranteCompleto.emit()" title="Borra todos los turnos para armar a mano (conserva VAC/INC)">
-          🧹 En Blanco
+          🧹 Limpiar
         </button>
 
         <div class="tools-micro-divider"></div>
@@ -116,14 +113,11 @@ import {
         <div class="intranet-status-box" [title]="'Sincronización automática con Intranet: ' + (ultimaSincronizacionIntranet || 'Activa')">
           <span class="live-dot"></span>
           <span class="intranet-label">Intranet</span>
-          @if (ultimaSincronizacionIntranet) {
-            <span class="intranet-time">{{ ultimaSincronizacionIntranet }}</span>
-          }
           <button
             class="btn-icon-refresh"
             (click)="sincronizarNovedadesIntranet.emit()"
             [disabled]="sincronizandoNovedades"
-            title="Forzar actualización inmediata con Intranet (Censo y Ausencias)">
+            [title]="'Forzar actualización inmediata con Intranet • Última: ' + (ultimaSincronizacionIntranet || 'Activa')">
             🔄
           </button>
         </div>
@@ -138,7 +132,7 @@ import {
             style="border-color: #fcd34d; background: #fffbeb; color: #92400e; font-weight: 700;"
             (click)="revertirABorrador.emit()"
             title="Devolver este cuadrante a estado Borrador (Exclusivo Talento Humano)">
-            ↩️ A Borrador
+            ↩️ Borrador
           </button>
         }
 
@@ -161,7 +155,7 @@ import {
       </div>
     </section>
 
-    <!-- PALETA DE TURNOS -->
+    <!-- PALETA DE TURNOS (1 SOLA FILA COMPACTA) -->
     <section class="thurni-palette-bar">
       <div class="palette-clusters-wrapper">
         <!-- BLOQUE 1: HERRAMIENTAS (PUNTERO Y BORRADOR) -->
@@ -186,12 +180,10 @@ import {
           </div>
         </div>
 
-        <div class="cluster-divider"></div>
-
         <!-- BLOQUE 2: OPERATIVOS DIURNOS -->
         @if (turnosDiurnos.length > 0) {
           <div class="palette-cluster cluster-diurnos">
-            <span class="cluster-tag tag-diurno" title="Familia Diurna (Horas ordinarias solares)">☀️ Diurnos</span>
+            <span class="cluster-tag tag-diurno" title="Familia Diurna (Horas ordinarias solares)">☀️</span>
             @for (t of turnosDiurnos; track t.codigo) {
               <div
                 class="shift-chip"
@@ -207,14 +199,12 @@ import {
               </div>
             }
           </div>
-
-          <div class="cluster-divider"></div>
         }
 
         <!-- BLOQUE 3: GUARDIAS Y NOCHES -->
         @if (turnosGuardiasNoches.length > 0) {
           <div class="palette-cluster cluster-guardias">
-            <span class="cluster-tag tag-guardia" title="Familia Guardias & Noches (Recargo nocturno y dominical)">🌙 Guardias</span>
+            <span class="cluster-tag tag-guardia" title="Familia Guardias & Noches (Recargo nocturno y dominical)">🌙</span>
             @for (t of turnosGuardiasNoches; track t.codigo) {
               <div
                 class="shift-chip chip-heavy"
@@ -231,14 +221,12 @@ import {
               </div>
             }
           </div>
-
-          <div class="cluster-divider"></div>
         }
 
         <!-- BLOQUE 4: DESCANSOS Y BANCO -->
         @if (turnosDescansos.length > 0) {
           <div class="palette-cluster cluster-descansos">
-            <span class="cluster-tag tag-descanso" title="Familia Descanso Legal y Banco de Horas">☕ Descanso</span>
+            <span class="cluster-tag tag-descanso" title="Familia Descanso Legal y Banco de Horas">☕</span>
             @for (t of turnosDescansos; track t.codigo) {
               <div
                 class="shift-chip"
@@ -254,14 +242,12 @@ import {
               </div>
             }
           </div>
-
-          <div class="cluster-divider"></div>
         }
 
         <!-- BLOQUE 5: AUSENCIAS OFICIALES INTRANET -->
         @if (turnosAusencias.length > 0) {
           <div class="palette-cluster cluster-ausencias">
-            <span class="cluster-tag tag-ausencia" title="Novedades oficiales bloqueadas por Intranet">🔒 Ausencias</span>
+            <span class="cluster-tag tag-ausencia" title="Novedades oficiales bloqueadas por Intranet">🔒</span>
             @for (t of turnosAusencias; track t.codigo) {
               <div
                 class="shift-chip"
@@ -306,8 +292,7 @@ import {
             @for (d of diasDelMes; track d.dia) {
               <th
                 class="col-day"
-                [class.col-focused]="celdaEnfocada?.dia === d.dia"
-                [class.col-hovered]="celdaHovered?.dia === d.dia"
+                [class.col-hovered]="celdaGuiaLaser?.dia === d.dia"
                 [class.col-week-end]="d.esDomingo"
                 [class.is-saturday]="d.esSabado"
                 [class.is-sunday]="d.esDomingo"
@@ -346,8 +331,7 @@ import {
             }
             <tr
               [class.row-rotacion]="fila.esPersonalRotado"
-              [class.row-focused]="celdaEnfocada?.empId === fila.empleado.id"
-              [class.row-hovered]="celdaHovered?.empId === fila.empleado.id">
+              [class.row-hovered]="celdaGuiaLaser?.empId === fila.empleado.id">
               <!-- Info del Empleado (una sola línea) -->
               <td class="col-sticky-emp" [title]="fila.empleado.nombre + ' • ' + fila.empleado.categoria">
                 <div class="emp-cell">
@@ -356,7 +340,12 @@ import {
                   </div>
                   <span class="emp-name">{{ fila.empleado.nombre }}</span>
                   @if (fila.esPersonalRotado) {
-                    <span class="badge-rotado" title="Personal de apoyo de otro servicio">🔄</span>
+                    <span
+                      class="badge-rotado"
+                      [title]="'Personal de apoyo adscrito a: ' + (fila.servicioOrigenNombre || 'Servicio Hermano')"
+                    >
+                      🔄 {{ fila.servicioOrigenCodigo || 'APOYO' }}
+                    </span>
                     <button
                       type="button"
                       class="btn-quitar-rotado"
@@ -381,6 +370,7 @@ import {
                 @let celda = fila.celdas[d.dia];
                 @let cfg = obtenerConfigTurno(celda?.codigo || '');
                 @let conflicto = obtenerConflictoCelda(fila.empleado.id, d.dia);
+                @let esCeldaEspejo = esTurnoOtroServicio(celda);
                 @let cambioDiff = mostrarComparadorPrevisto && celda?.previsto !== undefined && celda?.previsto !== celda?.codigo;
 
                 <td
@@ -389,42 +379,57 @@ import {
                   tabindex="0"
                   [class.cell-focused]="celdaEnfocada?.empId === fila.empleado.id && celdaEnfocada?.dia === d.dia"
                   [class.cell-hovered]="celdaHovered?.empId === fila.empleado.id && celdaHovered?.dia === d.dia"
-                  [class.cell-col-guide]="celdaEnfocada?.dia === d.dia || celdaHovered?.dia === d.dia"
+                  [class.cell-col-guide]="celdaGuiaLaser?.dia === d.dia"
                   [class.cell-week-end]="d.esDomingo"
                   [class.cell-saturday]="d.esSabado"
                   [class.cell-sunday]="d.esDomingo"
                   [class.cell-holiday]="!!d.festivo"
                   [class.cell-conflict]="!!conflicto"
                   [class.cell-locked]="celda?.codigo === 'VAC' || celda?.codigo === 'INC' || celda?.codigo === 'LIC'"
-                  [class.shift-heavy]="cfg && (cfg.horasOrdinarias >= 12 || cfg.codigo === 'G24' || cfg.codigo === 'N12' || cfg.codigo === 'D12')"
-                  [class.shift-24]="celda?.codigo === 'G24' || (cfg && cfg.horasOrdinarias >= 24)"
-                  [style.background-color]="cfg ? cfg.bgHex : ''"
-                  [style.color]="cfg ? cfg.textHex : ''"
+                  [class.cell-mirror-other-service]="esCeldaEspejo"
+                  [class.shift-heavy]="!esCeldaEspejo && cfg && (cfg.horasOrdinarias >= 12 || cfg.codigo === 'G24' || cfg.codigo === 'N12' || cfg.codigo === 'D12')"
+                  [class.shift-24]="!esCeldaEspejo && (celda?.codigo === 'G24' || (cfg && cfg.horasOrdinarias >= 24))"
+                  [style.background-color]="esCeldaEspejo ? '' : (cfg ? cfg.bgHex : '')"
+                  [style.color]="esCeldaEspejo ? '' : (cfg ? cfg.textHex : '')"
                   (mousedown)="iniciarPintadoCelda.emit({ empId: fila.empleado.id, dia: d.dia, event: $event })"
                   (mouseenter)="onCeldaMouseEnter(fila.empleado.id, d.dia)"
                   (dragover)="onCeldaDragOver($event)"
                   (drop)="onCeldaDrop($event, fila.empleado.id, d.dia)"
-                  (keydown)="keyDownCelda.emit({ event: $event, empId: fila.empleado.id, dia: d.dia })"
+                  (keydown)="onCeldaKeyDown($event, fila.empleado.id, d.dia)"
                   [title]="construirTooltipCelda(fila.empleado, d, celda, conflicto)">
 
                   <div class="cell-inner">
-                    <span class="cell-code">{{ celda?.codigo || '' }}</span>
-                    @if (celda?.codigo === 'VAC' || celda?.codigo === 'INC' || celda?.codigo === 'LIC') {
-                      <span class="lock-mini-tag" title="Bloqueado por novedad oficial Intranet">🔒</span>
-                    }
-                    @if (celda?.esRotacion) {
-                      <span class="rotacion-mini-tag">🔄</span>
-                    }
-                    @if (cambioDiff) {
-                      <span class="diff-triangle" title="Previsto original: {{ celda?.previsto || 'Vacío' }}"></span>
+                    @if (esCeldaEspejo) {
+                      <div class="mirror-cell-content">
+                        <span class="mirror-srv-code">📍{{ obtenerCodigoServicio(celda?.servicioEjecutorId) }}</span>
+                        <span class="mirror-shift-code">{{ celda?.codigo }}</span>
+                      </div>
+                    } @else {
+                      <span class="cell-code">{{ celda?.codigo || '' }}</span>
+                      @if (celda?.codigo === 'VAC' || celda?.codigo === 'INC' || celda?.codigo === 'LIC') {
+                        <span class="lock-mini-tag" title="Bloqueado por novedad oficial Intranet">🔒</span>
+                      }
+                      @if (celda?.esRotacion && celda?.codigo && celda?.codigo !== 'L') {
+                        <span class="rotacion-mini-tag" title="Turno de apoyo ejecutado en este servicio">🔄</span>
+                      }
+                      @if (cambioDiff) {
+                        <span class="diff-triangle" title="Previsto original: {{ celda?.previsto || 'Vacío' }}"></span>
+                      }
                     }
                   </div>
                 </td>
               }
 
               <!-- Totales, Desglose de Recargos y Banco de Horas por Colaborador -->
-              <td class="col-summary font-mono" [title]="'Programadas ' + fila.horasTrabajadas + 'h de ' + fila.empleado.horasContratoMes + 'h de contrato'">
-                <strong>{{ fila.horasTrabajadas }}</strong><span class="sub-contract">/{{ fila.empleado.horasContratoMes }}</span>
+              <td class="col-summary font-mono" [title]="construirTooltipHorasMes(fila)">
+                <div>
+                  <strong>{{ fila.horasTrabajadas }}</strong><span class="sub-contract">/{{ fila.empleado.horasContratoMes }}</span>
+                </div>
+                @if (fila.horasOtrosServicios > 0) {
+                  <div class="multi-srv-hours-badge">
+                    {{ fila.horasLocales }}h aquí · {{ fila.horasOtrosServicios }}h apoyo
+                  </div>
+                }
               </td>
 
               <td class="col-summary col-recargo font-mono" title="Horas Ordinarias Diurnas (06:00-19:00 L-S)">
@@ -485,12 +490,13 @@ import {
         <tfoot>
           @let reglaFiltroFoot = reglaCargoActivaEnCuadrante;
           <tr class="coverage-row">
-            <td colspan="2" class="col-sticky-emp coverage-label">
+            <td class="col-sticky-emp coverage-label">
               ☀️ Cobertura Mañana • <strong>Mín: {{ reglaFiltroFoot ? reglaFiltroFoot.reqManana : servicioActual.reqManana }}</strong>
               @if (filtroCategoriaActiva !== 'TODAS') {
                 <span style="font-size: 10.5px; color: #0284c7; font-weight: 700;">({{ filtroCategoriaActiva }})</span>
               }
             </td>
+            <td class="col-empalme" style="background: #f8fafc; color: #94a3b8;">—</td>
             @for (d of diasDelMes; track d.dia) {
               @let cob = coberturaPorDia[d.dia];
               @let metas = obtenerMetasDiaServicio(servicioActual, d);
@@ -510,12 +516,13 @@ import {
           </tr>
 
           <tr class="coverage-row">
-            <td colspan="2" class="col-sticky-emp coverage-label">
+            <td class="col-sticky-emp coverage-label">
               🌤️ Cobertura Tarde • <strong>Mín: {{ reglaFiltroFoot ? reglaFiltroFoot.reqTarde : servicioActual.reqTarde }}</strong>
               @if (filtroCategoriaActiva !== 'TODAS') {
                 <span style="font-size: 10.5px; color: #0284c7; font-weight: 700;">({{ filtroCategoriaActiva }})</span>
               }
             </td>
+            <td class="col-empalme" style="background: #f8fafc; color: #94a3b8;">—</td>
             @for (d of diasDelMes; track d.dia) {
               @let cob = coberturaPorDia[d.dia];
               @let metas = obtenerMetasDiaServicio(servicioActual, d);
@@ -535,12 +542,13 @@ import {
           </tr>
 
           <tr class="coverage-row">
-            <td colspan="2" class="col-sticky-emp coverage-label">
+            <td class="col-sticky-emp coverage-label">
               🌙 Cobertura Noche • <strong>Mín: {{ reglaFiltroFoot ? reglaFiltroFoot.reqNoche : servicioActual.reqNoche }}</strong>
               @if (filtroCategoriaActiva !== 'TODAS') {
                 <span style="font-size: 10.5px; color: #0284c7; font-weight: 700;">({{ filtroCategoriaActiva }})</span>
               }
             </td>
+            <td class="col-empalme" style="background: #f8fafc; color: #94a3b8;">—</td>
             @for (d of diasDelMes; track d.dia) {
               @let cob = coberturaPorDia[d.dia];
               @let metas = obtenerMetasDiaServicio(servicioActual, d);
@@ -571,6 +579,7 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
   private autoScrollVelocidadX = 0;
   @Input() servicioSeleccionadoId = '';
   @Input() serviciosVisibles: ServicioHospitalario[] = [];
+  @Input() servicios: ServicioHospitalario[] = [];
   @Input() mesSeleccionado = 1;
   @Input() mesesDisponibles: Array<{ valor: number; nombre: string }> = [];
   @Input() anioSeleccionado = 2026;
@@ -625,6 +634,15 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
 
   celdaHovered: { empId: string; dia: number } | null = null;
 
+  /**
+   * Un único láser inteligente:
+   * - Cuando el puntero está sobre la grilla (`celdaHovered`), el haz láser sigue al puntero.
+   * - Cuando el ratón sale de la tabla o se navega por teclado, el haz láser se posa en `celdaEnfocada`.
+   */
+  get celdaGuiaLaser(): { empId: string; dia: number } | null {
+    return this.celdaHovered ?? this.celdaEnfocada;
+  }
+
   ngOnDestroy(): void {
     this.detenerAutoScroll();
   }
@@ -632,6 +650,11 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
   onCeldaMouseEnter(empId: string, dia: number): void {
     this.celdaHovered = { empId, dia };
     this.continuarPintadoCelda.emit({ empId, dia });
+  }
+
+  onCeldaKeyDown(event: KeyboardEvent, empId: string, dia: number): void {
+    this.celdaHovered = null;
+    this.keyDownCelda.emit({ event, empId, dia });
   }
 
   onGridDragOver(event: DragEvent): void {
@@ -829,6 +852,46 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
     return partes.join(' | ');
   }
 
+  esTurnoOtroServicio(celda?: CeldaAsignacion): boolean {
+    if (!celda || !celda.codigo) return false;
+    if (['L', 'VAC', 'INC', 'LIC'].includes(celda.codigo)) return false;
+    return Boolean(
+      celda.servicioEjecutorId &&
+        celda.servicioEjecutorId !== this.servicioSeleccionadoId
+    );
+  }
+
+  obtenerCodigoServicio(servicioId?: string): string {
+    if (!servicioId) return 'SRV';
+    const srv =
+      this.servicios.find((s) => s.id === servicioId) ||
+      this.serviciosVisibles.find((s) => s.id === servicioId);
+    return srv ? srv.codigo : 'OTRO';
+  }
+
+  obtenerNombreServicio(servicioId?: string): string {
+    if (!servicioId) return 'Otro Servicio';
+    const srv =
+      this.servicios.find((s) => s.id === servicioId) ||
+      this.serviciosVisibles.find((s) => s.id === servicioId);
+    return srv ? srv.nombre : servicioId;
+  }
+
+  construirTooltipHorasMes(fila: any): string {
+    const base = `Total Hospital: ${fila.horasTrabajadas}h programadas de ${fila.empleado.horasContratoMes}h de contrato`;
+    if (!fila.desgloseServicios || fila.desgloseServicios.length <= 1) {
+      if (fila.horasOtrosServicios > 0) {
+        return `${base}\n• En este servicio: ${fila.horasLocales}h\n• En otros servicios (Apoyo): ${fila.horasOtrosServicios}h`;
+      }
+      return base;
+    }
+    const lineas = fila.desgloseServicios.map(
+      (d: { servicioId: string; codigo: string; nombre: string; horas: number }) =>
+        `• ${d.nombre} (${d.codigo}): ${d.horas}h${d.servicioId === this.servicioSeleccionadoId ? ' [Actual]' : ''}`
+    );
+    return `${base}\n${lineas.join('\n')}`;
+  }
+
   construirTooltipCelda(
     emp: EmpleadoHospital,
     d: DiaColumna,
@@ -837,7 +900,17 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
   ): string {
     const partes: string[] = [`${emp.nombre} • ${emp.categoria} • Día ${d.dia}`];
     if (d.festivo) partes.push(`🇨🇴 Festivo: ${d.festivo.nombre}`);
-    if (celda?.codigo) {
+    if (this.esTurnoOtroServicio(celda)) {
+      const nomSrv = this.obtenerNombreServicio(celda?.servicioEjecutorId);
+      const codSrv = this.obtenerCodigoServicio(celda?.servicioEjecutorId);
+      const cfg = celda?.codigo ? this.catalogoTurnosMap[celda.codigo] : undefined;
+      partes.push(
+        `📍 ROTACIÓN ACTIVA EN: ${nomSrv} (${codSrv}) — Turno ${celda?.codigo}${cfg ? ' (' + cfg.horario + ')' : ''}`
+      );
+      partes.push(
+        `🔒 Celda Espejo bloqueada en este servicio • Suma a sus horas de contrato, pero NO suma a la cobertura local de ${this.servicioActual?.nombre || 'este servicio'}.`
+      );
+    } else if (celda?.codigo) {
       const cfg = this.catalogoTurnosMap[celda.codigo];
       if (cfg) {
         const fam = this.clasificarFamilia(cfg);
@@ -850,6 +923,9 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
                 ? '☕ Descanso / Banco'
                 : '🔒 Novedad Oficial';
         partes.push(`${famTag}: ${cfg.nombre} (${cfg.horario})`);
+      }
+      if (celda.esRotacion && celda.codigo !== 'L') {
+        partes.push(`🔄 Turno de apoyo ejecutado en ${this.servicioActual?.nombre || 'este servicio'}`);
       }
     } else {
       partes.push('Sin turno asignado');

@@ -274,9 +274,12 @@ export class CuadrantesController {
 
       asignacionesPorPeriodo[periodoKey][a.empleadoId][dia] = {
         codigo: codigoReal,
-        previsto: a.codigoPrevisto ?? codigoReal,
-        esRotacion: a.esRotacion,
-        servicioEjecutorId: a.servicioEjecutorId,
+        previsto:
+          a.codigoPrevisto === CODIGO_CELDA_VACIA_DB
+            ? ''
+            : (a.codigoPrevisto ?? codigoReal),
+        esRotacion: codigoReal === '' ? false : a.esRotacion,
+        servicioEjecutorId: codigoReal === '' ? undefined : a.servicioEjecutorId,
       };
     }
 
@@ -475,7 +478,7 @@ export class CuadrantesController {
       );
     }
 
-    // Consultar turno anterior para auditoría si el cuadrante está PUBLICADO
+    // Consultar turno anterior para auditoría y validación de propiedad por servicio (Celda Espejo)
     const asigPrevia = await this.prisma.asignacionTurno.findUnique({
       where: {
         empleadoId_fecha: {
@@ -483,9 +486,29 @@ export class CuadrantesController {
           fecha: fechaUtc,
         },
       },
-      include: { tipoTurno: true },
+      include: {
+        tipoTurno: true,
+        servicioEjecutor: { select: { codigo: true, nombre: true } },
+      },
     });
     const codigoAnterior = asigPrevia?.tipoTurno?.codigo || 'L';
+
+    // Bloqueo cruzado inter-servicio: no permitir sobreescribir un turno operativo activo de otro servicio
+    if (
+      asigPrevia &&
+      asigPrevia.servicioEjecutorId &&
+      asigPrevia.servicioEjecutorId !== dto.servicioId &&
+      asigPrevia.tipoTurno?.codigo &&
+      ![CODIGO_CELDA_VACIA_DB, '', 'L', 'VAC', 'INC', 'LIC'].includes(
+        asigPrevia.tipoTurno.codigo
+      )
+    ) {
+      const nombreOtroSrv =
+        asigPrevia.servicioEjecutor?.nombre || asigPrevia.servicioEjecutorId;
+      throw new ConflictException(
+        `Celda Espejo bloqueada: El colaborador ya tiene asignado el turno "${asigPrevia.tipoTurno.codigo}" en "${nombreOtroSrv}" en esta fecha. Libéralo primero en ese servicio.`
+      );
+    }
 
     const tipoTurnoId = await this.resolverTipoTurnoId(dto.codigo);
 
@@ -577,15 +600,28 @@ export class CuadrantesController {
       );
     }
 
-    // Consultar novedades del mes para proteger las celdas oficiales de Intranet
+    // Consultar novedades del mes y asignaciones activas en otros servicios para protegerlas
     const primerDiaMes = new Date(Date.UTC(anio, mes - 1, 1));
     const ultimoDiaMes = new Date(Date.UTC(anio, mes, 0, 23, 59, 59));
-    const novedadesMes = await this.prisma.novedadAusencia.findMany({
-      where: {
-        fechaInicio: { lte: ultimoDiaMes },
-        fechaFin: { gte: primerDiaMes },
-      },
-    });
+    const [novedadesMes, asignacionesOtrosServicios] = await Promise.all([
+      this.prisma.novedadAusencia.findMany({
+        where: {
+          fechaInicio: { lte: ultimoDiaMes },
+          fechaFin: { gte: primerDiaMes },
+        },
+      }),
+      this.prisma.asignacionTurno.findMany({
+        where: {
+          fecha: { gte: primerDiaMes, lte: ultimoDiaMes },
+          servicioEjecutorId: { not: dto.servicioId },
+        },
+        select: {
+          empleadoId: true,
+          fecha: true,
+          tipoTurno: { select: { codigo: true } },
+        },
+      }),
+    ]);
 
     const mapaNovedadesDia = new Map<string, string>();
     for (const n of novedadesMes) {
@@ -598,10 +634,23 @@ export class CuadrantesController {
       }
     }
 
-    // Filtrar celdas: si el empleado tiene novedad oficial activa ese día, no se sobreescribe
+    const celdasOcupadasOtroServicio = new Set<string>();
+    for (const a of asignacionesOtrosServicios) {
+      const cod = a.tipoTurno?.codigo || '';
+      if (![CODIGO_CELDA_VACIA_DB, '', 'L', 'VAC', 'INC', 'LIC'].includes(cod)) {
+        const diaUtc = new Date(a.fecha).getUTCDate();
+        celdasOcupadasOtroServicio.add(`${a.empleadoId}_${diaUtc}`);
+      }
+    }
+
+    // Filtrar celdas: proteger novedades oficiales de Intranet y Celdas Espejo de otros servicios
     const celdasFiltradas = dto.celdas.filter((c) => {
-      const tipoNov = mapaNovedadesDia.get(`${c.empleadoId}_${c.dia}`);
+      const key = `${c.empleadoId}_${c.dia}`;
+      const tipoNov = mapaNovedadesDia.get(key);
       if (tipoNov && c.codigo !== tipoNov) {
+        return false;
+      }
+      if (celdasOcupadasOtroServicio.has(key)) {
         return false;
       }
       return true;

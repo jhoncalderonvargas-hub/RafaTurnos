@@ -89,7 +89,10 @@ export function calcularMetricasMesColaborador(
           ? saldosConsolidados[saldoKeyPrev]
           : emp.saldoBancoAnterior);
 
-  const diferenciaMes = horasTrabajadas - emp.horasContratoMes - horasAmortizadasComp;
+  const tieneTurnosOperativos = horasTrabajadas > 0 || horasAmortizadasComp > 0;
+  const diferenciaMes = tieneTurnosOperativos
+    ? horasTrabajadas - emp.horasContratoMes - horasAmortizadasComp
+    : 0;
   const nuevoSaldoBanco = saldoAntReal + diferenciaMes;
 
   let estadoBanco: 'EQUILIBRADO' | 'ATENCION' | 'CRITICO' = 'EQUILIBRADO';

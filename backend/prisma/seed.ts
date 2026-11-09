@@ -261,7 +261,7 @@ async function main() {
       }
 
       const doc = String(cedulaBase++);
-      const saldoBanco = saldosBancoVariados[contadorTotal % saldosBancoVariados.length];
+      const saldoBanco = 0;
       const slugPila = nombrePila.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
       const slugAp = apellido1.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
