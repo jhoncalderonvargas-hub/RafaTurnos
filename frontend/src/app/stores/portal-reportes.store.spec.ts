@@ -155,4 +155,125 @@ describe('PortalReportesStore', () => {
     });
     expect(store.datosReporteCalculados().length).toBe(4);
   });
+
+  it('habilita companerosParesPortal multi-cargo en servicios equivalentes y filtra reportes por empresa contratante', () => {
+    catalogos.aplicarEmpresasDesdeDb([
+      {
+        id: 'emp-ese',
+        codigo: 'ESE_PLANTA',
+        nombre: 'Planta ESE',
+        estadoConfiguracion: 'CONFIRMADA',
+        plantillaNormativa: 'DECRETO_1042',
+        horasSemanalesContrato: 44,
+        diasBaseSemana: 6,
+        horaInicioNocturnoMin: 1080,
+        horaFinNocturnoMin: 360,
+        porcentajeRecargoNocturno: 0.35,
+        modoRecargoDominical: 'FIJO',
+        porcentajeRecargoDominicalFijo: 1.0,
+        aplicaTopeHorasExtrasSemanal: true,
+        topeHorasExtrasSemanal: 12,
+        usaBancoHoras: true,
+        activa: true,
+      },
+      {
+        id: 'emp-temp',
+        codigo: 'TEMP_SALUD',
+        nombre: 'Temporal Salud',
+        estadoConfiguracion: 'CONFIRMADA',
+        plantillaNormativa: 'CST_LEY_2466',
+        horasSemanalesContrato: 42,
+        diasBaseSemana: 6,
+        horaInicioNocturnoMin: 1140,
+        horaFinNocturnoMin: 360,
+        porcentajeRecargoNocturno: 0.35,
+        modoRecargoDominical: 'LEY_2466',
+        aplicaTopeHorasExtrasSemanal: true,
+        topeHorasExtrasSemanal: 12,
+        usaBancoHoras: true,
+        activa: true,
+      },
+    ]);
+    catalogos.aplicarServiciosDesdeDb([
+      {
+        id: 'srv-fact',
+        codigo: 'FACT',
+        nombre: 'Facturación',
+        tipoAsistencia: 'ADMINISTRATIVO',
+        permitePermutaEntreCargos: true,
+        cargosPermitidosIds: ['cat-aux', 'cat-tec'],
+        cargosPermitidos: [
+          { categoriaId: 'cat-aux', categoriaNombre: 'Auxiliar' },
+          { categoriaId: 'cat-tec', categoriaNombre: 'Técnico' },
+        ],
+        reqDia: 2,
+        reqNoche: 0,
+      },
+    ]);
+    catalogos.aplicarEmpleadosDesdeDb([
+      {
+        id: 'e-ese',
+        documento: '401',
+        nombre: 'Camila ESE',
+        categoriaId: 'cat-aux',
+        categoria: { id: 'cat-aux', nombre: 'Auxiliar' },
+        servicioBaseId: 'srv-fact',
+        empresaContratanteId: 'emp-ese',
+      },
+      {
+        id: 'e-temp',
+        documento: '402',
+        nombre: 'Diego Temporal',
+        categoriaId: 'cat-tec',
+        categoria: { id: 'cat-tec', nombre: 'Técnico' },
+        servicioBaseId: 'srv-fact',
+        empresaContratanteId: 'emp-temp',
+      },
+      {
+        id: 'e-ajeno',
+        documento: '403',
+        nombre: 'Otro Cargo',
+        categoriaId: 'cat-med',
+        categoria: { id: 'cat-med', nombre: 'Médico' },
+        servicioBaseId: 'srv-fact',
+        empresaContratanteId: 'emp-temp',
+      },
+    ]);
+
+    store.empleadoPortalId.set('e-ese');
+    store.diaPermutaSeleccionado.set(4);
+    cuadrante.estadosPorCuadrante.set({ 'srv-fact::2026-11': 'PUBLICADO' });
+    cuadrante.asignacionesPorPeriodo.set({
+      '2026-11': {
+        'e-ese': { 4: { codigo: 'M8', servicioEjecutorId: 'srv-fact' } },
+        'e-temp': { 4: { codigo: 'T8', servicioEjecutorId: 'srv-fact' } },
+        'e-ajeno': { 4: { codigo: 'M8', servicioEjecutorId: 'srv-fact' } },
+      },
+    });
+
+    expect(store.companerosParesPortal().map((p) => p.id)).toEqual(['e-temp']);
+
+    catalogos.establecerSesionBasicaSso({
+      empleadoId: 'th',
+      documento: '999',
+      nombre: 'TH',
+      categoria: 'Talento Humano',
+      rol: 'ADMIN_TH',
+      servicioBaseId: 'srv-fact',
+      servicioBaseNombre: 'Facturación',
+      serviciosPermitidosIds: ['srv-fact'],
+    });
+    store.filtroReporteServicioId.set('TODOS');
+    store.filtroReporteEmpresaId.set('TODOS');
+    const todasFilas = store.datosReporteCalculados();
+    const filaEse = todasFilas.find((f) => f.emp.id === 'e-ese')!;
+    const filaTemp = todasFilas.find((f) => f.emp.id === 'e-temp')!;
+    expect(filaEse.horasSemanalesAplicadas).toBe(44);
+    expect(filaEse.recargos.dominical).toBe(1.0);
+    expect(filaTemp.horasSemanalesAplicadas).toBe(42);
+    expect(filaTemp.recargos.dominical).toBe(0.9);
+
+    store.filtroReporteEmpresaId.set('emp-ese');
+    expect(store.datosReporteCalculados().map((f) => f.emp.id)).toEqual(['e-ese']);
+  });
 });

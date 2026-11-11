@@ -2,9 +2,13 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import {
+  CategoriaProfesionalItem,
   EmpleadoHospital,
+  EmpresaContratante,
   FestivoEntry,
+  MetaTurnoServicio,
   PermutaItem,
+  PlantillaEmpresaOption,
   RegistroAuditoria,
   ServicioHospitalario,
   SesionUsuarioSso,
@@ -30,9 +34,49 @@ export class TurnosApiService {
 
   constructor(private readonly http: HttpClient) {}
 
-  // 1. Servicios Asistenciales, Macroprocesos y Hermanos
+  // 0. Empresas Contratantes y Plantillas Normativas
+  getEmpresas(): Observable<EmpresaContratante[]> {
+    return this.http.get<EmpresaContratante[]>(`${this.baseUrl}/empresas`);
+  }
+
+  getPlantillasEmpresas(): Observable<PlantillaEmpresaOption[]> {
+    return this.http.get<PlantillaEmpresaOption[]>(`${this.baseUrl}/empresas/plantillas`);
+  }
+
+  crearEmpresa(
+    empresa: Partial<EmpresaContratante> & { confirmar?: boolean }
+  ): Observable<EmpresaContratante> {
+    return this.http.post<EmpresaContratante>(`${this.baseUrl}/empresas`, empresa);
+  }
+
+  actualizarEmpresa(
+    id: string,
+    empresa: Partial<EmpresaContratante> & { confirmar?: boolean }
+  ): Observable<EmpresaContratante> {
+    return this.http.put<EmpresaContratante>(`${this.baseUrl}/empresas/${id}`, empresa);
+  }
+
+  confirmarReglasEmpresa(
+    id: string,
+    empresa?: Partial<EmpresaContratante>
+  ): Observable<EmpresaContratante> {
+    return this.http.post<EmpresaContratante>(
+      `${this.baseUrl}/empresas/${id}/confirmar-reglas`,
+      empresa || {}
+    );
+  }
+
+  eliminarEmpresa(id: string): Observable<{ ok: boolean; mensaje: string }> {
+    return this.http.delete<{ ok: boolean; mensaje: string }>(`${this.baseUrl}/empresas/${id}`);
+  }
+
+  // 1. Servicios Asistenciales, Cargos, Macroprocesos y Hermanos
   getMacroprocesos(): Observable<any[]> {
     return this.http.get<any[]>(`${this.baseUrl}/servicios-admin/macroprocesos`);
+  }
+
+  getCategorias(): Observable<CategoriaProfesionalItem[]> {
+    return this.http.get<CategoriaProfesionalItem[]>(`${this.baseUrl}/servicios-admin/categorias`);
   }
 
   getServicios(): Observable<ServicioHospitalario[]> {
@@ -44,6 +88,10 @@ export class TurnosApiService {
     nombre: string;
     tipoAsistencia: string;
     intranetId?: string;
+    permitePermutaEntreCargos?: boolean;
+    cargosPermitidosIds?: string[];
+    cargosPermitidos?: Array<{ categoriaId?: string; categoriaNombre?: string }>;
+    metasPorTurno?: MetaTurnoServicio[];
     reqDia?: number;
     reqNoche?: number;
     modalidadDias?: string;
@@ -55,19 +103,52 @@ export class TurnosApiService {
     return this.http.post(`${this.baseUrl}/servicios-admin`, servicio);
   }
 
-  actualizarServicio(id: string, servicio: {
-    codigo: string;
-    nombre: string;
-    tipoAsistencia: string;
-    reqDia?: number;
-    reqNoche?: number;
-    modalidadDias?: string;
-    reqDiaDomFest?: number;
-    reqNocheDomFest?: number;
-    turnosHabilitados?: string[];
-    reglasPorCargo?: any[];
-  }): Observable<any> {
+  actualizarServicio(
+    id: string,
+    servicio: {
+      codigo: string;
+      nombre: string;
+      tipoAsistencia: string;
+      permitePermutaEntreCargos?: boolean;
+      cargosPermitidosIds?: string[];
+      cargosPermitidos?: Array<{ categoriaId?: string; categoriaNombre?: string }>;
+      metasPorTurno?: MetaTurnoServicio[];
+      reqDia?: number;
+      reqNoche?: number;
+      modalidadDias?: string;
+      reqDiaDomFest?: number;
+      reqNocheDomFest?: number;
+      turnosHabilitados?: string[];
+      reglasPorCargo?: any[];
+    }
+  ): Observable<any> {
     return this.http.put(`${this.baseUrl}/servicios-admin/${id}`, servicio);
+  }
+
+  adscribirEmpleado(
+    empleadoId: string,
+    servicioBaseId: string
+  ): Observable<{ id: string; servicioBaseId: string; advertenciaCargoCompatible?: string | null }> {
+    return this.http.put<any>(`${this.baseUrl}/servicios-admin/adscribir-empleado`, {
+      empleadoId,
+      servicioBaseId,
+    });
+  }
+
+  adscribirLote(
+    empleadoIds: string[],
+    servicioBaseId: string
+  ): Observable<{
+    ok: boolean;
+    servicioBaseId: string;
+    servicioNombre: string;
+    trasladados: number;
+    advertenciasCargo: string[];
+  }> {
+    return this.http.put<any>(`${this.baseUrl}/servicios-admin/adscribir-lote`, {
+      empleadoIds,
+      servicioBaseId,
+    });
   }
 
   eliminarServicio(id: string): Observable<any> {
@@ -98,6 +179,13 @@ export class TurnosApiService {
     total: number;
     creados: number;
     actualizados: number;
+    empresasPendientes?: Array<{
+      id: string;
+      codigo: string;
+      nombre: string;
+      horasSemanalesContrato: number;
+      recienCreada?: boolean;
+    }>;
   }> {
     return this.http.post<any>(`${this.baseUrl}/servicios-admin/sincronizar-empleados-intranet`, {});
   }
@@ -118,12 +206,39 @@ export class TurnosApiService {
     minutosAlmuerzo?: number;
     colorHex: string;
     descuentaBancoHoras: boolean;
+    modoAmortizacionBanco?: string;
     horasAmortizacionBanco?: number | null;
+    prorrateaMetaContrato?: boolean;
+    esAusencia?: boolean;
+    bloqueaPermutas?: boolean;
+    activo?: boolean;
     modoJornada?: 'HORARIO' | 'GUARDIA_24H' | 'DESCANSO';
     esNocturnoPesado: boolean;
     visibleEnPaleta?: boolean;
   }): Observable<any> {
     return this.http.post(`${this.baseUrl}/servicios-admin/turnos`, turno);
+  }
+
+  archivarTipoTurno(codigo: string, activo?: boolean): Observable<any> {
+    return this.http.patch(
+      `${this.baseUrl}/servicios-admin/turnos/${encodeURIComponent(codigo)}/archivar`,
+      activo !== undefined ? { activo } : {}
+    );
+  }
+
+  eliminarTipoTurno(codigo: string): Observable<{ ok: boolean; mensaje: string }> {
+    return this.http.delete<{ ok: boolean; mensaje: string }>(
+      `${this.baseUrl}/servicios-admin/turnos/${encodeURIComponent(codigo)}`
+    );
+  }
+
+  recalcularLiquidacion(body?: {
+    anio?: number;
+    mes?: number;
+    servicioId?: string;
+    incluirCerrados?: boolean;
+  }): Observable<any> {
+    return this.http.post(`${this.baseUrl}/liquidacion/recalcular`, body || {});
   }
 
   // 2. Festivos Oficiales y Días Cívicos (Caché RAM en NestJS)

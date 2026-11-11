@@ -22,11 +22,13 @@ import { LiquidacionModule, LiquidacionService, TipoTurnoLiquidableDb, toTurnoLi
 import {
   calcularDescansoEntreTurnosMin,
   DESCANSO_MINIMO_ENTRE_TURNOS_MIN,
+  esCodigoExoneracionContrato,
   esDomingo,
   esFechaIsoValida,
   hoyColombiaIso,
   r2,
   sumarDiasIso,
+  turnoEsLaborado,
 } from '../../shared/liquidacion-horas';
 
 export interface ValidacionTurnoDto {
@@ -81,8 +83,6 @@ export interface GuardarLoteCuadranteDto {
 
 const CODIGO_CELDA_VACIA_DB = 'BLANCO';
 
-const CODIGOS_NO_OPERATIVOS = new Set(['L', 'S', 'COMP', 'VAC', 'INC', 'LIC', 'FAM', 'DISP', 'BLANCO', '']);
-
 @Injectable()
 export class CuadrantesReglasService {
   constructor(
@@ -132,14 +132,14 @@ export class CuadrantesReglasService {
     }
 
     if ((dto.tieneAusenciaActiva || novedadDb) && (!novedadDb || codProp !== novedadDb.tipo.toUpperCase())) {
-      const tipoTxt = novedadDb?.tipo || 'VAC / INC / LIC / FAM';
+      const tipoTxt = novedadDb?.tipo || 'Novedad oficial RRHH';
       alertas.push(
         `RN-03 Bloqueante: El colaborador presenta novedad oficial activa (${tipoTxt}) en la fecha.`
       );
     }
 
     const codigosConsultar = Array.from(
-      new Set([codPrev, codProp, codSig].filter((c) => c && !CODIGOS_NO_OPERATIVOS.has(c)))
+      new Set([codPrev, codProp, codSig].filter((c) => c && c !== CODIGO_CELDA_VACIA_DB))
     );
     const tipos =
       codigosConsultar.length > 0
@@ -149,8 +149,12 @@ export class CuadrantesReglasService {
     const cfgProp = tipos.find((t) => t.codigo.toUpperCase() === codProp);
     const cfgSig = tipos.find((t) => t.codigo.toUpperCase() === codSig);
 
-    if (codPrev && codProp && !CODIGOS_NO_OPERATIVOS.has(codPrev) && !CODIGOS_NO_OPERATIVOS.has(codProp)) {
-      if (cfgPrev?.esNocturnoPesado && cfgProp && cfgProp.horasOrdinarias > 0) {
+    const prevLaborado = turnoEsLaborado(toTurnoLiquidable(cfgPrev, codPrev));
+    const propLaborado = turnoEsLaborado(toTurnoLiquidable(cfgProp, codProp));
+    const sigLaborado = turnoEsLaborado(toTurnoLiquidable(cfgSig, codSig));
+
+    if (prevLaborado && propLaborado) {
+      if (cfgPrev?.esNocturnoPesado) {
         alertas.push(
           `RN-01 Bloqueante: Infracción Post-Guardia (${codPrev}). El día previo fue turno pesado; requiere Saliente (S) o Libre (L).`
         );
@@ -167,8 +171,8 @@ export class CuadrantesReglasService {
       }
     }
 
-    if (codProp && codSig && !CODIGOS_NO_OPERATIVOS.has(codProp) && !CODIGOS_NO_OPERATIVOS.has(codSig)) {
-      if (cfgProp?.esNocturnoPesado && cfgSig && cfgSig.horasOrdinarias > 0) {
+    if (propLaborado && sigLaborado) {
+      if (cfgProp?.esNocturnoPesado) {
         alertas.push(
           `RN-01 Bloqueante: Asignar ${codProp} antes de ${codSig} incumple el descanso Post-Guardia del día siguiente.`
         );
@@ -248,6 +252,18 @@ export class CuadrantesController {
     return !u || u === CODIGO_CELDA_VACIA_DB ? 'L' : u;
   }
 
+  private esTurnoOperativoOtroServicio(
+    tipo?: { codigo?: string | null; horasOrdinarias?: number | null; esAusencia?: boolean | null } | null
+  ): boolean {
+    if (!tipo) return false;
+    const cod = String(tipo.codigo || '').trim().toUpperCase();
+    if (!cod || cod === CODIGO_CELDA_VACIA_DB) return false;
+    if (typeof tipo.horasOrdinarias === 'number') {
+      return turnoEsLaborado(toTurnoLiquidable(tipo as Partial<TipoTurnoLiquidableDb>, cod));
+    }
+    return !['L', 'S', CODIGO_CELDA_VACIA_DB, ''].includes(cod) && !esCodigoExoneracionContrato(cod);
+  }
+
   private async resolverTipoTurno(
     codigo: string,
     tx?: Prisma.TransactionClient
@@ -271,8 +287,14 @@ export class CuadrantesController {
           horasNocturnas: 0,
           colorHex: '#FFFFFF',
           descuentaBancoHoras: false,
+          modoAmortizacionBanco: 'HORAS_FIJAS',
+          prorrateaMetaContrato: false,
+          esAusencia: false,
+          bloqueaPermutas: true,
           esNocturnoPesado: false,
+          esSistemaObligatorio: true,
           visibleEnPaleta: false,
+          activo: true,
         },
       });
     }
@@ -426,6 +448,48 @@ export class CuadrantesController {
         const srv = await tx.servicio.findUnique({ where: { id: dto.servicioId } });
         if (!srv) {
           throw new NotFoundException(`Servicio hospitalario "${dto.servicioId}" no encontrado.`);
+        }
+
+        if (
+          estadoEnum === EstadoCuadrante.CERRADO_NOMINA &&
+          typeof tx.empleado?.findMany === 'function'
+        ) {
+          const primerDiaMes = new Date(Date.UTC(anio, mes - 1, 1));
+          const ultimoDiaMes = new Date(Date.UTC(anio, mes, 0, 23, 59, 59, 999));
+          const empsPendientes = await tx.empleado.findMany({
+            where: {
+              empresaContratante: { estadoConfiguracion: 'PENDIENTE_REGLAS' },
+              OR: [
+                { servicioBaseId: dto.servicioId },
+                {
+                  asignaciones: {
+                    some: {
+                      servicioEjecutorId: dto.servicioId,
+                      fecha: { gte: primerDiaMes, lte: ultimoDiaMes },
+                    },
+                  },
+                },
+              ],
+            },
+            select: {
+              id: true,
+              nombre: true,
+              empresaContratante: { select: { codigo: true, nombre: true } },
+            },
+          });
+          if (Array.isArray(empsPendientes) && empsPendientes.length > 0) {
+            const empresasTxt = Array.from(
+              new Set(
+                empsPendientes.map(
+                  (e: any) =>
+                    `${e.empresaContratante?.nombre || e.empresaContratante?.codigo || 'Sin nombre'} (${e.empresaContratante?.codigo || '?'})`
+                )
+              )
+            ).join(', ');
+            throw new ConflictException(
+              `No es posible cerrar a Nómina: ${empsPendientes.length} colaborador(es) de este cuadrante pertenecen a empresas contratantes en estado PENDIENTE_REGLAS (${empresasTxt}). Confirma sus reglas normativas en Configuración -> Empresas Contratantes antes de cerrar.`
+            );
+          }
         }
 
         const cuadrantePrevio = await tx.cuadrante.findUnique({
@@ -609,8 +673,8 @@ export class CuadrantesController {
           );
         }
 
-        // Consultar turno anterior y vecinos de empalme dentro de la transacción
-        const [asigPrevia, asigPrevDia, asigSigDia] = await Promise.all([
+        // Consultar turno anterior, vecinos de empalme y reglas de empresa del empleado dentro de la transacción
+        const [asigPrevia, asigPrevDia, asigSigDia, emp] = await Promise.all([
           tx.asignacionTurno.findUnique({
             where: {
               empleadoId_fecha: {
@@ -635,6 +699,12 @@ export class CuadrantesController {
             },
             select: { tipoTurno: { select: { codigo: true } } },
           }),
+          typeof tx.empleado?.findUnique === 'function'
+            ? tx.empleado.findUnique({
+                where: { id: dto.empleadoId },
+                include: { empresaContratante: true },
+              })
+            : Promise.resolve(null),
         ]);
 
         const codPrevRaw = String(asigPrevia?.tipoTurno?.codigo || '').trim().toUpperCase();
@@ -645,8 +715,7 @@ export class CuadrantesController {
           asigPrevia &&
           asigPrevia.servicioEjecutorId &&
           asigPrevia.servicioEjecutorId !== dto.servicioId &&
-          codPrevRaw &&
-          ![CODIGO_CELDA_VACIA_DB, '', 'L', 'VAC', 'INC', 'LIC', 'FAM'].includes(codPrevRaw)
+          this.esTurnoOperativoOtroServicio(asigPrevia.tipoTurno)
         ) {
           const nombreOtroSrv =
             asigPrevia.servicioEjecutor?.nombre || asigPrevia.servicioEjecutorId;
@@ -656,7 +725,12 @@ export class CuadrantesController {
         }
 
         const tipoTurno = await this.resolverTipoTurno(codigoRaw, tx);
-        const horas = await this.liquidacionService.calcularHorasPorTipo(tipoTurno, fechaUtc);
+        const reglasEmp = this.liquidacionService.resolverReglasEmpleado?.(emp as any);
+        const horas = await this.liquidacionService.calcularHorasPorTipo(
+          tipoTurno,
+          fechaUtc,
+          reglasEmp
+        );
 
         const validacion = await this.reglasService.validarAsignacionCelda(
           {
@@ -740,10 +814,6 @@ export class CuadrantesController {
             true,
             tx
           );
-          const emp = await tx.empleado.findUnique({
-            where: { id: dto.empleadoId },
-            select: { servicioBaseId: true },
-          });
           if (emp && emp.servicioBaseId !== dto.servicioId) {
             const cuadBase = await tx.cuadrante.findUnique({
               where: {
@@ -824,7 +894,7 @@ export class CuadrantesController {
         const primerDiaMes = new Date(Date.UTC(anio, mes - 1, 1));
         const ultimoDiaMes = new Date(Date.UTC(anio, mes, 0, 23, 59, 59));
         const empIdsLote = Array.from(new Set(celdasInput.map((c) => c.empleadoId).filter(Boolean)));
-        const [novedadesMes, asignacionesOtrosServicios, asignacionesPreviasServicio] =
+        const [novedadesMes, asignacionesOtrosServicios, asignacionesPreviasServicio, empleadosLote] =
           await Promise.all([
             tx.novedadAusencia.findMany({
               where: {
@@ -840,7 +910,7 @@ export class CuadrantesController {
               select: {
                 empleadoId: true,
                 fecha: true,
-                tipoTurno: { select: { codigo: true } },
+                tipoTurno: { select: { codigo: true, horasOrdinarias: true, esAusencia: true } },
               },
             }),
             empIdsLote.length > 0
@@ -856,7 +926,24 @@ export class CuadrantesController {
                   },
                 })
               : Promise.resolve([]),
+            empIdsLote.length > 0 && typeof tx.empleado?.findMany === 'function'
+              ? tx.empleado.findMany({
+                  where: { id: { in: empIdsLote } },
+                  select: {
+                    id: true,
+                    horasSemanalesOverride: true,
+                    horasSemanalesLey: true,
+                    empresaContratante: true,
+                  },
+                })
+              : Promise.resolve([]),
           ]);
+
+        const mapaReglasEmp = new Map<string, any>();
+        for (const empRow of Array.isArray(empleadosLote) ? empleadosLote : []) {
+          const reglas = this.liquidacionService.resolverReglasEmpleado?.(empRow as any);
+          if (reglas) mapaReglasEmp.set(empRow.id, reglas);
+        }
 
         const mapaNovedadesDia = new Map<string, string>();
         for (const n of novedadesMes) {
@@ -874,8 +961,7 @@ export class CuadrantesController {
 
         const celdasOcupadasOtroServicio = new Set<string>();
         for (const a of asignacionesOtrosServicios) {
-          const cod = String(a.tipoTurno?.codigo || '').trim().toUpperCase();
-          if (![CODIGO_CELDA_VACIA_DB, '', 'L', 'VAC', 'INC', 'LIC', 'FAM'].includes(cod)) {
+          if (this.esTurnoOperativoOtroServicio(a.tipoTurno)) {
             const diaUtc = new Date(a.fecha).getUTCDate();
             celdasOcupadasOtroServicio.add(`${a.empleadoId}_${diaUtc}`);
           }
@@ -924,7 +1010,11 @@ export class CuadrantesController {
         for (const c of celdasFiltradas) {
           const fechaUtc = this.construirFechaUtcStrict(anio, mes, c.dia);
           const tipoTurno = mapaTipos.get(c.codigoNorm)!;
-          const horas = await this.liquidacionService.calcularHorasPorTipo(tipoTurno, fechaUtc);
+          const horas = await this.liquidacionService.calcularHorasPorTipo(
+            tipoTurno,
+            fechaUtc,
+            mapaReglasEmp.get(c.empleadoId)
+          );
           const codPrevGuardar = c.previstoNorm ?? c.codigoNorm;
 
           const antAud = mapaPrevio.get(`${c.empleadoId}_${c.dia}`) || 'L';
@@ -1217,8 +1307,14 @@ export class CuadrantesController {
                 horasNocturnas: 0,
                 colorHex: '#fee2e2',
                 descuentaBancoHoras: false,
+                modoAmortizacionBanco: 'HORAS_FIJAS',
+                prorrateaMetaContrato: true,
+                esAusencia: true,
+                bloqueaPermutas: true,
                 esNocturnoPesado: false,
+                esSistemaObligatorio: false,
                 visibleEnPaleta: true,
+                activo: true,
               },
               select: { id: true },
             });

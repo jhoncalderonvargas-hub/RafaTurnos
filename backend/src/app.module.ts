@@ -9,6 +9,7 @@ import { OperacionesHospitalModule } from './modules/operaciones/operaciones.mod
 import { SsoRoleGuard } from './modules/operaciones/sso-role.guard';
 import { ServiciosAdminModule } from './modules/servicios-admin/servicios-admin.module';
 import { LiquidacionModule } from './modules/liquidacion/liquidacion.module';
+import { EmpresasModule } from './modules/empresas/empresas.module';
 
 @Controller('api/v1')
 export class HealthController {
@@ -17,14 +18,15 @@ export class HealthController {
     return {
       servicio: 'Rafa Turnos Backend API (NestJS + Prisma)',
       estado: 'ONLINE',
-      normativa: 'CST Colombia + Ley 2466/2025 (19:00–06:00, Dom 90%→100%) + Ley 2101 (42h/sem) + Ley Emiliani',
+      normativa: 'Multi-Empresa (Decreto 1042 44h/18:00 + CST Ley 2466/2025 42h/19:00 + Régimen Editable) + Ley Emiliani',
       modulosActivos: [
+        'EmpresasModule (Gestión Multi-Empresa y Auto-descubrimiento Intranet)',
         'FestivosColombiaService (Caché RAM O(1) + Butcher/Meeus)',
-        'LiquidacionService (Motor Único HOD/HON/HDFD/HDFN + Vigencias + Art. 165 CST)',
+        'LiquidacionService (Motor Único HOD/HON/HDFD/HDFN + Días Hábiles Universales)',
         'BancoHorasNominaService (Continuo sin caducidad + Desacoplamiento Financiero)',
         'CuadrantesReglasService (Descanso 12h + Post-guardia + Rotación Homóloga)',
-        'ServiciosAdminController (Gobierno de Servicios, Enlace de Hermanos y Adscripción)',
-        'IntranetIntegration (SSO JWT + Webhooks en Tiempo Real + Sincronización REST)',
+        'ServiciosAdminController (Servicios Homogéneos/Multi-cargo, Metas por Turno, Turnos Obligatorios)',
+        'IntranetIntegration (SSO JWT + Sincronización Macroproceso × Cargo × Empresa)',
         'CalendarioIcalController (RFC 5545 webcal://)',
       ],
     };
@@ -39,6 +41,7 @@ export class HealthController {
     PrismaModule,
     FestivosModule,
     LiquidacionModule,
+    EmpresasModule,
     BancoHorasNominaModule,
     CuadrantesModule,
     OperacionesHospitalModule,

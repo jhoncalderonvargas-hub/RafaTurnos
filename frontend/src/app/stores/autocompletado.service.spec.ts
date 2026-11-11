@@ -199,4 +199,51 @@ describe('AutocompletadoService', () => {
       }
     }
   });
+
+  it('prioriza cubrir mínimo por turno antes de elevar a esperado bajo Esquema B', () => {
+    const srv: ServicioHospitalario = {
+      id: 'srv-esq',
+      codigo: 'ESQ',
+      nombre: 'Servicio Esquema B',
+      tipoAsistencia: 'ADMINISTRATIVO',
+      reqDia: 3,
+      reqNoche: 0,
+      modalidadDias: 'LUN_VIE_HABILES',
+      turnosHabilitados: ['ADM', 'L'],
+      metasPorTurno: [
+        {
+          codigoTurno: 'ADM',
+          habilitado: true,
+          minimoBase: 1,
+          esperadoBase: 3,
+          minimoDomFest: 0,
+          esperadoDomFest: 0,
+        },
+      ],
+    };
+
+    const filas = [makeFila('a1'), makeFila('a2')];
+    const res = service.generarAutocompletadoCuadrante({
+      srv,
+      srvId: 'srv-esq',
+      dias: diasNoviembre2026(),
+      catalogo: CATALOGO_TURNOS,
+      listaTurnosCatalogo: Object.values(CATALOGO_TURNOS).filter((t) => t.visibleEnPaleta !== false),
+      prevMapSnapshot: { a1: {}, a2: {} },
+      filasBase: filas,
+      filtroCategoriaActiva: 'TODAS',
+      enBorradorGlobal: true,
+      obtenerMetasDiaServicio: () => ({ reqDia: 3, reqNoche: 0, cerrado: false }),
+    });
+
+    // Días hábiles de Nov 2026 deben tener al menos 1 ADM cubierto (mínimo=1) donde haya personal disponible, y nunca en domingo/festivo
+    for (const d of diasNoviembre2026()) {
+      const enAdm = filas.filter((f) => res.actualMap[f.empleado.id][d.dia]?.codigo === 'ADM').length;
+      if (d.esDomingo || d.esSabado || d.festivo) {
+        expect(enAdm).toBe(0);
+      }
+    }
+    const admDia3 = filas.filter((f) => res.actualMap[f.empleado.id][3]?.codigo === 'ADM').length;
+    expect(admDia3).toBeGreaterThanOrEqual(1);
+  });
 });

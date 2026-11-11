@@ -7,14 +7,20 @@ import {
   calcularDescansoEntreTurnosMin,
   calcularDiasCompensatoriosDominicales,
   calcularMetaContractualProrrateada,
+  calcularMetaMensualPorDiasHabiles,
+  combinarReglasEmpresa,
+  contarDiasHabilesMes,
+  contarDiasHabilesProrrateados,
   crearPredicadoDescanso,
   DESCANSO_MINIMO_ENTRE_TURNOS_MIN,
   desglosarHorarioOrdinario,
   divisorHorasMensualesVigente,
   esCodigoExoneracionContrato,
+  esDiaHabilColombia,
   esDomingo,
   esFechaIsoValida,
   esTurnoNocturnoPrincipal,
+  esTurnoProrrateable,
   evaluarEstadoBancoHoras,
   evaluarJornadaSemanalPeriodo,
   formatearPorcentaje,
@@ -26,6 +32,8 @@ import {
   liquidarTurno,
   liquidarTurnoMinutos,
   obtenerHorasAmortizacionTurno,
+  PLANTILLA_CST_LEY_2466,
+  PLANTILLA_DECRETO_1042,
   r2,
   recargosVigentes,
   resumenNormativoPeriodo,
@@ -400,6 +408,90 @@ prueba('calcularMetaContractualProrrateada descuenta VAC/INC/LIC/FAM sin generar
   const cero = calcularMetaContractualProrrateada(168, 30, 0);
   assert.strictEqual(cero.horasExoneradas, 0);
   assert.strictEqual(cero.horasContratadasEfectivas, 168);
+});
+
+console.log('Multi-Empresa, Días Hábiles Universales y Prorrateo Configurable');
+prueba('Decreto 1042 (44h / 18:00 / Dom 100%) vs CST Ley 2466 (42h / 19:00 / Dom 90%) sin colisión en caché', () => {
+  assert.strictEqual(inicioNocturnoVigente('2026-11-10', PLANTILLA_DECRETO_1042), 18 * 60);
+  assert.strictEqual(inicioNocturnoVigente('2026-11-10', PLANTILLA_CST_LEY_2466), 19 * 60);
+
+  assert.strictEqual(recargosVigentes('2026-11-10', PLANTILLA_DECRETO_1042).dominical, 1.0);
+  assert.strictEqual(recargosVigentes('2026-11-10', PLANTILLA_CST_LEY_2466).dominical, 0.9);
+
+  // T8 15:00-23:00 mismo día evaluado primero bajo CST (4/4) y luego bajo Decreto 1042 (3/5)
+  const resCst = liquidarTurno(T8, '2026-11-10', descanso, PLANTILLA_CST_LEY_2466);
+  const resEse = liquidarTurno(T8, '2026-11-10', descanso, PLANTILLA_DECRETO_1042);
+  assert.deepStrictEqual(resCst, { hod: 4, hon: 4, hdfd: 0, hdfn: 0, total: 8 });
+  assert.deepStrictEqual(resEse, { hod: 3, hon: 5, hdfd: 0, hdfn: 0, total: 8 });
+
+  const empHalf = combinarReglasEmpresa(PLANTILLA_DECRETO_1042, 22);
+  assert.strictEqual(empHalf.horasSemanalesContrato, 22);
+});
+
+prueba('contarDiasHabilesMes y calcularMetaMensualPorDiasHabiles exacto para 44h y 42h', () => {
+  const esFest = (f: string) => f === '2026-10-12' || FESTIVOS.has(f);
+  // Octubre 2026: 31 días - 4 domingos (4,11,18,25) - 1 festivo (12) = 26 días hábiles
+  const oct = contarDiasHabilesMes(2026, 10, esFest);
+  assert.strictEqual(oct.diasDelMes, 31);
+  assert.strictEqual(oct.diasHabilesMes, 26);
+
+  // Noviembre 2026: 30 días - 5 domingos (1,8,15,22,29) - 2 festivos (2,16) = 23 días hábiles
+  const esFestNov = (f: string) => f === '2026-11-02' || f === '2026-11-16';
+  const nov = contarDiasHabilesMes(2026, 11, esFestNov);
+  assert.strictEqual(nov.diasDelMes, 30);
+  assert.strictEqual(nov.diasHabilesMes, 23);
+
+  // 24 días hábiles exactos: 44h -> 176.00; 42h -> 168.00
+  assert.strictEqual(calcularMetaMensualPorDiasHabiles(44, 24, 0).horasContratadasNominales, 176);
+  assert.strictEqual(calcularMetaMensualPorDiasHabiles(42, 24, 0).horasContratadasNominales, 168);
+
+  // Oct 2026 (26 días hábiles): 44h -> 190.67; 42h -> 182.00
+  assert.strictEqual(calcularMetaMensualPorDiasHabiles(44, 26, 0).horasContratadasNominales, 190.67);
+  assert.strictEqual(calcularMetaMensualPorDiasHabiles(42, 26, 0).horasContratadasNominales, 182);
+
+  // Mes completo exonerado -> meta efectiva = 0
+  const exTotal = calcularMetaMensualPorDiasHabiles(44, 26, 30);
+  assert.strictEqual(exTotal.horasContratadasEfectivas, 0);
+  assert.strictEqual(exTotal.horasExoneradas, 190.67);
+});
+
+prueba('Prorrateo selectivo: turno DLR configurable SOLO descuenta días hábiles (ignora domingo y festivo)', () => {
+  const esFest = (f: string) => f === '2026-11-02' || f === '2026-11-16';
+  assert.strictEqual(esDiaHabilColombia('2026-11-02', esFest), false); // lunes festivo
+  assert.strictEqual(esDiaHabilColombia('2026-11-08', esFest), false); // domingo
+  assert.strictEqual(esDiaHabilColombia('2026-11-03', esFest), true);  // martes hábil
+
+  const turnoDlr: TurnoLiquidable = { codigo: 'DLR', horasOrdinarias: 0, prorrateaMetaContrato: true };
+  const turnoL: TurnoLiquidable = { codigo: 'L', horasOrdinarias: 0, prorrateaMetaContrato: false };
+  assert.strictEqual(esTurnoProrrateable(turnoDlr), true);
+  assert.strictEqual(esTurnoProrrateable(turnoL), false);
+
+  // Asignamos DLR en festivo (02-nov), domingo (08-nov) y 2 días hábiles (03-nov, 04-nov), + L en día hábil (05-nov)
+  const diasPror = contarDiasHabilesProrrateados(
+    [
+      { fechaIso: '2026-11-02', turno: turnoDlr },
+      { fechaIso: '2026-11-08', turno: turnoDlr },
+      { fechaIso: '2026-11-03', turno: turnoDlr },
+      { fechaIso: '2026-11-04', turno: turnoDlr },
+      { fechaIso: '2026-11-05', turno: turnoL },
+    ],
+    esFest
+  );
+  assert.strictEqual(diasPror, 2);
+
+  const metaEse = calcularMetaMensualPorDiasHabiles(44, 23, diasPror);
+  assert.strictEqual(metaEse.horasContratadasNominales, 168.67);
+  assert.strictEqual(metaEse.horasContratadasEfectivas, 154); // (23 - 2) * 44 / 6 = 154.00
+  assert.strictEqual(metaEse.horasExoneradas, 14.67);
+});
+
+prueba('Amortización COMP dinámica: DIA_HABIL_EMPRESA (44h→7.33h, 42h→7h) vs HORAS_FIJAS', () => {
+  const compDinamico = { descuentaBancoHoras: true, modoAmortizacionBanco: 'DIA_HABIL_EMPRESA', horasAmortizacionBanco: 8 };
+  assert.strictEqual(obtenerHorasAmortizacionTurno(compDinamico, 44, 6), 7.33);
+  assert.strictEqual(obtenerHorasAmortizacionTurno(compDinamico, 42, 6), 7);
+
+  const compFijo = { descuentaBancoHoras: true, modoAmortizacionBanco: 'HORAS_FIJAS', horasAmortizacionBanco: 12 };
+  assert.strictEqual(obtenerHorasAmortizacionTurno(compFijo, 44, 6), 12);
 });
 
 console.log(`\n${ok} pruebas OK${process.exitCode ? ' — HAY FALLOS' : ''}`);

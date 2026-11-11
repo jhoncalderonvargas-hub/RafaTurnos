@@ -26,12 +26,13 @@ function leerCensoRrhhLocal() {
     const data = JSON.parse(raw);
     return {
       macroprocesos: Array.isArray(data.macroprocesos) ? data.macroprocesos : [],
+      empresas: Array.isArray(data.empresas) ? data.empresas : [],
       empleados: Array.isArray(data.empleados) ? data.empleados : [],
       novedades: Array.isArray(data.novedades) ? data.novedades : [],
     };
   } catch (err) {
     console.error('Error leyendo censo-rrhh.json:', err.message);
-    return { macroprocesos: [], empleados: [], novedades: [] };
+    return { macroprocesos: [], empresas: [], empleados: [], novedades: [] };
   }
 }
 
@@ -162,10 +163,10 @@ const HTML_PORTAL = `<!DOCTYPE html>
         </div>
         <div style="display: flex; flex-direction: column; gap: 8px;">
           <button class="btn-quick" onclick="lanzarDirecto('1010001018', 'COLABORADOR')">
-            🏥 Urgencias: Bernardo Castro
+            🏥 Urgencias: Bernardo Castro (TEMP_SALUD · 42h)
           </button>
           <button class="btn-quick" style="background: #334155;" onclick="lanzarDirecto('1010001144', 'COLABORADOR')">
-            🔧 Mantenimiento: Jaime Londoño
+            🔧 Mantenimiento: Jaime Londoño (COOP_SERV · 42h)
           </button>
         </div>
       </div>
@@ -183,10 +184,10 @@ const HTML_PORTAL = `<!DOCTYPE html>
         </div>
         <div style="display: flex; flex-direction: column; gap: 8px;">
           <button class="btn-quick coord" onclick="lanzarDirecto('1010001022', 'COORDINADOR')">
-            🏥 Urgencias: Alfonso Mora
+            🏥 Urgencias: Alfonso Mora (ESE_PLANTA · 44h)
           </button>
           <button class="btn-quick coord" style="background: #b45309;" onclick="lanzarDirecto('1037645182', 'COORDINADOR')">
-            🔧 Mantenimiento: Jhon Alexander Calderon
+            🔧 Mantenimiento: Jhon Alexander Calderon (ESE_PLANTA · 44h)
           </button>
         </div>
       </div>
@@ -276,9 +277,11 @@ const HTML_PORTAL = `<!DOCTYPE html>
 
       for (const e of lista) {
         const cat = e.cargoNombre || '';
+        const emp = e.empresaCodigo ? ' · ' + e.empresaCodigo : '';
+        const mp = e.macroprocesoCodigo ? ' [' + e.macroprocesoCodigo + ']' : '';
         const opt = document.createElement('option');
         opt.value = e.documento;
-        opt.textContent = e.nombre + ' — ' + cat + ' (C.C. ' + e.documento + ')';
+        opt.textContent = e.nombre + ' — ' + cat + emp + mp + ' (C.C. ' + e.documento + ')';
         selEmp.appendChild(opt);
       }
     }
@@ -343,6 +346,18 @@ const server = http.createServer((req, res) => {
     });
     const { macroprocesos } = leerCensoRrhhLocal();
     res.end(JSON.stringify(macroprocesos, null, 2));
+    return;
+  }
+
+  if (req.method === 'GET' && req.url.startsWith('/api/intranet/empresas')) {
+    res.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    });
+    const { empresas } = leerCensoRrhhLocal();
+    res.end(JSON.stringify(empresas, null, 2));
     return;
   }
 

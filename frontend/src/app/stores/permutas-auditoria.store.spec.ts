@@ -189,4 +189,82 @@ describe('PermutasAuditoriaStore', () => {
     expect(store.permutasVisiblesDashboard().map((p) => p.id)).toEqual(['p1', 'p2']);
     expect(store.notificacionesSolicitudesCount()).toBe(1); // Solo p2 de srv-urg en PENDIENTE_SUPERVISOR
   });
+
+  it('admite permutas multi-cargo si permitePermutaEntreCargos=true y ambos cargos estan permitidos, y respeta bloqueaPermutas', () => {
+    catalogos.aplicarServiciosDesdeDb([
+      {
+        id: 'srv-mant',
+        codigo: 'MANT',
+        nombre: 'Mantenimiento Equivalente',
+        tipoAsistencia: 'APOYO_OPERATIVO',
+        permitePermutaEntreCargos: true,
+        cargosPermitidosIds: ['cat-aux', 'cat-tec'],
+        cargosPermitidos: [
+          { categoriaId: 'cat-aux', categoriaNombre: 'Auxiliar Operativo' },
+          { categoriaId: 'cat-tec', categoriaNombre: 'Técnico' },
+        ],
+        reqDia: 1,
+        reqNoche: 1,
+      },
+    ]);
+    catalogos.servicioSeleccionadoId.set('srv-mant');
+    catalogos.aplicarEmpleadosDesdeDb([
+      {
+        id: 'e-aux',
+        documento: '301',
+        nombre: 'Pedro Aux',
+        categoriaId: 'cat-aux',
+        categoria: { id: 'cat-aux', nombre: 'Auxiliar Operativo' },
+        servicioBaseId: 'srv-mant',
+      },
+      {
+        id: 'e-tec',
+        documento: '302',
+        nombre: 'Marta Tec',
+        categoriaId: 'cat-tec',
+        categoria: { id: 'cat-tec', nombre: 'Técnico' },
+        servicioBaseId: 'srv-mant',
+      },
+      {
+        id: 'e-med',
+        documento: '303',
+        nombre: 'Dr. Ajeno',
+        categoriaId: 'cat-med',
+        categoria: { id: 'cat-med', nombre: 'Médico General' },
+        servicioBaseId: 'srv-mant',
+      },
+    ]);
+
+    const resCompat = store.validarReglasPermuta('e-aux', 'e-tec', 10, 'M8', 'T8', {
+      anio: 2026,
+      mes: 11,
+      totalDias: 30,
+      servicioId: 'srv-mant',
+      matriz: {
+        'e-aux': { 10: { codigo: 'M8' } },
+        'e-tec': { 10: { codigo: 'T8' } },
+      },
+    });
+    expect(resCompat.valida).toBeTrue();
+    expect(resCompat.motivo).toContain('Cargos equivalentes');
+
+    const resNoPermitido = store.validarReglasPermuta('e-aux', 'e-med', 10, 'M8', 'T8', {
+      anio: 2026,
+      mes: 11,
+      totalDias: 30,
+      servicioId: 'srv-mant',
+      matriz: {},
+    });
+    expect(resNoPermitido.valida).toBeFalse();
+
+    const resDisp = store.validarReglasPermuta('e-aux', 'e-tec', 10, 'DISP', 'M8', {
+      anio: 2026,
+      mes: 11,
+      totalDias: 30,
+      servicioId: 'srv-mant',
+      matriz: {},
+    });
+    expect(resDisp.valida).toBeFalse();
+    expect(resDisp.motivo).toContain('bloqueo de permutas');
+  });
 });

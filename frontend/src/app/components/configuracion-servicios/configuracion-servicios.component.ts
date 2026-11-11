@@ -2,14 +2,18 @@ import { Component, EventEmitter, Input, Output, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
+  CategoriaProfesionalItem,
   EmpleadoHospital,
   MacroprocesoInfo,
+  MetaTurnoServicio,
   ModalidadDiasServicio,
   ReglaCargoServicio,
   ServicioHospitalario,
   TipoAsistencia,
   TipoTurnoConfig,
 } from '../../models';
+import { FestivosColombiaHelper } from '../../festivos-colombia.helper';
+import { hoyColombiaIso, r2 } from '../../shared/liquidacion-horas';
 
 @Component({
   selector: 'app-configuracion-servicios',
@@ -118,8 +122,8 @@ import {
                   type="number"
                   min="0"
                   max="50"
-                  [disabled]="nuevoServicioReglasPorCargo.length > 0"
-                  [title]="nuevoServicioReglasPorCargo.length > 0 ? 'Calculado automáticamente desde el desglose por cargo' : ''"
+                  [disabled]="nuevoServicioReglasPorCargo.length > 0 || nuevoServicioMetasPorTurno.length > 0"
+                  [title]="nuevoServicioMetasPorTurno.length > 0 ? 'Calculado automáticamente desde la Matriz de Metas por Turno' : (nuevoServicioReglasPorCargo.length > 0 ? 'Calculado automáticamente desde el desglose por cargo' : '')"
                   [ngModel]="nuevoServicioReqDia"
                   (ngModelChange)="cambiarNuevoServicioReqDia.emit(+$event)"
                 />
@@ -131,8 +135,8 @@ import {
                   type="number"
                   min="0"
                   max="50"
-                  [disabled]="nuevoServicioReglasPorCargo.length > 0"
-                  [title]="nuevoServicioReglasPorCargo.length > 0 ? 'Calculado automáticamente desde el desglose por cargo' : ''"
+                  [disabled]="nuevoServicioReglasPorCargo.length > 0 || nuevoServicioMetasPorTurno.length > 0"
+                  [title]="nuevoServicioMetasPorTurno.length > 0 ? 'Calculado automáticamente desde la Matriz de Metas por Turno' : (nuevoServicioReglasPorCargo.length > 0 ? 'Calculado automáticamente desde el desglose por cargo' : '')"
                   [ngModel]="nuevoServicioReqNoche"
                   (ngModelChange)="cambiarNuevoServicioReqNoche.emit(+$event)"
                 />
@@ -152,8 +156,8 @@ import {
                     type="number"
                     min="0"
                     max="50"
-                    [disabled]="nuevoServicioReglasPorCargo.length > 0"
-                    [title]="nuevoServicioReglasPorCargo.length > 0 ? 'Calculado automáticamente desde el desglose por cargo' : ''"
+                    [disabled]="nuevoServicioReglasPorCargo.length > 0 || nuevoServicioMetasPorTurno.length > 0"
+                    [title]="nuevoServicioMetasPorTurno.length > 0 ? 'Calculado automáticamente desde la Matriz de Metas por Turno' : (nuevoServicioReglasPorCargo.length > 0 ? 'Calculado automáticamente desde el desglose por cargo' : '')"
                     [ngModel]="nuevoServicioReqDiaDomFest"
                     (ngModelChange)="cambiarNuevoServicioReqDiaDomFest.emit(+$event)"
                   />
@@ -165,8 +169,8 @@ import {
                     type="number"
                     min="0"
                     max="50"
-                    [disabled]="nuevoServicioReglasPorCargo.length > 0"
-                    [title]="nuevoServicioReglasPorCargo.length > 0 ? 'Calculado automáticamente desde el desglose por cargo' : ''"
+                    [disabled]="nuevoServicioReglasPorCargo.length > 0 || nuevoServicioMetasPorTurno.length > 0"
+                    [title]="nuevoServicioMetasPorTurno.length > 0 ? 'Calculado automáticamente desde la Matriz de Metas por Turno' : (nuevoServicioReglasPorCargo.length > 0 ? 'Calculado automáticamente desde el desglose por cargo' : '')"
                     [ngModel]="nuevoServicioReqNocheDomFest"
                     (ngModelChange)="cambiarNuevoServicioReqNocheDomFest.emit(+$event)"
                   />
@@ -203,7 +207,7 @@ import {
               </div>
             </div>
             <div class="turnos-chips-container">
-              @for (t of listaTurnosCatalogo; track t.codigo) {
+              @for (t of turnosDisponiblesEnForm; track t.codigo) {
                 @let activo = esTurnoHabilitadoEnServicioForm(t.codigo);
                 <button
                   type="button"
@@ -222,6 +226,172 @@ import {
               }
             </div>
           </div>
+
+          <!-- Cargos Profesionales Permitidos & Regla de Permutas Multi-Cargo -->
+          <div class="form-row cargos-permitidos-box">
+            <div class="cargos-permitidos-header">
+              <label class="cargos-permitidos-title">
+                🎓 Cargos Profesionales Permitidos en este Servicio:
+              </label>
+              <small class="cargos-permitidos-hint">
+                @if (nuevoServicioCargosPermitidosIds.length === 0) {
+                  Sin restricción específica (admite rotación general compatible)
+                } @else {
+                  {{ nuevoServicioCargosPermitidosIds.length }} cargo(s) habilitado(s)
+                }
+              </small>
+            </div>
+            <div class="cargos-permitidos-chips">
+              @for (cat of categoriasProfesionales; track cat.id) {
+                @let cargoSel = esCargoPermitidoEnServicioForm(cat.id);
+                <button
+                  type="button"
+                  class="cargo-permitido-chip"
+                  [class.is-active]="cargoSel"
+                  [attr.aria-pressed]="cargoSel"
+                  (click)="alternarCargoPermitidoEnServicioForm.emit(cat.id)">
+                  <span>{{ cargoSel ? '✓' : '+' }}</span>
+                  <span>{{ cat.nombre }}</span>
+                </button>
+              } @empty {
+                <span class="text-muted">Cargando catálogo de cargos profesionales...</span>
+              }
+            </div>
+            <label class="check-row-servicio">
+              <input
+                type="checkbox"
+                [ngModel]="nuevoServicioPermitePermutaEntreCargos"
+                (ngModelChange)="cambiarNuevoServicioPermitePermutaEntreCargos.emit($event)"
+              />
+              <span>
+                🔄 Permitir permutas entre distintos cargos permitidos de este servicio (ej. Auxiliares / Técnicos / Tecnólogos con funciones equivalentes)
+              </span>
+            </label>
+          </div>
+
+          <!-- Matriz de Metas por Turno Operativo (Esquema B) -->
+          @if (nuevoServicioMetasPorTurno.length > 0) {
+            @let balanceCap = resumenCapacidadServicioForm;
+            <div class="form-row metas-turno-box">
+              <div class="cargos-desglose-header">
+                <label class="metas-turno-title">
+                  🎯 Matriz de Metas Diarias por Turno Operativo (Cuadrante de Cobertura):
+                </label>
+                <small class="metas-turno-hint">
+                  Verde ≥ Esperado · Amarillo Mínimo..&lt;Esperado · Rojo &lt; Mínimo
+                </small>
+              </div>
+              <div class="table-responsive">
+                <table class="metas-turno-table">
+                  <thead>
+                    <tr>
+                      <th>Turno</th>
+                      <th>{{ nuevoServicioModalidadDias === 'TODOS_24_7' ? 'Mín. (24/7)' : (nuevoServicioModalidadDias === 'LUN_VIE_HABILES' ? 'Mín. (Lun–Vie)' : 'Mín. (Lun–Sáb)') }}</th>
+                      <th>{{ nuevoServicioModalidadDias === 'TODOS_24_7' ? 'Esp. (24/7)' : (nuevoServicioModalidadDias === 'LUN_VIE_HABILES' ? 'Esp. (Lun–Vie)' : 'Esp. (Lun–Sáb)') }}</th>
+                      @if (nuevoServicioModalidadDias === 'TODOS_GUARDIA_FDS') {
+                        <th class="col-df">Mín. Dom/Fest</th>
+                        <th class="col-df">Esp. Dom/Fest</th>
+                      }
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (m of nuevoServicioMetasPorTurno; track m.codigoTurno) {
+                      <tr>
+                        <td>
+                          <div class="meta-turno-badge-cell">
+                            <span
+                              class="mini-shift"
+                              [style.background-color]="m.colorHex || '#E0F2FE'"
+                              [style.color]="obtenerCfgMeta(m.codigoTurno)?.textHex || '#0F172A'"
+                              [style.border-color]="obtenerCfgMeta(m.codigoTurno)?.borderHex || '#94A3B8'">
+                              {{ m.codigoTurno }}
+                            </span>
+                            <div class="meta-turno-meta">
+                              <strong>{{ m.nombreTurno || m.codigoTurno }}</strong>
+                              <small>{{ m.horasOrdinarias || 8 }}h · {{ m.horaInicio }}-{{ m.horaFin }}</small>
+                            </div>
+                          </div>
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            min="0"
+                            max="50"
+                            class="cargo-meta-input"
+                            [attr.aria-label]="'Mínimo base ' + m.codigoTurno"
+                            [ngModel]="m.minimoBase"
+                            (ngModelChange)="actualizarMetaTurnoEnServicioForm.emit({ codigoTurno: m.codigoTurno, campo: 'minimoBase', valor: +$event })"
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            min="0"
+                            max="50"
+                            class="cargo-meta-input"
+                            [attr.aria-label]="'Esperado base ' + m.codigoTurno"
+                            [ngModel]="m.esperadoBase"
+                            (ngModelChange)="actualizarMetaTurnoEnServicioForm.emit({ codigoTurno: m.codigoTurno, campo: 'esperadoBase', valor: +$event })"
+                          />
+                        </td>
+                        @if (nuevoServicioModalidadDias === 'TODOS_GUARDIA_FDS') {
+                          <td>
+                            <input
+                              type="number"
+                              min="0"
+                              max="50"
+                              class="cargo-meta-input"
+                              [attr.aria-label]="'Mínimo dom/fest ' + m.codigoTurno"
+                              [ngModel]="m.minimoDomFest"
+                              (ngModelChange)="actualizarMetaTurnoEnServicioForm.emit({ codigoTurno: m.codigoTurno, campo: 'minimoDomFest', valor: +$event })"
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              min="0"
+                              max="50"
+                              class="cargo-meta-input"
+                              [attr.aria-label]="'Esperado dom/fest ' + m.codigoTurno"
+                              [ngModel]="m.esperadoDomFest"
+                              (ngModelChange)="actualizarMetaTurnoEnServicioForm.emit({ codigoTurno: m.codigoTurno, campo: 'esperadoDomFest', valor: +$event })"
+                            />
+                          </td>
+                        }
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- Pre-check Capacidad vs Demanda Mensual -->
+              <div
+                class="capacidad-demanda-banner"
+                [class.cap-deficit]="servicioEditandoId && balanceCap.diferencia < 0"
+                [class.cap-ok]="servicioEditandoId && balanceCap.diferencia >= 0">
+                <div class="cap-row">
+                  <span>📊 Demanda esperada ({{ balanceCap.mesNombre }}): <strong>{{ balanceCap.demandaHoras }}h/mes</strong></span>
+                  @if (servicioEditandoId) {
+                    <span>
+                      👥 Plantilla actual ({{ balanceCap.personas }} colab.): <strong>{{ balanceCap.capacidadHoras }}h/mes</strong>
+                      ({{ balanceCap.diferencia >= 0 ? '+' : '' }}{{ balanceCap.diferencia }}h)
+                    </span>
+                  } @else {
+                    <span>👥 Personal estimado requerido (~168h/mes): <strong>{{ balanceCap.personasEstimadas }} colab.</strong></span>
+                  }
+                </div>
+                @if (servicioEditandoId && balanceCap.diferencia < 0) {
+                  <small class="cap-alert-text">
+                    ⚠️ La demanda esperada supera la capacidad nominal actual del servicio en {{ -balanceCap.diferencia }}h (requerirá horas extras o personal de apoyo).
+                  </small>
+                }
+              </div>
+            </div>
+          } @else {
+            <div class="modalidad-info-banner">
+              💡 Selecciona una plantilla rápida o haz clic en un turno de la lista superior para configurar metas diarias individuales por cada código de turno.
+            </div>
+          }
 
           @if (nuevoServicioReglasPorCargo.length > 0) {
             <div class="form-row cargos-desglose-box">
@@ -353,7 +523,7 @@ import {
             </select>
           </div>
           <div class="form-row">
-            <label for="select-enlace-srv2">Servicio de Apoyo:</label>
+            <label for="select-enlace-srv2">Servicio de Apoyo (verificando compatibilidad de cargos):</label>
             <select
               id="select-enlace-srv2"
               [ngModel]="enlaceHermanoSrv2"
@@ -361,8 +531,13 @@ import {
             >
               <option value="" disabled>-- Seleccionar Servicio de Apoyo --</option>
               @for (s of servicios; track s.id) {
+                @let comp = estadoCompatibilidadCargos(enlaceHermanoSrv1, s);
                 <option [value]="s.id" [disabled]="s.id === enlaceHermanoSrv1">
                   {{ s.nombre }} ({{ s.codigo }})
+                  @if (s.id !== enlaceHermanoSrv1) {
+                    @if (comp === 'COMPATIBLE') { — ✅ Cargo compatible }
+                    @else if (comp === 'INCOMPATIBLE') { — ⚠️ Cargos distintos }
+                  }
                 </option>
               }
             </select>
@@ -425,6 +600,16 @@ import {
                 <td><strong class="font-mono">{{ srv.codigo }}</strong></td>
                 <td>
                   <strong>{{ srv.nombre }}</strong>
+                  @if (srv.cargosPermitidos && srv.cargosPermitidos.length > 0) {
+                    <div class="srv-cargos-chips">
+                      @for (cp of srv.cargosPermitidos; track cp.categoriaId || cp.categoriaNombre) {
+                        <span class="badge-cargo-srv">{{ cp.categoriaNombre }}</span>
+                      }
+                    </div>
+                  }
+                  @if (srv.permitePermutaEntreCargos) {
+                    <div class="srv-permuta-note">🔄 Permuta multi-cargo habilitada</div>
+                  }
                 </td>
                 <td>
                   @let macro = infoMacroproceso(srv.tipoAsistencia);
@@ -435,12 +620,24 @@ import {
                 </td>
                 <td class="font-mono">
                   <div class="metas-cell-stack">
-                    <span class="badge-personal" [title]="srv.modalidadDias === 'LUN_VIE_HABILES' ? 'Mínimo requerido Lunes a Viernes: Día / Noche' : 'Mínimo requerido Lunes a Sábado: Día / Noche'">
-                      ☀️{{ srv.reqDia }} • 🌙{{ srv.reqNoche }}
-                    </span>
+                    @if (srv.metasPorTurno && srv.metasPorTurno.length > 0) {
+                      <div class="metas-turno-pills">
+                        @for (mt of srv.metasPorTurno; track mt.codigoTurno) {
+                          <span
+                            class="meta-turno-pill"
+                            [title]="'Mín: ' + mt.minimoBase + ' / Esp: ' + mt.esperadoBase + (srv.modalidadDias === 'TODOS_GUARDIA_FDS' ? ' | Dom/Fest: ' + mt.minimoDomFest + '–' + mt.esperadoDomFest : '')">
+                            <strong>{{ mt.codigoTurno }}</strong>: {{ mt.minimoBase }}–{{ mt.esperadoBase }}
+                          </span>
+                        }
+                      </div>
+                    } @else {
+                      <span class="badge-personal" [title]="srv.modalidadDias === 'LUN_VIE_HABILES' ? 'Mínimo requerido Lunes a Viernes: Día / Noche' : 'Mínimo requerido Lunes a Sábado: Día / Noche'">
+                        ☀️{{ srv.reqDia }} • 🌙{{ srv.reqNoche }}
+                      </span>
+                    }
                     <small class="modalidad-subtext">
                       {{ etiquetaModalidadDias(srv.modalidadDias) }}
-                      @if (srv.modalidadDias === 'TODOS_GUARDIA_FDS') {
+                      @if (srv.modalidadDias === 'TODOS_GUARDIA_FDS' && (!srv.metasPorTurno || srv.metasPorTurno.length === 0)) {
                         (Dom/Fest: {{ srv.reqDiaDomFest ?? srv.reqDia }}/{{ srv.reqNocheDomFest ?? srv.reqNoche }})
                       }
                     </small>
@@ -550,10 +747,53 @@ import {
                             {{ obtenerEmpleadosDelServicio(srv.id).length }} colaboradores
                           </span>
                         </div>
-                        <small class="personal-drawer-subtitle">
-                          Censo Oficial de Personal
-                        </small>
+                        <div class="personal-drawer-actions">
+                          @if (obtenerEmpleadosDelServicio(srv.id).length > 0) {
+                            <button
+                              type="button"
+                              class="btn-outline btn-plantilla-sm"
+                              (click)="alternarSeleccionTodosServicio(srv.id)">
+                              {{ todosSeleccionadosEnServicio(srv.id) ? '☐ Desmarcar todos' : '☑️ Seleccionar todos' }}
+                            </button>
+                          }
+                          <small class="personal-drawer-subtitle">
+                            Adscripción Autónoma
+                          </small>
+                        </div>
                       </div>
+
+                      @let selIds = obtenerSeleccionadosEnServicio(srv.id);
+                      @if (selIds.length > 0) {
+                        <div class="batch-transfer-bar">
+                          <strong>🔄 {{ selIds.length }} seleccionado(s) para traslado masivo a:</strong>
+                          <select
+                            class="batch-transfer-select"
+                            [attr.aria-label]="'Servicio destino para traslado desde ' + srv.nombre"
+                            [ngModel]="destinoTrasladoPorServicio[srv.id] || ''"
+                            (ngModelChange)="destinoTrasladoPorServicio[srv.id] = $event"
+                          >
+                            <option value="" disabled>-- Elegir servicio destino --</option>
+                            @for (dest of servicios; track dest.id) {
+                              @if (dest.id !== srv.id) {
+                                <option [value]="dest.id">{{ dest.nombre }} ({{ dest.codigo }})</option>
+                              }
+                            }
+                          </select>
+                          <button
+                            type="button"
+                            class="btn-sm-primary"
+                            [disabled]="!destinoTrasladoPorServicio[srv.id]"
+                            (click)="ejecutarTrasladoLote(srv.id)">
+                            🚚 Trasladar Lote
+                          </button>
+                          <button
+                            type="button"
+                            class="btn-outline btn-plantilla-sm"
+                            (click)="limpiarSeleccionServicio(srv.id)">
+                            Cancelar
+                          </button>
+                        </div>
+                      }
 
                       @if (obtenerEmpleadosDelServicio(srv.id).length === 0) {
                         <div class="personal-drawer-empty">
@@ -574,27 +814,58 @@ import {
 
                               <div class="personal-cards-grid">
                                 @for (colab of grupo.colaboradores; track colab.id) {
-                                  <div class="colaborador-mini-card">
-                                    <div class="colaborador-mini-info">
-                                      <span class="colaborador-mini-name" [title]="colab.nombre">
-                                        {{ colab.nombre }}
-                                      </span>
-                                      <span class="colaborador-mini-doc">
-                                        CC: {{ colab.documento }}
-                                      </span>
+                                  @let regSem = colab.horasSemanalesAplicadas ?? colab.empresaContratante?.horasSemanalesContrato ?? colab.horasSemanalesLey ?? 42;
+                                  <div
+                                    class="colaborador-mini-card"
+                                    [class.is-selected]="seleccionadosTraslado.has(colab.id)">
+                                    <div class="colaborador-card-top">
+                                      <label class="colab-select-label">
+                                        <input
+                                          type="checkbox"
+                                          [checked]="seleccionadosTraslado.has(colab.id)"
+                                          (change)="alternarSeleccionColaborador(colab.id)"
+                                        />
+                                        <div class="colaborador-mini-info">
+                                          <span class="colaborador-mini-name" [title]="colab.nombre">
+                                            {{ colab.nombre }}
+                                          </span>
+                                          <span class="colaborador-mini-doc">
+                                            CC: {{ colab.documento }}
+                                          </span>
+                                        </div>
+                                      </label>
+                                      <div class="colaborador-mini-metrics">
+                                        <span
+                                          class="colaborador-empresa-badge"
+                                          [class.is-pendiente]="colab.empresaContratante?.estadoConfiguracion === 'PENDIENTE_REGLAS'"
+                                          [title]="(colab.empresaContratante?.nombre || 'Empresa por defecto') + ' (' + regSem + 'h/sem)'">
+                                          {{ colab.empresaContratante?.codigo || 'CST' }} · {{ regSem }}h
+                                        </span>
+                                        <span class="colaborador-contrato-badge" title="Meta nominal de días hábiles del mes">
+                                          ⏱️ {{ colab.horasContratoMes }}h/mes
+                                        </span>
+                                        <span
+                                          class="colaborador-banco-badge"
+                                          [class.banco-neg]="(colab.saldoBancoAnterior || 0) < 0"
+                                          [class.banco-pos]="(colab.saldoBancoAnterior || 0) > 0"
+                                          title="Saldo en Banco de Horas"
+                                        >
+                                          🏦 {{ (colab.saldoBancoAnterior || 0) > 0 ? '+' : '' }}{{ colab.saldoBancoAnterior || 0 }}h
+                                        </span>
+                                      </div>
                                     </div>
-                                    <div class="colaborador-mini-metrics">
-                                      <span class="colaborador-contrato-badge" title="Horas de contrato mensual">
-                                        ⏱️ {{ colab.horasContratoMes || 168 }}h/mes
-                                      </span>
-                                      <span
-                                        class="colaborador-banco-badge"
-                                        [class.banco-neg]="(colab.saldoBancoAnterior || 0) < 0"
-                                        [class.banco-pos]="(colab.saldoBancoAnterior || 0) > 0"
-                                        title="Saldo en Banco de Horas"
+                                    <div class="colaborador-adscripcion-row">
+                                      <span class="adscripcion-label">Servicio:</span>
+                                      <select
+                                        class="adscripcion-select"
+                                        [attr.aria-label]="'Cambiar servicio de ' + colab.nombre"
+                                        [ngModel]="colab.servicioBaseId"
+                                        (ngModelChange)="cambiarServicioEmpleadoIndividual(colab.id, $event)"
                                       >
-                                        🏦 {{ (colab.saldoBancoAnterior || 0) > 0 ? '+' : '' }}{{ colab.saldoBancoAnterior || 0 }}h
-                                      </span>
+                                        @for (sDest of servicios; track sDest.id) {
+                                          <option [value]="sDest.id">{{ sDest.codigo }} — {{ sDest.nombre }}</option>
+                                        }
+                                      </select>
                                     </div>
                                   </div>
                                 }
@@ -618,6 +889,7 @@ export class ConfiguracionServiciosComponent {
   @Input() macroprocesos: MacroprocesoInfo[] = [];
   @Input() servicios: ServicioHospitalario[] = [];
   @Input() empleados: EmpleadoHospital[] = [];
+  @Input() categoriasProfesionales: CategoriaProfesionalItem[] = [];
   @Input() totalCategoriasUnicas = 0;
   @Input() totalEnlacesApoyo = 0;
   @Input() servicioEditandoId: string | null = null;
@@ -625,6 +897,9 @@ export class ConfiguracionServiciosComponent {
   @Input() nuevoServicioNombre = '';
   @Input() nuevoServicioTipoAsistencia: any = 'URGENCIAS';
   @Input() nuevoServicioModalidadDias: any = 'TODOS_24_7';
+  @Input() nuevoServicioPermitePermutaEntreCargos = false;
+  @Input() nuevoServicioCargosPermitidosIds: string[] = [];
+  @Input() nuevoServicioMetasPorTurno: MetaTurnoServicio[] = [];
   @Input() nuevoServicioReqDia = 4;
   @Input() nuevoServicioReqNoche = 2;
   @Input() nuevoServicioReqDiaDomFest = 2;
@@ -641,6 +916,13 @@ export class ConfiguracionServiciosComponent {
   @Output() cambiarNuevoServicioNombre = new EventEmitter<string>();
   @Output() cambiarNuevoServicioTipoAsistencia = new EventEmitter<any>();
   @Output() cambiarNuevoServicioModalidadDias = new EventEmitter<any>();
+  @Output() cambiarNuevoServicioPermitePermutaEntreCargos = new EventEmitter<boolean>();
+  @Output() alternarCargoPermitidoEnServicioForm = new EventEmitter<string>();
+  @Output() actualizarMetaTurnoEnServicioForm = new EventEmitter<{
+    codigoTurno: string;
+    campo: 'minimoBase' | 'esperadoBase' | 'minimoDomFest' | 'esperadoDomFest';
+    valor: number;
+  }>();
   @Output() cambiarNuevoServicioReqDia = new EventEmitter<number>();
   @Output() cambiarNuevoServicioReqNoche = new EventEmitter<number>();
   @Output() cambiarNuevoServicioReqDiaDomFest = new EventEmitter<number>();
@@ -658,9 +940,86 @@ export class ConfiguracionServiciosComponent {
   @Output() abrirCuadroServicio = new EventEmitter<string>();
   @Output() cargarServicioParaEdicion = new EventEmitter<ServicioHospitalario>();
   @Output() eliminarServicioAutonomo = new EventEmitter<ServicioHospitalario>();
+  @Output() adscribirEmpleadoAServicio = new EventEmitter<{ empleadoId: string; servicioBaseId: string }>();
+  @Output() adscribirLoteAServicio = new EventEmitter<{ empleadoIds: string[]; servicioBaseId: string }>();
 
   serviciosExpandidos = signal<Set<string>>(new Set<string>());
   filtroMacroproceso = signal<string>('TODOS');
+  seleccionadosTraslado = new Set<string>();
+  destinoTrasladoPorServicio: Record<string, string> = {};
+
+  get turnosDisponiblesEnForm(): TipoTurnoConfig[] {
+    return (this.listaTurnosCatalogo || []).filter(
+      (t) => t.activo !== false || this.esTurnoHabilitadoEnServicioForm(t.codigo)
+    );
+  }
+
+  get resumenCapacidadServicioForm(): {
+    demandaHoras: number;
+    capacidadHoras: number;
+    diferencia: number;
+    personas: number;
+    personasEstimadas: number;
+    mesNombre: string;
+  } {
+    const hoyIso = hoyColombiaIso();
+    const anio = Number(hoyIso.substring(0, 4)) || new Date().getFullYear();
+    const mes = Number(hoyIso.substring(5, 7)) || new Date().getMonth() + 1;
+    const totalDias = new Date(Date.UTC(anio, mes, 0)).getUTCDate();
+    let diasDomFest = 0;
+    let diasNoDomFest = 0;
+    let diasLunVieNoFest = 0;
+
+    for (let d = 1; d <= totalDias; d++) {
+      const iso = `${anio}-${String(mes).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const dow = new Date(Date.UTC(anio, mes - 1, d)).getUTCDay();
+      const esDomOFest = dow === 0 || Boolean(FestivosColombiaHelper.esFestivo(iso));
+      if (esDomOFest) {
+        diasDomFest++;
+      } else {
+        diasNoDomFest++;
+        if (dow >= 1 && dow <= 5) {
+          diasLunVieNoFest++;
+        }
+      }
+    }
+
+    const mod = this.nuevoServicioModalidadDias;
+    let demandaHoras = 0;
+    for (const m of this.nuevoServicioMetasPorTurno) {
+      const cfg = this.catalogoTurnosMap[m.codigoTurno.toUpperCase()];
+      const hTurno = Number(cfg?.horasOrdinarias ?? m.horasOrdinarias ?? 8);
+      if (hTurno <= 0) continue;
+      if (mod === 'LUN_VIE_HABILES') {
+        demandaHoras += m.esperadoBase * diasLunVieNoFest * hTurno;
+      } else if (mod === 'LUN_SAB_SIN_FESTIVOS') {
+        demandaHoras += m.esperadoBase * diasNoDomFest * hTurno;
+      } else if (mod === 'TODOS_GUARDIA_FDS') {
+        demandaHoras += (m.esperadoBase * diasNoDomFest + m.esperadoDomFest * diasDomFest) * hTurno;
+      } else {
+        demandaHoras += m.esperadoBase * totalDias * hTurno;
+      }
+    }
+
+    const empsSrv = this.servicioEditandoId
+      ? this.obtenerEmpleadosDelServicio(this.servicioEditandoId)
+      : [];
+    const capacidadHoras = r2(
+      empsSrv.reduce((acc, e) => acc + (Number(e.horasContratoMes) || 0), 0)
+    );
+    const demandaRed = r2(demandaHoras);
+    const diferencia = r2(capacidadHoras - demandaRed);
+    const mesesNom = ['', 'Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+
+    return {
+      demandaHoras: demandaRed,
+      capacidadHoras,
+      diferencia,
+      personas: empsSrv.length,
+      personasEstimadas: Math.max(0, Math.ceil(demandaRed / 168)),
+      mesNombre: `${mesesNom[mes] || mes} ${anio}`,
+    };
+  }
 
   get catalogoMacroprocesos(): MacroprocesoInfo[] {
     return this.macroprocesos || [];
@@ -762,6 +1121,87 @@ export class ConfiguracionServiciosComponent {
     if (mod === 'LUN_SAB_SIN_FESTIVOS') return 'Lunes a Sábado (Cierra Dom/Fest)';
     if (mod === 'LUN_VIE_HABILES') return 'Lunes a Viernes Hábiles';
     return 'Todos los días 24/7';
+  }
+
+  esCargoPermitidoEnServicioForm(categoriaId: string): boolean {
+    return (this.nuevoServicioCargosPermitidosIds || []).includes(categoriaId);
+  }
+
+  estadoCompatibilidadCargos(
+    srv1Id: string,
+    srv2: ServicioHospitalario
+  ): 'COMPATIBLE' | 'INCOMPATIBLE' | 'SIN_RESTRICCION' {
+    const srv1 = (this.servicios || []).find((s) => s.id === srv1Id);
+    if (!srv1 || !srv2 || srv1.id === srv2.id) return 'SIN_RESTRICCION';
+    const ids1 = new Set(
+      (srv1.cargosPermitidosIds?.length
+        ? srv1.cargosPermitidosIds
+        : (srv1.cargosPermitidos || []).map((c) => c.categoriaId)
+      ).filter(Boolean)
+    );
+    const ids2 = new Set(
+      (srv2.cargosPermitidosIds?.length
+        ? srv2.cargosPermitidosIds
+        : (srv2.cargosPermitidos || []).map((c) => c.categoriaId)
+      ).filter(Boolean)
+    );
+    if (ids1.size === 0 || ids2.size === 0) return 'SIN_RESTRICCION';
+    for (const id of ids1) {
+      if (ids2.has(id)) return 'COMPATIBLE';
+    }
+    return 'INCOMPATIBLE';
+  }
+
+  alternarSeleccionColaborador(empleadoId: string): void {
+    if (this.seleccionadosTraslado.has(empleadoId)) {
+      this.seleccionadosTraslado.delete(empleadoId);
+    } else {
+      this.seleccionadosTraslado.add(empleadoId);
+    }
+  }
+
+  obtenerSeleccionadosEnServicio(servicioId: string): string[] {
+    const emps = this.obtenerEmpleadosDelServicio(servicioId);
+    return emps.filter((e) => this.seleccionadosTraslado.has(e.id)).map((e) => e.id);
+  }
+
+  todosSeleccionadosEnServicio(servicioId: string): boolean {
+    const emps = this.obtenerEmpleadosDelServicio(servicioId);
+    return emps.length > 0 && emps.every((e) => this.seleccionadosTraslado.has(e.id));
+  }
+
+  alternarSeleccionTodosServicio(servicioId: string): void {
+    const emps = this.obtenerEmpleadosDelServicio(servicioId);
+    if (this.todosSeleccionadosEnServicio(servicioId)) {
+      emps.forEach((e) => this.seleccionadosTraslado.delete(e.id));
+    } else {
+      emps.forEach((e) => this.seleccionadosTraslado.add(e.id));
+    }
+  }
+
+  limpiarSeleccionServicio(servicioId: string): void {
+    this.obtenerEmpleadosDelServicio(servicioId).forEach((e) =>
+      this.seleccionadosTraslado.delete(e.id)
+    );
+  }
+
+  cambiarServicioEmpleadoIndividual(empleadoId: string, servicioBaseId: string): void {
+    if (!empleadoId || !servicioBaseId) return;
+    this.seleccionadosTraslado.delete(empleadoId);
+    this.adscribirEmpleadoAServicio.emit({ empleadoId, servicioBaseId });
+  }
+
+  ejecutarTrasladoLote(servicioOrigenId: string): void {
+    const destino = this.destinoTrasladoPorServicio[servicioOrigenId];
+    const ids = this.obtenerSeleccionadosEnServicio(servicioOrigenId);
+    if (!destino || ids.length === 0) return;
+    this.adscribirLoteAServicio.emit({ empleadoIds: ids, servicioBaseId: destino });
+    ids.forEach((id) => this.seleccionadosTraslado.delete(id));
+    this.destinoTrasladoPorServicio[servicioOrigenId] = '';
+  }
+
+  obtenerCfgMeta(codigo: string): TipoTurnoConfig | undefined {
+    return this.catalogoTurnosMap[codigo];
   }
 
   obtenerTurnosOperativosServicio(srv: ServicioHospitalario): TipoTurnoConfig[] {

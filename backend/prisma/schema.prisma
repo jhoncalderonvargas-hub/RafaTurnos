@@ -21,6 +21,33 @@ enum EstadoPermuta {
   RECHAZADA
 }
 
+model EmpresaContratante {
+  id                             String     @id @default(uuid())
+  codigo                         String     @unique
+  nombre                         String
+  nit                            String?    @unique
+  aliasesCodigo                  String[]   @default([])
+  estadoConfiguracion            String     @default("CONFIRMADA") // CONFIRMADA | PENDIENTE_REGLAS
+  plantillaNormativa             String     @default("CST_LEY_2466") // DECRETO_1042 | CST_LEY_2466 | PERSONALIZADA
+  horasSemanalesContrato         Float      @default(42)
+  diasBaseSemana                 Int        @default(6)
+  horaInicioNocturnoMin          Int        @default(1140) // 18:00 = 1080, 19:00 = 1140
+  horaFinNocturnoMin             Int        @default(360)  // 06:00 = 360
+  porcentajeRecargoNocturno      Float      @default(0.35)
+  modoRecargoDominical           String     @default("LEY_2466") // LEY_2466 | FIJO
+  porcentajeRecargoDominicalFijo Float?
+  aplicaTopeHorasExtrasSemanal   Boolean    @default(true)
+  topeHorasExtrasSemanal         Float      @default(12)
+  usaBancoHoras                  Boolean    @default(true)
+  activa                         Boolean    @default(true)
+  observaciones                  String?
+  creadoEn                       DateTime   @default(now())
+  actualizadoEn                  DateTime   @updatedAt
+  empleados                      Empleado[]
+
+  @@map("empresas_contratantes")
+}
+
 model Macroproceso {
   id                      String     @id @default(uuid())
   codigo                  String     @unique
@@ -37,32 +64,64 @@ model Macroproceso {
 }
 
 model Servicio {
-  id                     String                   @id @default(uuid())
-  intranetId             String?                  @unique
-  codigo                 String                   @unique
-  nombre                 String
-  macroprocesoId         String
-  macroproceso           Macroproceso             @relation(fields: [macroprocesoId], references: [id])
-  reqDia                 Int                      @default(4)
-  reqNoche               Int                      @default(2)
-  modalidadDias          String                   @default("TODOS_24_7")
-  reqDiaDomFest          Int                      @default(2)
-  reqNocheDomFest        Int                      @default(1)
-  turnosHabilitadosCodigos String[]               @default(["M8", "T8", "N8", "M6", "T6", "N12", "D12", "G24", "ADM", "MD", "AP", "DISP", "S", "L", "COMP", "FAM", "VAC", "INC", "LIC"])
-  empleadosBase          Empleado[]               @relation("ServicioBase")
-  cuadrantes             Cuadrante[]
-  asignacionesEjecutadas AsignacionTurno[]        @relation("ServicioEjecutor")
-  coberturas             RequerimientoCobertura[]
-  turnosHabilitados      ServicioTurnoHabilitado[]
-  permutas               SolicitudPermuta[]
-  auditorias             AuditoriaCambio[]        @relation("AuditoriasServicio")
+  id                        String                   @id @default(uuid())
+  intranetId                String?                  @unique
+  codigo                    String                   @unique
+  nombre                    String
+  macroprocesoId            String
+  macroproceso              Macroproceso             @relation(fields: [macroprocesoId], references: [id])
+  reqDia                    Int                      @default(4)
+  reqNoche                  Int                      @default(2)
+  modalidadDias             String                   @default("TODOS_24_7")
+  reqDiaDomFest             Int                      @default(2)
+  reqNocheDomFest           Int                      @default(1)
+  permitePermutaEntreCargos Boolean                  @default(false)
+  turnosHabilitadosCodigos  String[]                 @default(["M8", "T8", "N8", "M6", "T6", "N12", "D12", "G24", "ADM", "MD", "AP", "DISP", "S", "L", "COMP", "FAM", "VAC", "INC", "LIC"])
+  empleadosBase             Empleado[]               @relation("ServicioBase")
+  cuadrantes                Cuadrante[]
+  asignacionesEjecutadas    AsignacionTurno[]        @relation("ServicioEjecutor")
+  cargosPermitidos          ServicioCargoPermitido[]
+  metasPorTurno             ServicioTurnoMeta[]
+  coberturas                RequerimientoCobertura[]
+  turnosHabilitados         ServicioTurnoHabilitado[]
+  permutas                  SolicitudPermuta[]
+  auditorias                AuditoriaCambio[]        @relation("AuditoriasServicio")
 
-  // Relación de Servicios Hermanos (Afinidad clínica para rotación)
-  serviciosHermanosOrigen ServicioHermano[]       @relation("ServicioOrigen")
-  serviciosHermanosDestino ServicioHermano[]      @relation("ServicioHermano")
+  // Relación de Servicios Hermanos (Afinidad clínica/técnica para rotación)
+  serviciosHermanosOrigen  ServicioHermano[]       @relation("ServicioOrigen")
+  serviciosHermanosDestino ServicioHermano[]       @relation("ServicioHermano")
 
   @@index([macroprocesoId])
   @@map("servicios")
+}
+
+model ServicioCargoPermitido {
+  id          String               @id @default(uuid())
+  servicioId  String
+  servicio    Servicio             @relation(fields: [servicioId], references: [id], onDelete: Cascade)
+  categoriaId String
+  categoria   CategoriaProfesional @relation(fields: [categoriaId], references: [id], onDelete: Cascade)
+
+  @@unique([servicioId, categoriaId])
+  @@index([categoriaId])
+  @@map("servicios_cargos_permitidos")
+}
+
+model ServicioTurnoMeta {
+  id              String    @id @default(uuid())
+  servicioId      String
+  servicio        Servicio  @relation(fields: [servicioId], references: [id], onDelete: Cascade)
+  tipoTurnoId     String
+  tipoTurno       TipoTurno @relation(fields: [tipoTurnoId], references: [id], onDelete: Cascade)
+  habilitado      Boolean   @default(true)
+  minimoBase      Int       @default(1)
+  esperadoBase    Int       @default(1)
+  minimoDomFest   Int       @default(1)
+  esperadoDomFest Int       @default(1)
+
+  @@unique([servicioId, tipoTurnoId])
+  @@index([tipoTurnoId])
+  @@map("servicios_turnos_metas")
 }
 
 model ServicioHermano {
@@ -91,35 +150,40 @@ model ServicioTurnoHabilitado {
 }
 
 model CategoriaProfesional {
-  id                String                    @id @default(uuid())
-  nombre            String                    @unique
-  empleados         Empleado[]
-  coberturas        RequerimientoCobertura[]
-  turnosHabilitados ServicioTurnoHabilitado[]
+  id                  String                    @id @default(uuid())
+  nombre              String                    @unique
+  empleados           Empleado[]
+  coberturas          RequerimientoCobertura[]
+  turnosHabilitados   ServicioTurnoHabilitado[]
+  serviciosPermitidos ServicioCargoPermitido[]
 
   @@map("categorias_profesionales")
 }
 
 model Empleado {
-  id                String               @id @default(uuid())
-  intranetId        String?              @unique
-  documento         String               @unique
-  nombre            String
-  correo            String?
-  horasSemanalesLey Int                  @default(42)
-  horasContratoMes  Int                  @default(168)
-  servicioBaseId    String
-  servicioBase      Servicio             @relation("ServicioBase", fields: [servicioBaseId], references: [id])
-  categoriaId       String
-  categoria         CategoriaProfesional @relation(fields: [categoriaId], references: [id])
-  asignaciones      AsignacionTurno[]
-  saldosBancoHoras    BancoHorasSaldo[]
-  novedades           NovedadAusencia[]
-  tokensCalendario    TokenCalendario[]
-  permutasSolicitadas SolicitudPermuta[]   @relation("PermutasSolicitadas")
-  permutasRecibidas   SolicitudPermuta[]   @relation("PermutasRecibidas")
-  auditorias          AuditoriaCambio[]    @relation("AuditoriasEmpleado")
+  id                   String               @id @default(uuid())
+  intranetId           String?              @unique
+  documento            String               @unique
+  nombre               String
+  correo               String?
+  horasSemanalesLey    Int                  @default(42)
+  horasContratoMes     Int                  @default(168)
+  horasSemanalesOverride Float?
+  empresaContratanteId String
+  empresaContratante   EmpresaContratante   @relation(fields: [empresaContratanteId], references: [id])
+  servicioBaseId       String
+  servicioBase         Servicio             @relation("ServicioBase", fields: [servicioBaseId], references: [id])
+  categoriaId          String
+  categoria            CategoriaProfesional @relation(fields: [categoriaId], references: [id])
+  asignaciones         AsignacionTurno[]
+  saldosBancoHoras     BancoHorasSaldo[]
+  novedades            NovedadAusencia[]
+  tokensCalendario     TokenCalendario[]
+  permutasSolicitadas  SolicitudPermuta[]   @relation("PermutasSolicitadas")
+  permutasRecibidas    SolicitudPermuta[]   @relation("PermutasRecibidas")
+  auditorias           AuditoriaCambio[]    @relation("AuditoriasEmpleado")
 
+  @@index([empresaContratanteId])
   @@index([servicioBaseId])
   @@index([categoriaId])
   @@map("empleados")
@@ -137,11 +201,18 @@ model TipoTurno {
   minutosAlmuerzo        Int                       @default(0) // Minutos de almuerzo no computables (Art. 167 CST)
   colorHex               String
   descuentaBancoHoras    Boolean                   @default(false)
-  horasAmortizacionBanco Float                     @default(8) // Horas que amortiza en Banco de Horas si descuentaBancoHoras = true
+  modoAmortizacionBanco  String                    @default("HORAS_FIJAS") // DIA_HABIL_EMPRESA | HORAS_FIJAS
+  horasAmortizacionBanco Float                     @default(8) // Horas que amortiza cuando modoAmortizacionBanco = HORAS_FIJAS
+  prorrateaMetaContrato  Boolean                   @default(false) // Configurable en turnos de descanso 0h (descuenta 1 día hábil)
+  esAusencia             Boolean                   @default(false)
+  bloqueaPermutas        Boolean                   @default(false)
   esNocturnoPesado       Boolean                   @default(false) // Obliga a S o L al día siguiente
+  esSistemaObligatorio   Boolean                   @default(false) // BLANCO, L, S, COMP, VAC, INC, LIC, FAM
   visibleEnPaleta        Boolean                   @default(true)
+  activo                 Boolean                   @default(true)
   asignaciones           AsignacionTurno[]
   turnosHabilitados      ServicioTurnoHabilitado[]
+  metasPorServicio       ServicioTurnoMeta[]
 
   @@map("tipos_turno")
 }
@@ -204,18 +275,24 @@ model AsignacionTurno {
 }
 
 model BancoHorasSaldo {
-  id                  String   @id @default(uuid())
-  empleadoId          String
-  empleado            Empleado @relation(fields: [empleadoId], references: [id])
-  anio                Int
-  mes                 Int
-  saldoInicial        Float    @default(0) // Arrastrado del mes anterior (sin caducidad)
-  horasTrabajadas     Float    @default(0)
-  horasContratadas    Float    @default(168)
-  horasAmortizadasComp Float   @default(0)
-  diferenciaMes       Float    @default(0)
-  saldoFinalAcumulado Float    @default(0) // Pasa como saldoInicial al mes M+1
-  actualizadoEn       DateTime @updatedAt
+  id                       String   @id @default(uuid())
+  empleadoId               String
+  empleado                 Empleado @relation(fields: [empleadoId], references: [id])
+  anio                     Int
+  mes                      Int
+  saldoInicial             Float    @default(0) // Arrastrado del mes anterior (sin caducidad)
+  horasTrabajadas          Float    @default(0)
+  horasContratadasNominales Float   @default(0)
+  horasExoneradas          Float    @default(0)
+  horasContratadas         Float    @default(168)
+  diasHabilesMes           Int      @default(0)
+  diasHabilesProrrateados  Int      @default(0)
+  horasSemanalesAplicadas  Float    @default(42)
+  empresaCodigoSnapshot    String?
+  horasAmortizadasComp     Float    @default(0)
+  diferenciaMes            Float    @default(0)
+  saldoFinalAcumulado      Float    @default(0) // Pasa como saldoInicial al mes M+1
+  actualizadoEn            DateTime @updatedAt
 
   @@unique([empleadoId, anio, mes])
   @@index([anio, mes])

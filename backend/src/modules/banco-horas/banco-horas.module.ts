@@ -2,10 +2,13 @@ import { Controller, Get, Injectable, Module, Post, Body } from '@nestjs/common'
 import {
   calcularDiasCompensatoriosDominicales,
   calcularMetaContractualProrrateada,
+  calcularMetaMensualPorDiasHabiles,
+  combinarReglasEmpresa,
   evaluarEstadoBancoHoras,
   HORAS_AMORTIZACION_COMP_DEFAULT,
   r2,
   recargosVigentes,
+  ReglasEmpresaContrato,
 } from '../../shared/liquidacion-horas';
 
 export interface CalculoBancoHorasInput {
@@ -21,6 +24,11 @@ export interface CalculoBancoHorasInput {
   horasAmortizadasComp?: number;
   diasExonerados?: number;
   diasDelMes?: number;
+  diasHabilesMes?: number;
+  diasHabilesProrrateados?: number;
+  horasSemanalesContrato?: number;
+  diasBaseSemana?: number;
+  reglasEmpresa?: Partial<ReglasEmpresaContrato>;
   hod: number;
   hon: number;
   hdfd: number;
@@ -33,7 +41,7 @@ export interface ResultadoBancoYNominaDto {
   documento: string;
   nombre: string;
   periodo: string;
-  // Conceptos CST que se pagan en la nómina del mes en curso (RN-BH01)
+  // Conceptos CST/Decreto 1042 que se pagan en la nómina del mes en curso (RN-BH01)
   conceptosNominaMesCorriente: {
     hod: number;
     hon: number;
@@ -41,7 +49,7 @@ export interface ResultadoBancoYNominaDto {
     hdfn: number;
     domingosLaborados: number;
     diasCompensatoriosCausados: number;
-    /** Porcentajes de recargo vigentes en el periodo (fracción: 0.9 = 90%). Ley 2466/2025 Art. 14. */
+    /** Porcentajes de recargo vigentes en el periodo según reglas de empresa (fracción: 0.9 = 90%, 1.0 = 100%). */
     recargos: {
       nocturno: number;
       dominical: number;
@@ -51,6 +59,9 @@ export interface ResultadoBancoYNominaDto {
   // Trazabilidad continua del Banco de Horas (Sin periodicidad de caducidad - RN-BH02)
   bancoDeHoras: {
     saldoAnterior: number;
+    horasSemanalesAplicadas: number;
+    diasHabilesMes: number;
+    diasHabilesProrrateados: number;
     horasContratadas: number;
     horasContratadasNominales: number;
     horasExoneradas: number;
@@ -66,35 +77,77 @@ export interface ResultadoBancoYNominaDto {
 export class BancoHorasNominaService {
   /**
    * Calcula el balance mensual continuo del Banco de Horas y separa estrictamente
-   * los recargos económicos de ley (CST) para el reporte de Nómina (Doc 10 y Doc 18).
+   * los recargos económicos de ley (CST o Decreto 1042) para el reporte de Nómina (Doc 10 y Doc 18).
    */
   calcularCierreMensualColaborador(
     input: CalculoBancoHorasInput
   ): ResultadoBancoYNominaDto {
-    const diasMes =
-      input.diasDelMes && input.diasDelMes > 0
-        ? Math.round(input.diasDelMes)
-        : new Date(Date.UTC(Number(input.anio), Number(input.mes), 0)).getUTCDate() || 30;
-    const meta = calcularMetaContractualProrrateada(
-      input.horasContratoMes,
-      diasMes,
-      input.diasExonerados || 0
-    );
+    const reglas = input.reglasEmpresa
+      ? combinarReglasEmpresa(input.reglasEmpresa, input.horasSemanalesContrato)
+      : undefined;
+    const hSem =
+      Number(input.horasSemanalesContrato) > 0
+        ? Number(input.horasSemanalesContrato)
+        : reglas?.horasSemanalesContrato || 42;
+    const dSem =
+      Number(input.diasBaseSemana) > 0
+        ? Math.round(Number(input.diasBaseSemana))
+        : reglas?.diasBaseSemana || 6;
+
+    let horasContratadasNominales = 0;
+    let horasExoneradas = 0;
+    let horasContratadas = 0;
+    let diasHabilesMes = Number(input.diasHabilesMes) || 0;
+    let diasHabilesProrrateados =
+      input.diasHabilesProrrateados !== undefined
+        ? Number(input.diasHabilesProrrateados) || 0
+        : Number(input.diasExonerados) || 0;
+
+    if (Number(input.diasHabilesMes) > 0) {
+      const metaDh = calcularMetaMensualPorDiasHabiles(
+        hSem,
+        diasHabilesMes,
+        diasHabilesProrrateados,
+        dSem
+      );
+      horasContratadasNominales = metaDh.horasContratadasNominales;
+      horasExoneradas = metaDh.horasExoneradas;
+      horasContratadas = metaDh.horasContratadasEfectivas;
+      diasHabilesMes = metaDh.diasHabilesMes;
+      diasHabilesProrrateados = metaDh.diasHabilesProrrateados;
+    } else {
+      const diasMes =
+        input.diasDelMes && input.diasDelMes > 0
+          ? Math.round(input.diasDelMes)
+          : new Date(Date.UTC(Number(input.anio), Number(input.mes), 0)).getUTCDate() || 30;
+      const meta = calcularMetaContractualProrrateada(
+        input.horasContratoMes,
+        diasMes,
+        input.diasExonerados || 0
+      );
+      horasContratadasNominales = meta.horasContratadasNominales;
+      horasExoneradas = meta.horasExoneradas;
+      horasContratadas = meta.horasContratadasEfectivas;
+    }
 
     const horasAmortizadas =
       input.horasAmortizadasComp !== undefined
         ? r2(Math.max(0, Number(input.horasAmortizadasComp) || 0))
         : r2(
             (Number(input.turnosCompensatoriosTomados) || 0) *
-              HORAS_AMORTIZACION_COMP_DEFAULT
+              (input.horasSemanalesContrato
+                ? r2(hSem / dSem)
+                : HORAS_AMORTIZACION_COMP_DEFAULT)
           );
 
-    const diferenciaMes = r2(
-      input.horasRealesTrabajadas - meta.horasContratadasEfectivas - horasAmortizadas
-    );
+    const diferenciaMes =
+      reglas?.usaBancoHoras === false
+        ? 0
+        : r2(input.horasRealesTrabajadas - horasContratadas - horasAmortizadas);
     const nuevoSaldo = r2(input.saldoInicialMesAnterior + diferenciaMes);
     const recargos = recargosVigentes(
-      `${input.anio}-${String(input.mes).padStart(2, '0')}-01`
+      `${input.anio}-${String(input.mes).padStart(2, '0')}-01`,
+      reglas
     );
 
     const estadoBase = evaluarEstadoBancoHoras(nuevoSaldo);
@@ -127,9 +180,12 @@ export class BancoHorasNominaService {
       },
       bancoDeHoras: {
         saldoAnterior: r2(input.saldoInicialMesAnterior),
-        horasContratadas: meta.horasContratadasEfectivas,
-        horasContratadasNominales: meta.horasContratadasNominales,
-        horasExoneradas: meta.horasExoneradas,
+        horasSemanalesAplicadas: r2(hSem),
+        diasHabilesMes,
+        diasHabilesProrrateados,
+        horasContratadas,
+        horasContratadasNominales,
+        horasExoneradas,
         horasTrabajadas: r2(input.horasRealesTrabajadas),
         horasAmortizadasPorTurnoComp: horasAmortizadas,
         diferenciaMesActual: diferenciaMes,

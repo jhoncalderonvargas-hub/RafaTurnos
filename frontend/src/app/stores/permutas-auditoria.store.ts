@@ -154,6 +154,7 @@ export class PermutasAuditoriaStore {
       mes: number;
       matriz: Record<string, Record<number, CeldaAsignacion>>;
       totalDias: number;
+      servicioId?: string;
     }
   ): { valida: boolean; motivo: string } {
     const emp1 = this.catalogos.empleados().find((e) => e.id === emp1Id);
@@ -162,7 +163,31 @@ export class PermutasAuditoriaStore {
       return { valida: false, motivo: 'Colaborador no encontrado en la plantilla.' };
     }
 
-    if (emp1.categoria !== emp2.categoria) {
+    const srvId = contexto?.servicioId || this.catalogos.servicioSeleccionadoId();
+    const srv =
+      this.catalogos.servicios().find((s) => s.id === srvId) || this.catalogos.servicioActual();
+
+    const mismoCargoId = Boolean(emp1.categoriaId && emp2.categoriaId && emp1.categoriaId === emp2.categoriaId);
+    const mismoCargoNombre = emp1.categoria.trim().toLowerCase() === emp2.categoria.trim().toLowerCase();
+    const mismoCargo = mismoCargoId || mismoCargoNombre;
+
+    const cargoPermitidoEnSrv = (emp: { categoriaId?: string; categoria: string }): boolean => {
+      const ids =
+        srv?.cargosPermitidosIds && srv.cargosPermitidosIds.length > 0
+          ? srv.cargosPermitidosIds
+          : (srv?.cargosPermitidos || []).map((c) => c.categoriaId).filter(Boolean);
+      const nombres = (srv?.cargosPermitidos || [])
+        .map((c) => c.categoriaNombre?.trim().toLowerCase())
+        .filter(Boolean);
+      if (emp.categoriaId && ids.includes(emp.categoriaId)) return true;
+      if (emp.categoria && nombres.includes(emp.categoria.trim().toLowerCase())) return true;
+      return false;
+    };
+
+    const permutaEntreCargosHabilitada =
+      Boolean(srv?.permitePermutaEntreCargos) && cargoPermitidoEnSrv(emp1) && cargoPermitidoEnSrv(emp2);
+
+    if (!mismoCargo && !permutaEntreCargosHabilitada) {
       return {
         valida: false,
         motivo: `RN-05 Incompatibilidad: ${emp1.nombre} (${emp1.categoria}) no puede permutar con ${emp2.nombre} (${emp2.categoria}).`,
@@ -170,22 +195,28 @@ export class PermutasAuditoriaStore {
     }
 
     const catalogo = this.catalogos.catalogoTurnosMap();
-    const cfgT1 = catalogo[turno1];
-    const cfgT2 = catalogo[turno2];
+    const codT1 = (turno1 || '').trim().toUpperCase();
+    const codT2 = (turno2 || '').trim().toUpperCase();
+    const cfgT1 = catalogo[codT1];
+    const cfgT2 = catalogo[codT2];
+    const esAus1 = cfgT1 ? Boolean(cfgT1.esAusencia) : esCodigoExoneracionContrato(codT1);
+    const esAus2 = cfgT2 ? Boolean(cfgT2.esAusencia) : esCodigoExoneracionContrato(codT2);
 
-    if (
-      esCodigoExoneracionContrato(turno1) ||
-      esCodigoExoneracionContrato(turno2) ||
-      cfgT1?.esAusencia ||
-      cfgT2?.esAusencia
-    ) {
+    if (esAus1 || esAus2) {
       return {
         valida: false,
         motivo: 'No se permiten permutas sobre periodos con Novedades Oficiales de RRHH (Vacaciones, Incapacidades, Licencias o Día de la Familia).',
       };
     }
 
-    if (turno1 === turno2) {
+    if (cfgT1?.bloqueaPermutas || cfgT2?.bloqueaPermutas) {
+      return {
+        valida: false,
+        motivo: `El turno (${cfgT1?.bloqueaPermutas ? codT1 : codT2}) tiene bloqueo de permutas habilitado en el catálogo.`,
+      };
+    }
+
+    if (codT1 === codT2) {
       return {
         valida: false,
         motivo: `Ambos colaboradores ya tienen el mismo turno (${turno1}) en el día ${dia}.`,
@@ -259,9 +290,12 @@ export class PermutasAuditoriaStore {
       }
     }
 
+    const detalleCargo = mismoCargo
+      ? `Mismo cargo profesional (${emp1.categoria})`
+      : `Cargos equivalentes habilitados en ${srv?.nombre || 'el servicio'} (${emp1.categoria} ↔ ${emp2.categoria})`;
     return {
       valida: true,
-      motivo: `Mismo cargo asistencial (${emp1.categoria}) y descanso mínimo de 12h verificado para ambos.`,
+      motivo: `${detalleCargo} y descanso mínimo de 12h verificado para ambos.`,
     };
   }
 

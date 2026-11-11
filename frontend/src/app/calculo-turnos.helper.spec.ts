@@ -81,17 +81,24 @@ describe('calculo-turnos.helper', () => {
     expect(horasLiquidadasCelda(CATALOGO_TURNOS['M8'], '2026-11-03', esDesc)).toBe(8);
   });
 
-  it('prorratea meta contractual con VAC/FAM, amortiza COMP y mantiene diferenciaMes=0 si solo hay ausencias', () => {
-    const diasNov = construirDiasMes(2026, 11);
-    const esDesc = crearPredicadoDescanso(() => false);
+  it('calcula meta por días hábiles, prorrateo selectivo, amortización COMP y liquidación multi-empresa', () => {
+    const festivosNov = ['2026-11-02', '2026-11-16'];
+    const diasNov = construirDiasMes(2026, 11, festivosNov);
+    const esFest = (iso: string) => iso === '2026-11-02' || iso === '2026-11-16';
+    const esDesc = crearPredicadoDescanso(esFest);
 
-    // Case 1: Only VAC + FAM (no operative hours, no COMP) -> diferenciaMes = 0, no debt!
+    // Nov 2026: 30 días - 5 domingos - 2 festivos oficiales = 23 días hábiles.
+    // Empresa CST por defecto (42h/sem): 23 * 42 / 6 = 161h nominales.
+    // Case 1: VAC en domingo (día 1) + festivo (día 2) NO descuenta meta; VAC día 3 + FAM día 4 (2 días hábiles) SÍ prorratean (-14h)
     const celdasVac: Record<number, CeldaAsignacion> = {
       1: { codigo: 'VAC' },
-      2: { codigo: 'FAM' },
+      2: { codigo: 'VAC' },
+      3: { codigo: 'VAC' },
+      4: { codigo: 'FAM' },
+      5: { codigo: 'L' },
     };
     const mVac = calcularMetricasMesColaborador(
-      { ...empBase, horasContratoMes: 150 },
+      empBase,
       celdasVac,
       diasNov,
       CATALOGO_TURNOS,
@@ -99,43 +106,112 @@ describe('calculo-turnos.helper', () => {
       2026,
       11,
       undefined,
-      esDesc
+      esDesc,
+      esFest
     );
-    expect(mVac.diasVac).toBe(1);
+    expect(mVac.diasHabilesMes).toBe(23);
+    expect(mVac.horasContratadasNominales).toBe(161);
+    expect(mVac.diasVac).toBe(3);
     expect(mVac.diasFam).toBe(1);
+    expect(mVac.diasHabilesProrrateados).toBe(2);
     expect(mVac.diasExonerados).toBe(2);
-    expect(mVac.horasExoneradas).toBe(10); // 2 * (150/30)
-    expect(mVac.horasContratadasEfectivas).toBe(140);
+    expect(mVac.horasExoneradas).toBe(14);
+    expect(mVac.horasContratadasEfectivas).toBe(147);
     expect(mVac.diferenciaMes).toBe(0);
     expect(mVac.nuevoSaldoBanco).toBe(4);
 
-    // Case 2: M8 + COMP (amortizes 8h) + VAC -> summarizes identically via resumirHorasPeriodo
-    const celdasMix: Record<number, CeldaAsignacion> = {
-      1: { codigo: 'VAC' },
-      3: { codigo: 'M8' },
-      4: { codigo: 'COMP' },
+    // Case 2: Turno libre remunerado personalizado (DLR, 0h, prorrateaMetaContrato: true, no es ausencia) sí prorratea día hábil
+    const catalogoConDlr = {
+      ...CATALOGO_TURNOS,
+      DLR: {
+        ...CATALOGO_TURNOS['L'],
+        codigo: 'DLR',
+        nombre: 'Día Libre Remunerado',
+        esAusencia: false,
+        prorrateaMetaContrato: true,
+      },
     };
-    const resumen = resumirHorasPeriodo(celdasMix, 2026, 11, CATALOGO_TURNOS, esDesc);
+    const mDlr = calcularMetricasMesColaborador(
+      empBase,
+      { 3: { codigo: 'DLR' }, 4: { codigo: 'L' }, 10: { codigo: 'M8' } },
+      diasNov,
+      catalogoConDlr,
+      {},
+      2026,
+      11,
+      undefined,
+      esDesc,
+      esFest
+    );
+    expect(mDlr.diasHabilesProrrateados).toBe(1);
+    expect(mDlr.horasContratadasEfectivas).toBe(154);
+
+    // Case 3: M8 + COMP (DIA_HABIL_EMPRESA -> 42/6 = 7h) + VAC día 3 -> resumirHorasPeriodo y calcularMetricas coinciden
+    const celdasMix: Record<number, CeldaAsignacion> = {
+      3: { codigo: 'VAC' },
+      4: { codigo: 'M8' },
+      5: { codigo: 'COMP' },
+    };
+    const resumen = resumirHorasPeriodo(celdasMix, 2026, 11, CATALOGO_TURNOS, esDesc, undefined, esFest);
     expect(resumen.horasTrabajadas).toBe(8);
-    expect(resumen.horasAmortizadasComp).toBe(8);
-    expect(resumen.diasExonerados).toBe(1);
+    expect(resumen.horasAmortizadasComp).toBe(7);
+    expect(resumen.diasHabilesProrrateados).toBe(1);
 
     const mMix = calcularMetricasMesColaborador(
-      { ...empBase, horasContratoMes: 150, saldoBancoOrigen: { anio: 2026, mes: 10, saldo: 10 } },
+      { ...empBase, saldoBancoOrigen: { anio: 2026, mes: 10, saldo: 10 } },
       celdasMix,
       diasNov,
       CATALOGO_TURNOS,
       { 'emp-1::2026-10': 20 },
       2026,
       11,
-      25, // explicit saldoAnteriorCalculado wins
-      esDesc
+      25,
+      esDesc,
+      esFest
     );
     expect(mMix.saldoAntReal).toBe(25);
-    expect(mMix.horasAmortizadasComp).toBe(8);
-    expect(mMix.horasContratadasEfectivas).toBe(145);
-    expect(mMix.diferenciaMes).toBe(-145); // 8 - 145 - 8
-    expect(mMix.nuevoSaldoBanco).toBe(-120);
+    expect(mMix.horasAmortizadasComp).toBe(7);
+    expect(mMix.horasContratadasEfectivas).toBe(154);
+    expect(mMix.diferenciaMes).toBe(-153); // 8 - 154 - 7
+    expect(mMix.nuevoSaldoBanco).toBe(-128);
+
+    // Case 4: Empresa ESE Decreto 1042 (44h/sem, nocturno 18:00-06:00, dom 100%)
+    const empEse: EmpleadoHospital = {
+      ...empBase,
+      empresaContratanteId: 'emp-ese',
+      empresaContratante: {
+        id: 'emp-ese',
+        codigo: 'ESE_PLANTA',
+        nombre: 'Planta ESE',
+        estadoConfiguracion: 'CONFIRMADA',
+        plantillaNormativa: 'DECRETO_1042',
+        horasSemanalesContrato: 44,
+        diasBaseSemana: 6,
+        horaInicioNocturnoMin: 1080,
+        horaFinNocturnoMin: 360,
+        porcentajeRecargoNocturno: 0.35,
+        modoRecargoDominical: 'FIJO',
+        porcentajeRecargoDominicalFijo: 1.0,
+      },
+    };
+    const mEse = calcularMetricasMesColaborador(
+      empEse,
+      { 3: { codigo: 'T8' }, 5: { codigo: 'COMP' } },
+      diasNov,
+      CATALOGO_TURNOS,
+      {},
+      2026,
+      11,
+      0,
+      esDesc,
+      esFest
+    );
+    expect(mEse.horasSemanalesAplicadas).toBe(44);
+    expect(mEse.horasContratadasNominales).toBe(168.67); // 23 * 44 / 6
+    expect(mEse.hod).toBe(3); // T8 15:00-18:00 diurno bajo Decreto 1042
+    expect(mEse.hon).toBe(5); // T8 18:00-23:00 nocturno desde las 18:00
+    expect(mEse.horasAmortizadasComp).toBe(7.33); // 44 / 6
+    expect(mEse.recargos.dominical).toBe(1.0);
   });
 
   it('usa prioridad de saldos consolidados y origen cuando no se pasa saldoAnteriorCalculado', () => {

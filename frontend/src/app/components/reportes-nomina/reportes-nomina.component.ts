@@ -2,7 +2,7 @@ import { Component, EventEmitter, Input, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { formatearPorcentaje, hoyColombiaIso, r2, resumenNormativoPeriodo } from '../../shared/liquidacion-horas';
-import { ServicioHospitalario } from '../../models';
+import { EmpresaContratante, ServicioHospitalario } from '../../models';
 
 export interface KpisReportes {
   totalEmpleados: number;
@@ -30,9 +30,14 @@ export type SubVistaReportes = 'PRE_NOMINA' | 'EQUIDAD' | 'BANCO_HORAS' | 'AUSEN
           <span class="reportes-period-tag">Periodo: {{ nombreMesSeleccionado }} {{ anioSeleccionado }}</span>
           <span
             class="badge-law report-norm-badge"
-            [title]="'Jornada máxima legal: ' + normativa.jornadaSemanalHoras + 'h/sem (Ley 2101) • Diurna: ' + normativa.franjas.diurna + ' • Nocturna: ' + normativa.franjas.nocturna">
-            ⚖️ {{ normativa.jornadaSemanalHoras }}h/sem • Noc {{ normativa.franjas.nocturna }} ({{ pct(normativa.recargos.nocturno) }}) • Dom/Fest {{ pct(normativa.recargos.dominical) }}
+            [title]="tooltipRegimenes">
+            ⚖️ {{ resumenRegimenes }}
           </span>
+          @if (tieneEmpresasPendientesEnReporte) {
+            <span class="badge-custom report-norm-badge" title="Al menos una empresa contratante fue auto-registrada desde Intranet y tiene reglas contractuales pendientes por confirmar en Configuración.">
+              ⚠️ Reglas de empresa pendientes por confirmar
+            </span>
+          }
           @if (normativa.franjaCambiaEnElMes || normativa.recargoDominicalCambiaEnElMes || normativa.jornadaSemanalCambiaEnElMes) {
             <span class="badge-custom report-norm-badge">
               ⚠️ Transición normativa en este mes (se liquida por fecha real de cada tramo)
@@ -107,12 +112,31 @@ export type SubVistaReportes = 'PRE_NOMINA' | 'EQUIDAD' | 'BANCO_HORAS' | 'AUSEN
             </select>
           </div>
 
+          @if (empresas.length > 0) {
+            <div class="control-item">
+              <label for="rep-empresa-select">Empresa:</label>
+              <select
+                id="rep-empresa-select"
+                [ngModel]="filtroReporteEmpresaId"
+                (ngModelChange)="cambiarFiltroEmpresa.emit($event)">
+                @if (empresas.length > 1) {
+                  <option value="TODOS">🏢 Todas las Empresas ({{ empresas.length }})</option>
+                }
+                @for (emp of empresas; track emp.id) {
+                  <option [value]="emp.id">
+                    {{ emp.codigo }} · {{ emp.nombre }} ({{ emp.horasSemanalesContrato }}h){{ emp.estadoConfiguracion === 'PENDIENTE_REGLAS' ? ' ⚠️' : '' }}
+                  </option>
+                }
+              </select>
+            </div>
+          }
+
           <div class="control-item">
             <label for="rep-busqueda-input">Buscar:</label>
             <input
               id="rep-busqueda-input"
               type="text"
-              placeholder="Nombre, cédula o cargo..."
+              placeholder="Nombre, cédula, cargo o empresa..."
               [ngModel]="busquedaReporteTexto"
               (ngModelChange)="cambiarBusquedaTexto.emit($event)"
               class="report-search-input"
@@ -194,13 +218,14 @@ export type SubVistaReportes = 'PRE_NOMINA' | 'EQUIDAD' | 'BANCO_HORAS' | 'AUSEN
                 <tr>
                   <th>Documento</th>
                   <th>Colaborador</th>
+                  <th>Empresa</th>
                   <th>Servicio Base</th>
                   <th>Cargo</th>
-                  <th>Contrato</th>
-                  <th [title]="'Horas Ordinarias Diurnas hábiles ('+normativa.franjas.diurna+')'">HOD</th>
-                  <th [title]="'Horas Ordinarias Nocturnas hábiles ('+normativa.franjas.nocturna+')'">HON {{ pct(normativa.recargos.nocturno) }}</th>
-                  <th [title]="'Horas Dominicales/Festivas Diurnas ('+normativa.franjas.diurna+')'">HDFD {{ pct(normativa.recargos.dominical) }}</th>
-                  <th [title]="'Horas Dominicales/Festivas Nocturnas ('+normativa.franjas.nocturna+') = dominical '+pct(normativa.recargos.dominical)+' + nocturno '+pct(normativa.recargos.nocturno)">HDFN {{ pct(normativa.recargos.nocturnoDominical) }}</th>
+                  <th title="Meta contractual del mes calculada por días hábiles (!Dom && !Fest) × horas semanales empresa / 6">Meta Mes (D.H.)</th>
+                  <th title="Horas Ordinarias Diurnas en días hábiles (según franja nocturna vigente de la empresa)">HOD</th>
+                  <th title="Horas Ordinarias Nocturnas en días hábiles (según empresa)">HON {{ etiquetaRecargoColumna('nocturno') }}</th>
+                  <th title="Horas Dominicales/Festivas Diurnas (según recargo de cada empresa)">HDFD {{ etiquetaRecargoColumna('dominical') }}</th>
+                  <th title="Horas Dominicales/Festivas Nocturnas (según recargo dominical + nocturno de cada empresa)">HDFN {{ etiquetaRecargoColumna('nocturnoDominical') }}</th>
                   <th>Total Mes</th>
                   <th>Dom (D+F) / Comp</th>
                   <th>VAC / INC / LIC / FAM</th>
@@ -214,18 +239,26 @@ export type SubVistaReportes = 'PRE_NOMINA' | 'EQUIDAD' | 'BANCO_HORAS' | 'AUSEN
                   <tr>
                     <td class="font-mono">{{ r.emp.documento }}</td>
                     <td><strong>{{ r.emp.nombre }}</strong></td>
+                    <td>
+                      <span
+                        class="rep-empresa-chip"
+                        [class.is-pendiente]="r.empresaEstadoConfiguracion === 'PENDIENTE_REGLAS'"
+                        [title]="(r.empresaNombre || 'Empresa') + ' · ' + (r.horasSemanalesAplicadas ?? 42) + 'h/sem' + (r.empresaEstadoConfiguracion === 'PENDIENTE_REGLAS' ? ' (Reglas pendientes)' : '')">
+                        {{ r.empresaCodigo || 'CST' }} · {{ r.horasSemanalesAplicadas ?? 42 }}h
+                      </span>
+                    </td>
                     <td><span class="badge-personal">{{ r.servicioNombre }}</span></td>
                     <td>{{ r.emp.categoria }}</td>
-                    <td class="font-mono" [title]="(r.diasExonerados || 0) > 0 ? 'Meta prorrateada por ' + r.diasExonerados + 'd de novedad oficial (-' + r.horasExoneradas + 'h sobre ' + r.emp.horasContratoMes + 'h nominales)' : 'Contrato mensual nominal'">
-                      {{ r.horasContratadasEfectivas ?? r.horasContratoMes }}h
-                      @if ((r.diasExonerados || 0) > 0) {
-                        <small class="text-muted">({{ r.emp.horasContratoMes }}h)</small>
+                    <td class="font-mono" [title]="construirTooltipMetaContrato(r)">
+                      <strong>{{ r.horasContratadasEfectivas ?? r.horasContratoMes }}h</strong>
+                      @if ((r.diasHabilesProrrateados ?? r.diasExonerados ?? 0) > 0) {
+                        <small class="text-muted">({{ r.horasContratadasNominales ?? r.emp.horasContratoMes }}h nom)</small>
                       }
                     </td>
                     <td class="font-mono">{{ r.hod }}h</td>
-                    <td class="font-mono">{{ r.hon }}h</td>
-                    <td class="font-mono">{{ r.hdfd }}h</td>
-                    <td class="font-mono">{{ r.hdfn }}h</td>
+                    <td class="font-mono" [title]="'Recargo nocturno aplicado: ' + pct(r.recargos?.nocturno ?? normativa.recargos.nocturno)">{{ r.hon }}h</td>
+                    <td class="font-mono" [title]="'Recargo dominical/festivo aplicado: ' + pct(r.recargos?.dominical ?? normativa.recargos.dominical)">{{ r.hdfd }}h</td>
+                    <td class="font-mono" [title]="'Recargo nocturno dom/fest aplicado: ' + pct(r.recargos?.nocturnoDominical ?? normativa.recargos.nocturnoDominical)">{{ r.hdfn }}h</td>
                     <td class="font-mono"><strong>{{ r.horasTrabajadas }}h</strong></td>
                     <td class="font-mono" [title]="'Domingos laborados: ' + (r.conteoDomingos ?? r.conteoDomFest) + ' (≥3 causa compensatorio Art. 179 Par. 1 CST) • Dom + Fest: ' + r.conteoDomFest">
                       {{ r.conteoDomingos ?? r.conteoDomFest }} dom@if (r.conteoDomingos !== undefined && r.conteoDomFest !== r.conteoDomingos) { <small class="text-muted">({{ r.conteoDomFest }} D+F)</small> }
@@ -235,7 +268,12 @@ export type SubVistaReportes = 'PRE_NOMINA' | 'EQUIDAD' | 'BANCO_HORAS' | 'AUSEN
                     </td>
                     <td class="font-mono">{{ r.diasVac }}d / {{ r.diasInc }}d / {{ r.diasLic || 0 }}d / {{ r.diasFam || 0 }}d</td>
                     <td class="font-mono">{{ formatearSigno(r.saldoBancoAnterior) }}h</td>
-                    <td class="font-mono">{{ formatearSigno(r.diferenciaMes) }}h</td>
+                    <td class="font-mono" [title]="r.usaBancoHoras === false ? 'Empresa sin Banco de Horas acumulativo' : (r.horasAmortizadasComp > 0 ? 'Incluye amortización COMP: -' + r.horasAmortizadasComp + 'h' : 'Trabajadas - Meta Neta')">
+                      {{ formatearSigno(r.diferenciaMes) }}h
+                      @if (r.usaBancoHoras === false) {
+                        <small class="rep-nobanco-tag">N/A</small>
+                      }
+                    </td>
                     <td class="font-mono">
                       <strong [class.text-pos]="r.nuevoSaldoBanco > 0" [class.text-neg]="r.nuevoSaldoBanco < 0">
                         {{ formatearSigno(r.nuevoSaldoBanco) }}h
@@ -244,7 +282,7 @@ export type SubVistaReportes = 'PRE_NOMINA' | 'EQUIDAD' | 'BANCO_HORAS' | 'AUSEN
                   </tr>
                 } @empty {
                   <tr>
-                    <td colspan="15" class="text-muted table-empty-cell">
+                    <td colspan="16" class="text-muted table-empty-cell">
                       No se encontraron colaboradores con los filtros seleccionados.
                     </td>
                   </tr>
@@ -268,6 +306,7 @@ export type SubVistaReportes = 'PRE_NOMINA' | 'EQUIDAD' | 'BANCO_HORAS' | 'AUSEN
                 <tr>
                   <th>Documento</th>
                   <th>Colaborador</th>
+                  <th>Empresa</th>
                   <th>Servicio Base</th>
                   <th>Cargo</th>
                   <th>Noches Realizadas</th>
@@ -282,6 +321,14 @@ export type SubVistaReportes = 'PRE_NOMINA' | 'EQUIDAD' | 'BANCO_HORAS' | 'AUSEN
                   <tr>
                     <td class="font-mono">{{ r.emp.documento }}</td>
                     <td><strong>{{ r.emp.nombre }}</strong></td>
+                    <td>
+                      <span
+                        class="rep-empresa-chip"
+                        [class.is-pendiente]="r.empresaEstadoConfiguracion === 'PENDIENTE_REGLAS'"
+                        [title]="(r.empresaNombre || 'Empresa') + ' · ' + (r.horasSemanalesAplicadas ?? 42) + 'h/sem'">
+                        {{ r.empresaCodigo || 'CST' }} · {{ r.horasSemanalesAplicadas ?? 42 }}h
+                      </span>
+                    </td>
                     <td><span class="badge-personal">{{ r.servicioNombre }}</span></td>
                     <td>{{ r.emp.categoria }}</td>
                     <td class="font-mono">🌙 <strong>{{ r.conteoNoches }}</strong> noches</td>
@@ -308,7 +355,7 @@ export type SubVistaReportes = 'PRE_NOMINA' | 'EQUIDAD' | 'BANCO_HORAS' | 'AUSEN
                   </tr>
                 } @empty {
                   <tr>
-                    <td colspan="9" class="text-muted table-empty-cell">
+                    <td colspan="10" class="text-muted table-empty-cell">
                       No se encontraron colaboradores con los filtros seleccionados.
                     </td>
                   </tr>
@@ -332,11 +379,12 @@ export type SubVistaReportes = 'PRE_NOMINA' | 'EQUIDAD' | 'BANCO_HORAS' | 'AUSEN
                 <tr>
                   <th>Documento</th>
                   <th>Colaborador</th>
+                  <th>Empresa</th>
                   <th>Servicio Base</th>
                   <th>Cargo</th>
                   <th>Saldo Inicial</th>
                   <th>Horas Programadas</th>
-                  <th>Contrato Mes</th>
+                  <th>Meta Neta Mes</th>
                   <th>Amortizadas (COMP)</th>
                   <th>Diferencia Mes</th>
                   <th>Nuevo Saldo Continuo</th>
@@ -348,26 +396,44 @@ export type SubVistaReportes = 'PRE_NOMINA' | 'EQUIDAD' | 'BANCO_HORAS' | 'AUSEN
                   <tr>
                     <td class="font-mono">{{ r.emp.documento }}</td>
                     <td><strong>{{ r.emp.nombre }}</strong></td>
+                    <td>
+                      <span
+                        class="rep-empresa-chip"
+                        [class.is-pendiente]="r.empresaEstadoConfiguracion === 'PENDIENTE_REGLAS'"
+                        [title]="(r.empresaNombre || 'Empresa') + ' · ' + (r.horasSemanalesAplicadas ?? 42) + 'h/sem'">
+                        {{ r.empresaCodigo || 'CST' }} · {{ r.horasSemanalesAplicadas ?? 42 }}h
+                      </span>
+                    </td>
                     <td><span class="badge-personal">{{ r.servicioNombre }}</span></td>
                     <td>{{ r.emp.categoria }}</td>
                     <td class="font-mono">{{ formatearSigno(r.saldoBancoAnterior) }}h</td>
                     <td class="font-mono">{{ r.horasTrabajadas }}h</td>
-                    <td class="font-mono" [title]="(r.diasExonerados || 0) > 0 ? 'Nominal: ' + r.emp.horasContratoMes + 'h (-' + r.horasExoneradas + 'h por novedad)' : ''">
-                      {{ r.horasContratadasEfectivas ?? r.horasContratoMes }}h
+                    <td class="font-mono" [title]="construirTooltipMetaContrato(r)">
+                      <strong>{{ r.horasContratadasEfectivas ?? r.horasContratoMes }}h</strong>
+                      @if ((r.diasHabilesProrrateados ?? r.diasExonerados ?? 0) > 0) {
+                        <small class="text-muted">(-{{ r.horasExoneradas }}h)</small>
+                      }
                     </td>
-                    <td class="font-mono">
+                    <td class="font-mono" [title]="construirTooltipAmortizacionComp(r)">
                       @if (r.horasAmortizadasComp > 0) {
                         <span class="comp-note">-{{ r.horasAmortizadasComp }}h COMP</span>
                       } @else {
                         0h
                       }
                     </td>
-                    <td class="font-mono">{{ formatearSigno(r.diferenciaMes) }}h</td>
+                    <td class="font-mono">
+                      {{ formatearSigno(r.diferenciaMes) }}h
+                      @if (r.usaBancoHoras === false) {
+                        <small class="rep-nobanco-tag">Sin Banco</small>
+                      }
+                    </td>
                     <td class="font-mono">
                       <strong>{{ formatearSigno(r.nuevoSaldoBanco) }}h</strong>
                     </td>
                     <td>
-                      @if (r.estadoBanco === 'CRITICO') {
+                      @if (r.usaBancoHoras === false) {
+                        <span class="rep-nobanco-pill">Regla Sin Banco</span>
+                      } @else if (r.estadoBanco === 'CRITICO') {
                         <span class="banco-badge-final status-danger">🔴 Crítico ({{ formatearSigno(r.nuevoSaldoBanco) }}h)</span>
                       } @else if (r.estadoBanco === 'ATENCION') {
                         <span class="banco-badge-final status-warn">🟡 Atención ({{ formatearSigno(r.nuevoSaldoBanco) }}h)</span>
@@ -378,7 +444,7 @@ export type SubVistaReportes = 'PRE_NOMINA' | 'EQUIDAD' | 'BANCO_HORAS' | 'AUSEN
                   </tr>
                 } @empty {
                   <tr>
-                    <td colspan="11" class="text-muted table-empty-cell">
+                    <td colspan="12" class="text-muted table-empty-cell">
                       No se encontraron colaboradores con los filtros seleccionados.
                     </td>
                   </tr>
@@ -402,6 +468,7 @@ export type SubVistaReportes = 'PRE_NOMINA' | 'EQUIDAD' | 'BANCO_HORAS' | 'AUSEN
                 <tr>
                   <th>Documento</th>
                   <th>Colaborador</th>
+                  <th>Empresa</th>
                   <th>Servicio Base</th>
                   <th>Cargo</th>
                   <th>Días Vacaciones (VAC)</th>
@@ -417,6 +484,14 @@ export type SubVistaReportes = 'PRE_NOMINA' | 'EQUIDAD' | 'BANCO_HORAS' | 'AUSEN
                   <tr>
                     <td class="font-mono">{{ r.emp.documento }}</td>
                     <td><strong>{{ r.emp.nombre }}</strong></td>
+                    <td>
+                      <span
+                        class="rep-empresa-chip"
+                        [class.is-pendiente]="r.empresaEstadoConfiguracion === 'PENDIENTE_REGLAS'"
+                        [title]="(r.empresaNombre || 'Empresa') + ' · ' + (r.horasSemanalesAplicadas ?? 42) + 'h/sem'">
+                        {{ r.empresaCodigo || 'CST' }} · {{ r.horasSemanalesAplicadas ?? 42 }}h
+                      </span>
+                    </td>
                     <td><span class="badge-personal">{{ r.servicioNombre }}</span></td>
                     <td>{{ r.emp.categoria }}</td>
                     <td class="font-mono">
@@ -460,7 +535,7 @@ export type SubVistaReportes = 'PRE_NOMINA' | 'EQUIDAD' | 'BANCO_HORAS' | 'AUSEN
                   </tr>
                 } @empty {
                   <tr>
-                    <td colspan="10" class="text-muted table-empty-cell">
+                    <td colspan="11" class="text-muted table-empty-cell">
                       No se encontraron colaboradores con los filtros seleccionados.
                     </td>
                   </tr>
@@ -484,6 +559,8 @@ export class ReportesNominaComponent {
   @Input() mesesDisponibles: Array<{ valor: number; nombre: string }> = [];
   @Input() filtroReporteServicioId = 'TODOS';
   @Input() servicios: ServicioHospitalario[] = [];
+  @Input() empresas: EmpresaContratante[] = [];
+  @Input() filtroReporteEmpresaId = 'TODOS';
   @Input() busquedaReporteTexto = '';
   @Input() subVistaReportes: SubVistaReportes = 'PRE_NOMINA';
 
@@ -492,13 +569,110 @@ export class ReportesNominaComponent {
   @Output() navegarMes = new EventEmitter<-1 | 1>();
   @Output() irAMesActual = new EventEmitter<void>();
   @Output() cambiarFiltroServicio = new EventEmitter<string>();
+  @Output() cambiarFiltroEmpresa = new EventEmitter<string>();
   @Output() cambiarBusquedaTexto = new EventEmitter<string>();
   @Output() cambiarSubVista = new EventEmitter<SubVistaReportes>();
   @Output() exportarExcel = new EventEmitter<void>();
 
-  /** Franjas y recargos legales vigentes del periodo (Art. 160/168/179 CST, Ley 2466/2025). */
+  /** Franjas y recargos legales base vigentes del periodo (Art. 160/168/179 CST, Ley 2466/2025). */
   get normativa(): ReturnType<typeof resumenNormativoPeriodo> {
     return resumenNormativoPeriodo(this.anioSeleccionado, this.mesSeleccionado);
+  }
+
+  get resumenRegimenes(): string {
+    const vistos = new Set<string>();
+    for (const r of this.filas || []) {
+      const cod = r.empresaCodigo || r.emp?.empresaContratante?.codigo;
+      const h = r.horasSemanalesAplicadas ?? r.emp?.horasSemanalesAplicadas;
+      if (cod && h) {
+        vistos.add(`${cod} ${h}h`);
+      }
+    }
+    if (vistos.size === 0 && (this.empresas || []).length > 0) {
+      const fuente =
+        this.filtroReporteEmpresaId !== 'TODOS'
+          ? this.empresas.filter((e) => e.id === this.filtroReporteEmpresaId)
+          : this.empresas;
+      for (const e of fuente) {
+        vistos.add(`${e.codigo} ${e.horasSemanalesContrato}h`);
+      }
+    }
+    if (vistos.size === 0) {
+      return `Base legal ${this.normativa.jornadaSemanalHoras}h/sem`;
+    }
+    const items = Array.from(vistos);
+    return items.length === 1 ? `Régimen ${items[0]}/sem` : `Multi-empresa: ${items.join(' / ')}`;
+  }
+
+  get tooltipRegimenes(): string {
+    const lineas: string[] = [];
+    const seen = new Set<string>();
+    for (const r of this.filas || []) {
+      const cod = r.empresaCodigo || 'CST';
+      if (seen.has(cod)) continue;
+      seen.add(cod);
+      const nom = r.empresaNombre || cod;
+      const h = r.horasSemanalesAplicadas ?? 42;
+      const dh = r.diasHabilesMes ?? '—';
+      const noc = r.recargos?.nocturno !== undefined ? this.pct(r.recargos.nocturno) : this.pct(this.normativa.recargos.nocturno);
+      const dom = r.recargos?.dominical !== undefined ? this.pct(r.recargos.dominical) : this.pct(this.normativa.recargos.dominical);
+      lineas.push(`• ${nom} (${cod}): ${h}h/sem · ${dh} d.h. mes · Noc ${noc} · Dom/Fest ${dom}`);
+    }
+    if (lineas.length === 0) {
+      return `Jornada por días hábiles según reglas de empresa contratante (Ref. CST: ${this.normativa.franjas.nocturna}, Noc ${this.pct(this.normativa.recargos.nocturno)}, Dom ${this.pct(this.normativa.recargos.dominical)})`;
+    }
+    return `Liquidación multi-empresa por días hábiles:\n${lineas.join('\n')}`;
+  }
+
+  get tieneEmpresasPendientesEnReporte(): boolean {
+    if ((this.filas || []).some((r) => r.empresaEstadoConfiguracion === 'PENDIENTE_REGLAS')) {
+      return true;
+    }
+    return (this.empresas || []).some(
+      (e) =>
+        e.estadoConfiguracion === 'PENDIENTE_REGLAS' &&
+        (this.filtroReporteEmpresaId === 'TODOS' || this.filtroReporteEmpresaId === e.id)
+    );
+  }
+
+  etiquetaRecargoColumna(clave: 'nocturno' | 'dominical' | 'nocturnoDominical'): string {
+    const vals = new Set<string>();
+    for (const r of this.filas || []) {
+      const v = r.recargos?.[clave];
+      if (typeof v === 'number') {
+        vals.add(this.pct(v));
+      }
+    }
+    if (vals.size === 1) {
+      return Array.from(vals)[0];
+    }
+    if (vals.size > 1) {
+      return '(Var.)';
+    }
+    return this.pct(this.normativa.recargos[clave]);
+  }
+
+  construirTooltipMetaContrato(r: any): string {
+    const hSem = r.horasSemanalesAplicadas ?? r.emp?.horasSemanalesAplicadas ?? 42;
+    const dhMes = r.diasHabilesMes ?? '—';
+    const nom = r.horasContratadasNominales ?? r.horasContratoMes ?? r.emp?.horasContratoMes ?? 0;
+    const ef = r.horasContratadasEfectivas ?? nom;
+    const dhPror = r.diasHabilesProrrateados ?? r.diasExonerados ?? 0;
+    const exoneradas = r.horasExoneradas ?? 0;
+    const base = `${r.empresaNombre || 'Empresa'} (${hSem}h/sem)\n${dhMes} días hábiles × ${hSem}h / 6 = ${nom}h nominales`;
+    if (dhPror > 0) {
+      return `${base}\nProrrateo: -${dhPror} d.h. (-${exoneradas}h) ➔ Meta neta: ${ef}h`;
+    }
+    return `${base}\nSin días hábiles prorrateados`;
+  }
+
+  construirTooltipAmortizacionComp(r: any): string {
+    if (!r.horasAmortizadasComp || r.horasAmortizadasComp <= 0) {
+      return 'Sin turnos COMP amortizados en el periodo';
+    }
+    const hSem = r.horasSemanalesAplicadas ?? 42;
+    const valorDiaHabil = r2(hSem / 6);
+    return `Amortización COMP: -${r.horasAmortizadasComp}h del Banco de Horas (Referencia 1 día hábil de ${hSem}h/sem = ${valorDiaHabil}h o valor fijo del turno).`;
   }
 
   pct(fraccion: number): string {

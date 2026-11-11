@@ -7,7 +7,10 @@ import {
 import { FestivosColombiaHelper } from './festivos-colombia.helper';
 import {
   calcularDiasCompensatoriosDominicales,
-  calcularMetaContractualProrrateada,
+  calcularMetaMensualPorDiasHabiles,
+  combinarReglasEmpresa,
+  contarDiasHabilesMes,
+  contarDiasHabilesProrrateados,
   crearPredicadoDescanso,
   esCodigoExoneracionContrato,
   esTurnoNocturnoPrincipal,
@@ -19,6 +22,7 @@ import {
   r2,
   RecargosVigentes,
   recargosVigentes,
+  ReglasEmpresaContrato,
 } from './shared/liquidacion-horas';
 
 export interface MetricasMesColaborador {
@@ -41,16 +45,24 @@ export interface MetricasMesColaborador {
   diasInc: number;
   diasLic: number;
   diasFam: number;
+  diasHabilesMes: number;
+  diasHabilesProrrateados: number;
   diasExonerados: number;
+  horasContratadasNominales: number;
   horasExoneradas: number;
   horasContratadasEfectivas: number;
+  horasSemanalesAplicadas: number;
+  empresaCodigo: string;
+  empresaNombre: string;
+  empresaEstadoConfiguracion: string;
+  usaBancoHoras: boolean;
   saldoAntReal: number;
   diferenciaMes: number;
   nuevoSaldoBanco: number;
   causaCompensatorioDominical: boolean;
   estadoBanco: 'EQUILIBRADO' | 'ATENCION' | 'CRITICO';
   nivelFatiga: 'BAJO' | 'MODERADO' | 'ALTO';
-  /** Porcentajes de recargo legalmente vigentes en el periodo (Art. 168 y 179 CST, Ley 2466/2025). */
+  /** Porcentajes de recargo legalmente vigentes en el periodo según empresa/ley. */
   recargos: RecargosVigentes;
 }
 
@@ -59,13 +71,72 @@ export function predicadoDescansoObligatorio(): PredicadoDescanso {
   return crearPredicadoDescanso((fechaIso) => Boolean(FestivosColombiaHelper.esFestivo(fechaIso)));
 }
 
+/** Resuelve el conjunto de reglas contractuales aplicables a un colaborador (EmpresaContratante + override individual). */
+export function reglasEmpresaDeEmpleado(
+  emp?: Partial<EmpleadoHospital> | null
+): ReglasEmpresaContrato {
+  const ec = emp?.empresaContratante;
+  const override =
+    emp?.horasSemanalesOverride !== undefined && emp?.horasSemanalesOverride !== null
+      ? emp.horasSemanalesOverride
+      : !ec && emp?.horasSemanalesLey
+        ? emp.horasSemanalesLey
+        : undefined;
+
+  return combinarReglasEmpresa(
+    ec
+      ? {
+          empresaId: ec.id,
+          codigo: ec.codigo,
+          nombre: ec.nombre,
+          estadoConfiguracion: ec.estadoConfiguracion,
+          plantillaNormativa: ec.plantillaNormativa,
+          horasSemanalesContrato: ec.horasSemanalesContrato,
+          diasBaseSemana: ec.diasBaseSemana,
+          horaInicioNocturnoMin: ec.horaInicioNocturnoMin,
+          horaFinNocturnoMin: ec.horaFinNocturnoMin,
+          porcentajeRecargoNocturno: ec.porcentajeRecargoNocturno,
+          modoRecargoDominical: ec.modoRecargoDominical,
+          porcentajeRecargoDominicalFijo: ec.porcentajeRecargoDominicalFijo,
+          aplicaTopeHorasExtrasSemanal: ec.aplicaTopeHorasExtrasSemanal,
+          topeHorasExtrasSemanal: ec.topeHorasExtrasSemanal,
+          usaBancoHoras: ec.usaBancoHoras,
+        }
+      : undefined,
+    override
+  );
+}
+
+/** Meta mensual nominal de un colaborador calculada por días hábiles del periodo y reglas de su empresa. */
+export function calcularMetaNominalMesEmpleado(
+  emp: Partial<EmpleadoHospital> | undefined | null,
+  anio: number,
+  mes: number,
+  esFestivo: (fechaIso: string) => boolean = (iso) => Boolean(FestivosColombiaHelper.esFestivo(iso))
+): { diasHabilesMes: number; horasSemanalesAplicadas: number; horasContratadasNominales: number } {
+  const reglas = reglasEmpresaDeEmpleado(emp);
+  const resumen = contarDiasHabilesMes(anio, mes, esFestivo);
+  const meta = calcularMetaMensualPorDiasHabiles(
+    reglas.horasSemanalesContrato,
+    resumen.diasHabilesMes,
+    0,
+    reglas.diasBaseSemana
+  );
+  return {
+    diasHabilesMes: meta.diasHabilesMes,
+    horasSemanalesAplicadas: meta.horasSemanalesAplicadas,
+    horasContratadasNominales: meta.horasContratadasNominales,
+  };
+}
+
 /** Horas liquidadas (netas) de un turno que inicia en `fechaIso`. Única vía para obtener horas de una celda. */
 export function horasLiquidadasCelda(
   cfg: TipoTurnoConfig | undefined,
   fechaIso: string,
-  esDescanso: PredicadoDescanso = predicadoDescansoObligatorio()
+  esDescanso: PredicadoDescanso = predicadoDescansoObligatorio(),
+  reglas?: Partial<ReglasEmpresaContrato> | null
 ): number {
-  return liquidarTurno(cfg, fechaIso, esDescanso).total;
+  return liquidarTurno(cfg, fechaIso, esDescanso, reglas).total;
 }
 
 function fechaIsoDelDia(anio: number, mes: number, dia: number): string {
@@ -81,34 +152,47 @@ export function resumirHorasPeriodo(
   anio: number,
   mes: number,
   catalogo: Record<string, TipoTurnoConfig>,
-  esDescanso: PredicadoDescanso = predicadoDescansoObligatorio()
-): { horasTrabajadas: number; horasAmortizadasComp: number; diasExonerados: number } {
-  const items: { fechaIso: string; turno: TipoTurnoConfig | undefined }[] = [];
+  esDescanso: PredicadoDescanso = predicadoDescansoObligatorio(),
+  reglas?: Partial<ReglasEmpresaContrato> | null,
+  esFestivo?: (fechaIso: string) => boolean
+): {
+  horasTrabajadas: number;
+  horasAmortizadasComp: number;
+  diasExonerados: number;
+  diasHabilesProrrateados: number;
+} {
+  const predFest = esFestivo ?? ((iso: string) => esDescanso(iso));
+  const hSem = reglas?.horasSemanalesContrato ?? 42;
+  const dBase = reglas?.diasBaseSemana ?? 6;
+  const items: { fechaIso: string; codigo?: string; turno: TipoTurnoConfig | undefined }[] = [];
   let horasAmortizadasComp = 0;
-  let diasExonerados = 0;
+
   for (const [diaStr, celda] of Object.entries(celdasEmp || {})) {
     const cod = (celda?.codigo || '').trim().toUpperCase();
     if (!cod || cod === 'BLANCO') continue;
     const cfg = catalogo[cod];
+    const fechaIso = fechaIsoDelDia(anio, mes, Number(diaStr));
     if (!cfg) {
-      if (esCodigoExoneracionContrato(cod)) diasExonerados++;
+      items.push({ fechaIso, codigo: cod, turno: undefined });
       continue;
     }
-    horasAmortizadasComp = r2(horasAmortizadasComp + obtenerHorasAmortizacionTurno(cfg));
-    if (cfg.esAusencia || esCodigoExoneracionContrato(cod)) {
-      diasExonerados++;
-    }
-    items.push({ fechaIso: fechaIsoDelDia(anio, mes, Number(diaStr)), turno: cfg });
+    horasAmortizadasComp = r2(
+      horasAmortizadasComp + obtenerHorasAmortizacionTurno(cfg, hSem, dBase)
+    );
+    items.push({ fechaIso, codigo: cod, turno: cfg });
   }
+
+  const diasHabilesProrrateados = contarDiasHabilesProrrateados(items, predFest);
   return {
-    horasTrabajadas: liquidarPeriodo(items, esDescanso).total,
+    horasTrabajadas: liquidarPeriodo(items, esDescanso, reglas).total,
     horasAmortizadasComp,
-    diasExonerados,
+    diasExonerados: diasHabilesProrrateados,
+    diasHabilesProrrateados,
   };
 }
 
 /**
- * Función compartida para la liquidación mensual de turnos de un colaborador (CST + Ley 2466 + Ley 2101).
+ * Función compartida para la liquidación mensual de turnos de un colaborador (multi-empresa + días hábiles + CST/Ley 2466/Decreto 1042).
  * Unifica el cálculo entre el Planificador de Cuadrantes, el Módulo de Reportes de Nómina y Mi Calendario.
  * Delegada por completo en `shared/liquidacion-horas.ts` (mismo motor que usa el backend al persistir).
  */
@@ -121,8 +205,18 @@ export function calcularMetricasMesColaborador(
   anio: number,
   mes: number,
   saldoAnteriorCalculado?: number,
-  esDescanso: PredicadoDescanso = predicadoDescansoObligatorio()
+  esDescanso?: PredicadoDescanso,
+  esFestivo?: (fechaIso: string) => boolean
 ): MetricasMesColaborador {
+  const reglas = reglasEmpresaDeEmpleado(emp);
+  const festivosEnDias = new Set(dias.filter((d) => Boolean(d.festivo)).map((d) => d.fechaIso));
+  const predFest: (fechaIso: string) => boolean =
+    esFestivo ??
+    (esDescanso
+      ? (iso: string) => esDescanso(iso)
+      : (iso: string) => Boolean(FestivosColombiaHelper.esFestivo(iso)) || festivosEnDias.has(iso));
+  const predDescanso = esDescanso ?? crearPredicadoDescanso(predFest);
+
   const celdas = celdasEmp || {};
   let horasAmortizadasComp = 0;
   let conteoNoches = 0;
@@ -130,12 +224,11 @@ export function calcularMetricasMesColaborador(
   let diasInc = 0;
   let diasLic = 0;
   let diasFam = 0;
-  let diasExonerados = 0;
-  const items: { fechaIso: string; turno: TipoTurnoConfig | undefined }[] = [];
+  const items: { fechaIso: string; codigo?: string; turno: TipoTurnoConfig | undefined }[] = [];
 
   for (const d of dias) {
     const cod = (celdas[d.dia]?.codigo || '').trim().toUpperCase();
-    if (!cod) continue;
+    if (!cod || cod === 'BLANCO') continue;
     if (cod === 'VAC') diasVac++;
     if (cod === 'INC') diasInc++;
     if (cod === 'LIC') diasLic++;
@@ -143,19 +236,19 @@ export function calcularMetricasMesColaborador(
 
     const cfg = catalogo[cod];
     if (!cfg) {
-      if (esCodigoExoneracionContrato(cod)) diasExonerados++;
+      items.push({ fechaIso: d.fechaIso, codigo: cod, turno: undefined });
       continue;
     }
 
-    items.push({ fechaIso: d.fechaIso, turno: cfg });
+    items.push({ fechaIso: d.fechaIso, codigo: cod, turno: cfg });
     if (esTurnoNocturnoPrincipal(cfg)) conteoNoches++;
-    if (cfg.esAusencia || esCodigoExoneracionContrato(cod)) {
-      diasExonerados++;
-    }
-    horasAmortizadasComp = r2(horasAmortizadasComp + obtenerHorasAmortizacionTurno(cfg));
+    horasAmortizadasComp = r2(
+      horasAmortizadasComp +
+        obtenerHorasAmortizacionTurno(cfg, reglas.horasSemanalesContrato, reglas.diasBaseSemana)
+    );
   }
 
-  const liq = liquidarPeriodo(items, esDescanso);
+  const liq = liquidarPeriodo(items, predDescanso, reglas);
   const horasTrabajadas = r2(liq.total);
   const hod = r2(liq.hod);
   const hon = r2(liq.hon);
@@ -182,15 +275,22 @@ export function calcularMetricasMesColaborador(
         : saldoFallbackOrigen
   );
 
-  const meta = calcularMetaContractualProrrateada(
-    emp.horasContratoMes,
-    dias.length,
-    diasExonerados
+  const resumenHabiles = contarDiasHabilesMes(anio, mes, predFest);
+  const diasHabilesProrrateados = contarDiasHabilesProrrateados(items, predFest);
+  const meta = calcularMetaMensualPorDiasHabiles(
+    reglas.horasSemanalesContrato,
+    resumenHabiles.diasHabilesMes,
+    diasHabilesProrrateados,
+    reglas.diasBaseSemana
   );
+
   const tieneTurnosOperativos = horasTrabajadas > 0 || horasAmortizadasComp > 0;
-  const diferenciaMes = tieneTurnosOperativos
-    ? r2(horasTrabajadas - meta.horasContratadasEfectivas - horasAmortizadasComp)
-    : 0;
+  const diferenciaMes =
+    reglas.usaBancoHoras === false
+      ? 0
+      : tieneTurnosOperativos
+        ? r2(horasTrabajadas - meta.horasContratadasEfectivas - horasAmortizadasComp)
+        : 0;
   const nuevoSaldoBanco = r2(saldoAntReal + diferenciaMes);
   const estadoBanco = evaluarEstadoBancoHoras(nuevoSaldoBanco);
 
@@ -218,16 +318,25 @@ export function calcularMetricasMesColaborador(
     diasInc,
     diasLic,
     diasFam,
-    diasExonerados: meta.diasExonerados,
+    diasHabilesMes: meta.diasHabilesMes,
+    diasHabilesProrrateados: meta.diasHabilesProrrateados,
+    diasExonerados: meta.diasHabilesProrrateados,
+    horasContratadasNominales: meta.horasContratadasNominales,
     horasExoneradas: meta.horasExoneradas,
     horasContratadasEfectivas: meta.horasContratadasEfectivas,
+    horasSemanalesAplicadas: meta.horasSemanalesAplicadas,
+    empresaCodigo: emp.empresaContratante?.codigo || reglas.codigo || 'CST_DEFAULT',
+    empresaNombre: emp.empresaContratante?.nombre || reglas.nombre || 'Régimen CST',
+    empresaEstadoConfiguracion:
+      emp.empresaContratante?.estadoConfiguracion || reglas.estadoConfiguracion || 'CONFIRMADA',
+    usaBancoHoras: reglas.usaBancoHoras !== false,
     saldoAntReal,
     diferenciaMes,
     nuevoSaldoBanco,
     causaCompensatorioDominical: calcularDiasCompensatoriosDominicales(conteoDomingos) > 0,
     estadoBanco,
     nivelFatiga,
-    recargos: recargosVigentes(fechaRefPeriodo),
+    recargos: recargosVigentes(fechaRefPeriodo, reglas),
   };
 }
 

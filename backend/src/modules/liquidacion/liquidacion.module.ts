@@ -12,25 +12,34 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { extraerReglasDeEmpleado } from '../empresas/empresas-matching.util';
 import { FestivosColombiaService } from '../festivos/festivos-colombia.service';
 import { FestivosModule } from '../festivos/festivos.module';
 import {
   calcularDiasCompensatoriosDominicales,
-  calcularMetaContractualProrrateada,
+  calcularMetaMensualPorDiasHabiles,
+  CODIGOS_TURNOS_SISTEMA_OBLIGATORIOS,
+  contarDiasHabilesMes,
+  contarDiasHabilesProrrateados,
   DESCANSO_MINIMO_ENTRE_TURNOS_MIN,
   esCodigoExoneracionContrato,
   esDomingo,
+  esTurnoProrrateable,
   evaluarJornadaSemanalPeriodo,
   hoyColombiaIso,
   ItemPeriodo,
   liquidarPeriodo,
   liquidarTurno,
   obtenerHorasAmortizacionTurno,
+  PLANTILLA_CST_LEY_2466,
+  PLANTILLA_DECRETO_1042,
+  PLANTILLA_PERSONALIZADA_DEFAULT,
   r2,
   RECARGO_EXTRA_DIURNA,
   RECARGO_EXTRA_NOCTURNA,
   RECARGO_NOCTURNO,
   recargosVigentes,
+  ReglasEmpresaContrato,
   resumenNormativoPeriodo,
   SEMAFORO_BANCO_HORAS,
   sumarDiasIso,
@@ -52,8 +61,15 @@ export interface TipoTurnoLiquidableDb {
   horasNocturnas: number;
   minutosAlmuerzo: number;
   descuentaBancoHoras: boolean;
+  modoAmortizacionBanco?: string;
   horasAmortizacionBanco?: number | null;
+  prorrateaMetaContrato?: boolean;
+  esAusencia?: boolean;
+  bloqueaPermutas?: boolean;
   esNocturnoPesado: boolean;
+  esSistemaObligatorio?: boolean;
+  visibleEnPaleta?: boolean;
+  activo?: boolean;
 }
 
 export interface HorasPersistibles {
@@ -65,24 +81,37 @@ export interface HorasPersistibles {
   hen: number;
 }
 
-const CODIGOS_AUSENCIA = new Set(['VAC', 'INC', 'LIC', 'FAM']);
-const CODIGOS_VACIOS = new Set(['', 'BLANCO', 'L', 'S', 'COMP', 'DISP', 'FAM', 'VAC', 'INC', 'LIC']);
-
 export function toTurnoLiquidable(
   tipo: Partial<TipoTurnoLiquidableDb> | null | undefined,
   codigo?: string
 ): TurnoLiquidable | null {
   if (!tipo) return null;
   const cod = (tipo.codigo || codigo || '').trim().toUpperCase();
+  const esAusencia =
+    typeof tipo.esAusencia === 'boolean' ? tipo.esAusencia : esCodigoExoneracionContrato(cod);
+  const prorrateaMetaContrato =
+    typeof tipo.prorrateaMetaContrato === 'boolean'
+      ? tipo.prorrateaMetaContrato
+      : esCodigoExoneracionContrato(cod);
+  const bloqueaPermutas =
+    typeof tipo.bloqueaPermutas === 'boolean'
+      ? tipo.bloqueaPermutas
+      : esCodigoExoneracionContrato(cod);
+
   return {
+    codigo: cod || undefined,
     horaInicio: tipo.horaInicio,
     horaFin: tipo.horaFin,
     horasOrdinarias: Number(tipo.horasOrdinarias) || 0,
     horasDiurnas: Number(tipo.horasDiurnas) || 0,
     horasNocturnas: Number(tipo.horasNocturnas) || 0,
     minutosAlmuerzo: Number(tipo.minutosAlmuerzo) || 0,
-    esAusencia: CODIGOS_AUSENCIA.has(cod),
+    esAusencia,
+    prorrateaMetaContrato,
+    bloqueaPermutas,
     descuentaBancoHoras: Boolean(tipo.descuentaBancoHoras),
+    modoAmortizacionBanco:
+      tipo.modoAmortizacionBanco ?? (cod === 'COMP' ? 'DIA_HABIL_EMPRESA' : 'HORAS_FIJAS'),
     horasAmortizacionBanco: tipo.horasAmortizacionBanco ?? null,
   };
 }
@@ -102,14 +131,27 @@ export class LiquidacionService implements OnModuleInit {
     });
   }
 
+  private predicadoFestivo() {
+    return (fechaIso: string) => this.festivosService.esFestivo(fechaIso);
+  }
+
   private predicadoDescanso() {
     return (fechaIso: string) => esDomingo(fechaIso) || this.festivosService.esFestivo(fechaIso);
   }
 
-  /** Calcula las horas legales (HOD, HON, HDFD, HDFN) de un turno que inicia en `fechaUtc`. */
+  resolverReglasEmpleado(emp?: {
+    empresaContratante?: Partial<ReglasEmpresaContrato> | null;
+    horasSemanalesOverride?: number | null;
+    horasSemanalesLey?: number | null;
+  } | null): ReglasEmpresaContrato {
+    return extraerReglasDeEmpleado(emp);
+  }
+
+  /** Calcula las horas legales (HOD, HON, HDFD, HDFN) de un turno que inicia en `fechaUtc` aplicando las reglas de la empresa. */
   async calcularHorasPorTipo(
     tipo: Partial<TipoTurnoLiquidableDb> | null | undefined,
-    fechaUtc: Date
+    fechaUtc: Date,
+    reglas?: Partial<ReglasEmpresaContrato> | null
   ): Promise<HorasPersistibles> {
     if (!tipo) {
       return { hod: 0, hon: 0, hdfd: 0, hdfn: 0, hed: 0, hen: 0 };
@@ -126,7 +168,7 @@ export class LiquidacionService implements OnModuleInit {
     ]);
 
     const turnoLiq = toTurnoLiquidable(tipo, cod);
-    const liq = liquidarTurno(turnoLiq, fechaIso, this.predicadoDescanso());
+    const liq = liquidarTurno(turnoLiq, fechaIso, this.predicadoDescanso(), reglas);
     return {
       hod: liq.hod,
       hon: liq.hon,
@@ -137,13 +179,17 @@ export class LiquidacionService implements OnModuleInit {
     };
   }
 
-  async calcularHorasPorCodigo(codigo: string, fechaUtc: Date): Promise<HorasPersistibles> {
+  async calcularHorasPorCodigo(
+    codigo: string,
+    fechaUtc: Date,
+    reglas?: Partial<ReglasEmpresaContrato> | null
+  ): Promise<HorasPersistibles> {
     const cod = (codigo || '').trim().toUpperCase();
     if (!cod || cod === 'BLANCO') {
       return { hod: 0, hon: 0, hdfd: 0, hdfn: 0, hed: 0, hen: 0 };
     }
     const tipo = await this.prisma.tipoTurno.findUnique({ where: { codigo: cod } });
-    return this.calcularHorasPorTipo(tipo, fechaUtc);
+    return this.calcularHorasPorTipo(tipo, fechaUtc, reglas);
   }
 
   /** Recalcula y persiste `hod, hon, hdfd, hdfn` en un subconjunto filtrado de `asignaciones_turno`. */
@@ -157,7 +203,16 @@ export class LiquidacionService implements OnModuleInit {
     const db = tx || this.prisma;
     const asignaciones = await db.asignacionTurno.findMany({
       where: whereClause,
-      include: { tipoTurno: true },
+      include: {
+        tipoTurno: true,
+        empleado: {
+          select: {
+            horasSemanalesOverride: true,
+            horasSemanalesLey: true,
+            empresaContratante: true,
+          },
+        },
+      },
     });
     if (asignaciones.length === 0) {
       return { evaluadas: 0, actualizadas: 0 };
@@ -177,10 +232,11 @@ export class LiquidacionService implements OnModuleInit {
     for (const a of asignaciones) {
       const fechaIso = new Date(a.fecha).toISOString().substring(0, 10);
       const cod = (a.tipoTurno?.codigo || '').trim().toUpperCase();
+      const reglas = this.resolverReglasEmpleado((a as any).empleado);
       const liq =
         !cod || cod === 'BLANCO'
           ? { hod: 0, hon: 0, hdfd: 0, hdfn: 0 }
-          : liquidarTurno(toTurnoLiquidable(a.tipoTurno, cod), fechaIso, pred);
+          : liquidarTurno(toTurnoLiquidable(a.tipoTurno, cod), fechaIso, pred, reglas);
 
       if (
         Math.abs((a.hod || 0) - liq.hod) > 0.001 ||
@@ -228,14 +284,43 @@ export class LiquidacionService implements OnModuleInit {
     return { evaluadas: asignaciones.length, actualizadas: pendientes.length };
   }
 
-  /** Recalcula todo el año `anio` más el 31 de diciembre de `anio - 1` (turnos que cruzan medianoche hacia ene-1). */
+  /**
+   * Recalcula todo el año `anio` más el 31 de diciembre de `anio - 1` (turnos que cruzan medianoche hacia ene-1),
+   * respetando la inmutabilidad estricta de cuadrantes en estado `CERRADO_NOMINA`.
+   */
   async recalcularAnioYVispera(anio: number): Promise<{ evaluadas: number; actualizadas: number }> {
     const desde = new Date(Date.UTC(anio - 1, 11, 31));
     const hasta = new Date(Date.UTC(anio, 11, 31, 23, 59, 59));
-    const res = await this.recalcularAsignaciones({ fecha: { gte: desde, lte: hasta } });
+    const res = await this.recalcularAsignaciones({
+      fecha: { gte: desde, lte: hasta },
+      cuadrante: { estado: { not: 'CERRADO_NOMINA' } },
+    });
+
+    // Reconsolidar saldos abiertos de Banco de Horas en cuadrantes PUBLICADO / VALIDADO del año afectado (nunca CERRADO_NOMINA)
+    const abiertos = await this.prisma.cuadrante?.findMany({
+      where: {
+        OR: [{ anio }, { anio: anio - 1, mes: 12 }],
+        estado: { in: ['PUBLICADO', 'VALIDADO'] },
+      },
+      select: { servicioId: true, anio: true, mes: true },
+    });
+    if (Array.isArray(abiertos) && abiertos.length > 0) {
+      const primerPorSrv = new Map<string, { anio: number; mes: number }>();
+      for (const c of abiertos) {
+        const curNum = c.anio * 100 + c.mes;
+        const prev = primerPorSrv.get(c.servicioId);
+        if (!prev || curNum < prev.anio * 100 + prev.mes) {
+          primerPorSrv.set(c.servicioId, { anio: c.anio, mes: c.mes });
+        }
+      }
+      for (const [srvId, per] of primerPorSrv.entries()) {
+        await this.consolidarSaldosBancoServicio(srvId, per.anio, per.mes, new Map(), true);
+      }
+    }
+
     if (res.actualizadas > 0) {
       this.logger.log(
-        `Recalculadas ${res.actualizadas}/${res.evaluadas} asignaciones tras cambio normativo/festivos de ${anio}.`
+        `Recalculadas ${res.actualizadas}/${res.evaluadas} asignaciones tras cambio normativo/festivos de ${anio} (periodos CERRADO_NOMINA protegidos).`
       );
     }
     return res;
@@ -247,7 +332,7 @@ export class LiquidacionService implements OnModuleInit {
       cuadrante: { estado: { not: 'CERRADO_NOMINA' } },
     });
 
-    // Propagar también al Banco de Horas de cuadrantes PUBLICADOS afectados (por ejemplo al cambiar COMP o duración)
+    // Propagar también al Banco de Horas de cuadrantes PUBLICADOS afectados (sin tocar CERRADO_NOMINA)
     const asigsAfectadas = await this.prisma.asignacionTurno.findMany({
       where: {
         tipoTurnoId,
@@ -276,9 +361,46 @@ export class LiquidacionService implements OnModuleInit {
   }
 
   /**
+   * Recalcula asignaciones y saldos abiertos (`BORRADOR`, `PUBLICADO`, `VALIDADO`) cuando Talento Humano
+   * actualiza los parámetros de una `EmpresaContratante`. Respeta estrictamente `CERRADO_NOMINA`.
+   */
+  async recalcularPorEmpresa(empresaId: string): Promise<{ evaluadas: number; actualizadas: number }> {
+    const res = await this.recalcularAsignaciones({
+      empleado: { empresaContratanteId: empresaId },
+      cuadrante: { estado: { not: 'CERRADO_NOMINA' } },
+    });
+
+    const cuadrantesAbiertos = await this.prisma.cuadrante.findMany({
+      where: {
+        estado: { in: ['PUBLICADO', 'VALIDADO'] },
+        OR: [
+          { servicio: { empleadosBase: { some: { empresaContratanteId: empresaId } } } },
+          { asignaciones: { some: { empleado: { empresaContratanteId: empresaId } } } },
+        ],
+      },
+      select: { servicioId: true, anio: true, mes: true },
+    });
+
+    const primerPorSrv = new Map<string, { anio: number; mes: number }>();
+    for (const c of cuadrantesAbiertos) {
+      const curNum = c.anio * 100 + c.mes;
+      const prev = primerPorSrv.get(c.servicioId);
+      if (!prev || curNum < prev.anio * 100 + prev.mes) {
+        primerPorSrv.set(c.servicioId, { anio: c.anio, mes: c.mes });
+      }
+    }
+    for (const [srvId, per] of primerPorSrv.entries()) {
+      await this.consolidarSaldosBancoServicio(srvId, per.anio, per.mes, new Map(), true);
+    }
+
+    return res;
+  }
+
+  /**
    * Consolida y retorna los saldos del Banco de Horas de `servicioId` en `(anio, mes)` calculados
-   * autoritativamente desde PostgreSQL `asignaciones_turno` y `tipos_turno`.
-   * Si `cascada = true`, encadena el recálculo hacia meses posteriores ya consolidados/publicados (`M+1..12+`).
+   * autoritativamente desde PostgreSQL `asignaciones_turno`, `tipos_turno` y `empresas_contratantes`.
+   * Si `cascada = true`, encadena el recálculo hacia meses posteriores abiertos (`PUBLICADO` / `VALIDADO`),
+   * protegiendo `CERRADO_NOMINA`.
    */
   async consolidarSaldosBancoServicio(
     servicioId: string,
@@ -291,10 +413,11 @@ export class LiquidacionService implements OnModuleInit {
     const db = tx || this.prisma;
     const primerDia = new Date(Date.UTC(anio, mes - 1, 1));
     const ultimoDia = new Date(Date.UTC(anio, mes, 0, 23, 59, 59));
-    const diasDelMes = new Date(Date.UTC(anio, mes, 0)).getUTCDate();
 
     await this.festivosService.asegurarAnios([anio, anio + 1]);
     const pred = this.predicadoDescanso();
+    const predFest = this.predicadoFestivo();
+    const resumenHabiles = contarDiasHabilesMes(anio, mes, predFest);
 
     const extraEmpIds = Array.from(fallbacksSaldoInicial.keys());
     const empleados = await db.empleado.findMany({
@@ -304,7 +427,9 @@ export class LiquidacionService implements OnModuleInit {
           ...(extraEmpIds.length > 0 ? [{ id: { in: extraEmpIds } }] : []),
         ],
       },
-      select: { id: true, horasContratoMes: true },
+      include: {
+        empresaContratante: true,
+      },
     });
     if (empleados.length === 0) return;
 
@@ -343,34 +468,47 @@ export class LiquidacionService implements OnModuleInit {
     }
 
     const upserts = empleados.map((emp) => {
+      const reglas = this.resolverReglasEmpleado(emp as any);
+      const empresaCodigoSnapshot =
+        (emp as any).empresaContratante?.codigo || reglas.codigo || 'CST_DEFAULT';
       const lista = asigsPorEmp.get(emp.id) || [];
       let horasAmortizadasComp = 0;
-      let diasExonerados = 0;
       const items: ItemPeriodo[] = [];
+
       for (const a of lista) {
         const cod = (a.tipoTurno?.codigo || '').trim().toUpperCase();
         if (!cod || cod === 'BLANCO') continue;
-        horasAmortizadasComp += obtenerHorasAmortizacionTurno(a.tipoTurno);
-        if (esCodigoExoneracionContrato(cod)) diasExonerados++;
+        const turnoLiq = toTurnoLiquidable(a.tipoTurno, cod);
+        horasAmortizadasComp += obtenerHorasAmortizacionTurno(
+          turnoLiq,
+          reglas.horasSemanalesContrato,
+          reglas.diasBaseSemana
+        );
         items.push({
           fechaIso: new Date(a.fecha).toISOString().substring(0, 10),
-          turno: toTurnoLiquidable(a.tipoTurno, cod),
+          codigo: cod,
+          turno: turnoLiq,
         });
       }
       horasAmortizadasComp = r2(horasAmortizadasComp);
-      const horasTrabajadas = liquidarPeriodo(items, pred).total;
-      const meta = calcularMetaContractualProrrateada(
-        emp.horasContratoMes,
-        diasDelMes,
-        diasExonerados
+      const horasTrabajadas = liquidarPeriodo(items, pred, reglas).total;
+      const diasHabilesProrrateados = contarDiasHabilesProrrateados(items, predFest);
+      const meta = calcularMetaMensualPorDiasHabiles(
+        reglas.horasSemanalesContrato,
+        resumenHabiles.diasHabilesMes,
+        diasHabilesProrrateados,
+        reglas.diasBaseSemana
       );
       const saldoInicial = r2(
         mapaPrevDb.get(emp.id) ?? fallbacksSaldoInicial.get(emp.id) ?? 0
       );
       const tieneTurnosOperativos = horasTrabajadas > 0 || horasAmortizadasComp > 0;
-      const diferenciaMes = tieneTurnosOperativos
-        ? r2(horasTrabajadas - meta.horasContratadasEfectivas - horasAmortizadasComp)
-        : 0;
+      const diferenciaMes =
+        reglas.usaBancoHoras === false
+          ? 0
+          : tieneTurnosOperativos
+            ? r2(horasTrabajadas - meta.horasContratadasEfectivas - horasAmortizadasComp)
+            : 0;
       const saldoFinalAcumulado = r2(saldoInicial + diferenciaMes);
 
       return db.bancoHorasSaldo.upsert({
@@ -380,7 +518,13 @@ export class LiquidacionService implements OnModuleInit {
         update: {
           saldoInicial,
           horasTrabajadas,
+          horasContratadasNominales: meta.horasContratadasNominales,
+          horasExoneradas: meta.horasExoneradas,
           horasContratadas: meta.horasContratadasEfectivas,
+          diasHabilesMes: meta.diasHabilesMes,
+          diasHabilesProrrateados: meta.diasHabilesProrrateados,
+          horasSemanalesAplicadas: meta.horasSemanalesAplicadas,
+          empresaCodigoSnapshot,
           horasAmortizadasComp,
           diferenciaMes,
           saldoFinalAcumulado,
@@ -391,7 +535,13 @@ export class LiquidacionService implements OnModuleInit {
           mes,
           saldoInicial,
           horasTrabajadas,
+          horasContratadasNominales: meta.horasContratadasNominales,
+          horasExoneradas: meta.horasExoneradas,
           horasContratadas: meta.horasContratadasEfectivas,
+          diasHabilesMes: meta.diasHabilesMes,
+          diasHabilesProrrateados: meta.diasHabilesProrrateados,
+          horasSemanalesAplicadas: meta.horasSemanalesAplicadas,
+          empresaCodigoSnapshot,
           horasAmortizadasComp,
           diferenciaMes,
           saldoFinalAcumulado,
@@ -414,7 +564,8 @@ export class LiquidacionService implements OnModuleInit {
 
   /**
    * Elimina los saldos consolidados del mes revertido a BORRADOR y recalcula en cascada
-   * los periodos posteriores ya publicados/consolidados para mantener la continuidad del arrastre.
+   * los periodos posteriores abiertos (`PUBLICADO` / `VALIDADO`) para mantener la continuidad del arrastre
+   * sin alterar jamás periodos ya cerrados en `CERRADO_NOMINA`.
    */
   async invalidarSaldosMesYCascada(
     servicioId: string,
@@ -452,10 +603,9 @@ export class LiquidacionService implements OnModuleInit {
       db.cuadrante.findMany({
         where: {
           servicioId,
-          estado: { in: ['PUBLICADO', 'VALIDADO', 'CERRADO_NOMINA'] },
           OR: [{ anio: { gt: anio } }, { anio, mes: { gt: mes } }],
         },
-        select: { anio: true, mes: true },
+        select: { anio: true, mes: true, estado: true },
       }),
       db.bancoHorasSaldo.findMany({
         where: {
@@ -467,10 +617,25 @@ export class LiquidacionService implements OnModuleInit {
       }),
     ]);
 
+    const periodosNoRecalculables = new Set<string>(
+      cuadrantesPost
+        .filter((c) => c.estado === 'CERRADO_NOMINA' || c.estado === 'BORRADOR')
+        .map((c) => `${c.anio}-${c.mes}`)
+    );
+
     const mapaPeriodos = new Map<string, { anio: number; mes: number }>();
-    for (const p of [...cuadrantesPost, ...saldosPost]) {
-      mapaPeriodos.set(`${p.anio}-${p.mes}`, { anio: p.anio, mes: p.mes });
+    for (const c of cuadrantesPost) {
+      if (c.estado === 'PUBLICADO' || c.estado === 'VALIDADO') {
+        mapaPeriodos.set(`${c.anio}-${c.mes}`, { anio: c.anio, mes: c.mes });
+      }
     }
+    for (const p of saldosPost) {
+      const k = `${p.anio}-${p.mes}`;
+      if (!periodosNoRecalculables.has(k)) {
+        mapaPeriodos.set(k, { anio: p.anio, mes: p.mes });
+      }
+    }
+
     const periodosOrdenados = Array.from(mapaPeriodos.values()).sort(
       (a, b) => a.anio * 100 + a.mes - (b.anio * 100 + b.mes)
     );
@@ -492,12 +657,13 @@ export class LiquidacionService implements OnModuleInit {
   async liquidarPeriodoConsulta(anio: number, mes: number, servicioId?: string) {
     const primerDia = new Date(Date.UTC(anio, mes - 1, 1));
     const ultimoDia = new Date(Date.UTC(anio, mes, 0, 23, 59, 59));
-    const diasDelMes = new Date(Date.UTC(anio, mes, 0)).getUTCDate();
     const primerDiaIso = `${anio}-${String(mes).padStart(2, '0')}-01`;
     const primerDiaBorde = new Date(Date.UTC(anio, mes - 1, 1 - 21));
 
     await this.festivosService.asegurarAnios([anio - 1, anio, anio + 1]);
     const pred = this.predicadoDescanso();
+    const predFest = this.predicadoFestivo();
+    const resumenHabiles = contarDiasHabilesMes(anio, mes, predFest);
 
     const empleados = await this.prisma.empleado.findMany({
       where: servicioId
@@ -518,6 +684,7 @@ export class LiquidacionService implements OnModuleInit {
       include: {
         servicioBase: { select: { id: true, codigo: true, nombre: true } },
         categoria: { select: { nombre: true } },
+        empresaContratante: true,
       },
       orderBy: [{ servicioBase: { nombre: 'asc' } }, { nombre: 'asc' }],
     });
@@ -544,6 +711,8 @@ export class LiquidacionService implements OnModuleInit {
 
     let pendientesRecalculo = 0;
     const colaboradores = empleados.map((emp) => {
+      const reglas = this.resolverReglasEmpleado(emp as any);
+      const empresaDb = (emp as any).empresaContratante;
       const ventanaEmp = porEmpVentana.get(emp.id) || [];
       const esRotacionExterna = Boolean(servicioId && emp.servicioBaseId !== servicioId);
 
@@ -555,6 +724,7 @@ export class LiquidacionService implements OnModuleInit {
       let diasInc = 0;
       let diasLic = 0;
       let diasFam = 0;
+      let diasProrrateoOtro = 0;
 
       for (const a of ventanaEmp) {
         const cod = (a.tipoTurno?.codigo || '').trim().toUpperCase();
@@ -563,7 +733,7 @@ export class LiquidacionService implements OnModuleInit {
         const fechaUtc = new Date(a.fecha);
         const fechaIso = fechaUtc.toISOString().substring(0, 10);
         const turno = toTurnoLiquidable(a.tipoTurno, cod);
-        itemsVentanaSemanal.push({ fechaIso, turno });
+        itemsVentanaSemanal.push({ fechaIso, codigo: cod, turno });
 
         if (fechaUtc < primerDia || fechaUtc > ultimoDia) continue;
 
@@ -572,14 +742,20 @@ export class LiquidacionService implements OnModuleInit {
           else if (cod === 'INC') diasInc++;
           else if (cod === 'LIC') diasLic++;
           else if (cod === 'FAM') diasFam++;
+          else if (esTurnoProrrateable(turno, cod)) diasProrrateoOtro++;
+
           if (a.tipoTurno?.descuentaBancoHoras) {
             turnosComp++;
-            horasAmortizadasComp += obtenerHorasAmortizacionTurno(a.tipoTurno);
+            horasAmortizadasComp += obtenerHorasAmortizacionTurno(
+              turno,
+              reglas.horasSemanalesContrato,
+              reglas.diasBaseSemana
+            );
           }
 
-          itemsMes.push({ fechaIso, turno });
+          itemsMes.push({ fechaIso, codigo: cod, turno });
 
-          const liqCelda = liquidarTurno(turno, fechaIso, pred);
+          const liqCelda = liquidarTurno(turno, fechaIso, pred, reglas);
           if (
             Math.abs((a.hod || 0) - liqCelda.hod) > 0.001 ||
             Math.abs((a.hon || 0) - liqCelda.hon) > 0.001 ||
@@ -591,8 +767,8 @@ export class LiquidacionService implements OnModuleInit {
         }
       }
 
-      const liq = liquidarPeriodo(itemsMes, pred);
-      const semanalRaw = evaluarJornadaSemanalPeriodo(itemsVentanaSemanal);
+      const liq = liquidarPeriodo(itemsMes, pred, reglas);
+      const semanalRaw = evaluarJornadaSemanalPeriodo(itemsVentanaSemanal, reglas);
       const semanasDelMes = semanalRaw.semanas.filter((s) => s.semanaFinIso >= primerDiaIso);
       const promediosDelMes = semanalRaw.promedios3SemanasExcedidos.filter(
         (p) => p.hastaSemana >= primerDiaIso
@@ -611,12 +787,14 @@ export class LiquidacionService implements OnModuleInit {
         liq.domingosLaborados
       );
       const causaCompensatorioDominical = diasCompensatoriosCausados > 0;
-      const diasExonerados = diasVac + diasInc + diasLic + diasFam;
-      const meta = calcularMetaContractualProrrateada(
-        emp.horasContratoMes,
-        diasDelMes,
-        esRotacionExterna ? 0 : diasExonerados
+      const diasHabilesProrrateados = contarDiasHabilesProrrateados(itemsMes, predFest);
+      const meta = calcularMetaMensualPorDiasHabiles(
+        reglas.horasSemanalesContrato,
+        resumenHabiles.diasHabilesMes,
+        esRotacionExterna ? 0 : diasHabilesProrrateados,
+        reglas.diasBaseSemana
       );
+      const normativaColaborador = resumenNormativoPeriodo(anio, mes, reglas);
 
       return {
         empleadoId: emp.id,
@@ -627,6 +805,16 @@ export class LiquidacionService implements OnModuleInit {
         servicioNombre: emp.servicioBase?.nombre || '',
         esRotacionExterna,
         cargo: emp.categoria?.nombre || '',
+        empresaContratanteId: emp.empresaContratanteId || empresaDb?.id || null,
+        empresaCodigo: empresaDb?.codigo || reglas.codigo || 'CST_DEFAULT',
+        empresaNombre: empresaDb?.nombre || reglas.nombre || 'Régimen CST',
+        empresaEstadoConfiguracion: empresaDb?.estadoConfiguracion || 'CONFIRMADA',
+        plantillaNormativa: empresaDb?.plantillaNormativa || reglas.plantillaNormativa || 'CST_LEY_2466',
+        horasSemanalesAplicadas: meta.horasSemanalesAplicadas,
+        diasHabilesMes: meta.diasHabilesMes,
+        diasHabilesProrrateados: esRotacionExterna ? 0 : meta.diasHabilesProrrateados,
+        usaBancoHoras: reglas.usaBancoHoras !== false,
+        normativaColaborador,
         horasContratoMes: meta.horasContratadasEfectivas,
         horasContratadasNominales: meta.horasContratadasNominales,
         horasExoneradas: meta.horasExoneradas,
@@ -650,6 +838,7 @@ export class LiquidacionService implements OnModuleInit {
         diasInc,
         diasLic,
         diasFam,
+        diasProrrateoOtro,
         evaluacionSemanal: semanal,
       };
     });
@@ -659,12 +848,28 @@ export class LiquidacionService implements OnModuleInit {
       periodo: `${anio}-${String(mes).padStart(2, '0')}`,
       anio,
       mes,
+      diasDelMes: resumenHabiles.diasDelMes,
+      diasHabilesMes: resumenHabiles.diasHabilesMes,
       servicioId: servicioId || 'TODOS',
       normativaVigente: resumenNormativo,
       pendientesRecalculo,
       totalColaboradores: colaboradores.length,
       colaboradores,
     };
+  }
+
+  async obtenerCodigosNoLaboradosDinamicos(): Promise<string[]> {
+    try {
+      const noLab = await this.prisma.tipoTurno.findMany({
+        where: { activo: true, horasOrdinarias: { lte: 0 }, codigo: { not: 'BLANCO' } },
+        select: { codigo: true },
+        orderBy: { codigo: 'asc' },
+      });
+      if (Array.isArray(noLab) && noLab.length > 0) {
+        return noLab.map((t) => t.codigo);
+      }
+    } catch {}
+    return Array.from(CODIGOS_TURNOS_SISTEMA_OBLIGATORIOS).filter((c) => c !== 'BLANCO');
   }
 }
 
@@ -673,7 +878,7 @@ export class LiquidacionController {
   constructor(private readonly service: LiquidacionService) {}
 
   @Get('vigencias')
-  obtenerVigencias(@Query('anio') anioStr?: string, @Query('mes') mesStr?: string) {
+  async obtenerVigencias(@Query('anio') anioStr?: string, @Query('mes') mesStr?: string) {
     const hoy = hoyColombiaIso();
     const anio = Number(anioStr) || Number(hoy.substring(0, 4));
     const mes = Number(mesStr) || Number(hoy.substring(5, 7));
@@ -681,12 +886,19 @@ export class LiquidacionController {
       throw new BadRequestException('Parámetros anio y mes inválidos.');
     }
 
+    const codigosNoLaborados = await this.service.obtenerCodigosNoLaboradosDinamicos();
+
     return {
       fechaReferenciaColombia: hoy,
       zonaHorariaOficial: 'America/Bogota',
       periodo: `${anio}-${String(mes).padStart(2, '0')}`,
       resumenPeriodo: resumenNormativoPeriodo(anio, mes),
       recargosHoy: recargosVigentes(hoy),
+      plantillasEmpresa: {
+        DECRETO_1042: PLANTILLA_DECRETO_1042,
+        CST_LEY_2466: PLANTILLA_CST_LEY_2466,
+        PERSONALIZADA: PLANTILLA_PERSONALIZADA_DEFAULT,
+      },
       parametrosBase: {
         recargoNocturno: RECARGO_NOCTURNO,
         recargoExtraDiurna: RECARGO_EXTRA_DIURNA,
@@ -694,7 +906,7 @@ export class LiquidacionController {
         descansoMinimoEntreTurnosMinutos: DESCANSO_MINIMO_ENTRE_TURNOS_MIN,
         topeExtrasSemanalesHoras: TOPE_HORAS_EXTRAS_SEMANALES,
         semaforoBancoHoras: SEMAFORO_BANCO_HORAS,
-        codigosNoLaborados: Array.from(CODIGOS_VACIOS).filter(Boolean),
+        codigosNoLaborados,
       },
       tablasHistoricas: {
         inicioNocturno: VIGENCIAS_INICIO_NOCTURNO,
@@ -721,22 +933,27 @@ export class LiquidacionController {
 
   @Post('recalcular')
   async recalcularPersistido(
-    @Body() body?: { anio?: number; mes?: number; servicioId?: string }
+    @Body() body?: { anio?: number; mes?: number; servicioId?: string; incluirCerrados?: boolean }
   ) {
+    const filtroEstado = body?.incluirCerrados ? {} : { estado: { not: 'CERRADO_NOMINA' } };
     const where: Record<string, any> = {};
     if (body?.anio && body?.mes) {
       where.cuadrante = {
         anio: Number(body.anio),
         mes: Number(body.mes),
+        ...filtroEstado,
         ...(body.servicioId ? { servicioId: body.servicioId } : {}),
       };
     } else if (body?.anio) {
       where.cuadrante = {
         anio: Number(body.anio),
+        ...filtroEstado,
         ...(body.servicioId ? { servicioId: body.servicioId } : {}),
       };
     } else if (body?.servicioId) {
-      where.cuadrante = { servicioId: body.servicioId };
+      where.cuadrante = { servicioId: body.servicioId, ...filtroEstado };
+    } else if (!body?.incluirCerrados) {
+      where.cuadrante = { ...filtroEstado };
     }
 
     const res = await this.service.recalcularAsignaciones(where);

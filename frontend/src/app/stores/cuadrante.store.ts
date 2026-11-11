@@ -1,13 +1,17 @@
 import { computed, inject, Injectable, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { catchError, concatMap, forkJoin, map, Observable, of, Subject } from 'rxjs';
+import { catchError, concatMap, forkJoin, map, Observable, of, Subject, switchMap } from 'rxjs';
 import {
   CambioCeldaHistorial,
   CeldaAsignacion,
+  CoberturaTurnoDia,
   CodigoTurno,
   DiaColumna,
   EmpleadoHospital,
+  EmpresaContratante,
+  EstadoCoberturaTurno,
   InfraccionNormativa,
+  MetaTurnoServicio,
   PasoHistorialEdicion,
   ReglaCargoServicio,
   ServicioHospitalario,
@@ -17,16 +21,19 @@ import {
 import { TurnosApiService } from '../turnos-api.service';
 import { FestivosColombiaHelper } from '../festivos-colombia.helper';
 import {
+  calcularMetaNominalMesEmpleado,
   calcularMetricasMesColaborador,
   guardarStorageSeguro,
   horasLiquidadasCelda,
   leerStorageSeguro,
   predicadoDescansoObligatorio,
+  reglasEmpresaDeEmpleado,
   resumirHorasPeriodo,
 } from '../calculo-turnos.helper';
 import {
   calcularDescansoEntreTurnosMin,
-  calcularMetaContractualProrrateada,
+  calcularMetaMensualPorDiasHabiles,
+  contarDiasHabilesMes,
   DESCANSO_MINIMO_ENTRE_TURNOS_MIN,
   esCodigoExoneracionContrato,
   evaluarJornadaSemanalPeriodo,
@@ -36,6 +43,31 @@ import {
 import { AutocompletadoService, clasificarFranjasTurno } from './autocompletado.service';
 import { CatalogosSsoStore, csvTexto, descargarArchivoCsv, numeroCsv } from './catalogos-sso.store';
 import { NotificacionStore } from './notificacion.store';
+
+export interface FilaCoberturaTurno {
+  codigoTurno: string;
+  nombreTurno: string;
+  colorHex: string;
+  textHex: string;
+  borderHex: string;
+  horario: string;
+  minimoBase: number;
+  esperadoBase: number;
+  minimoDomFest: number;
+  esperadoDomFest: number;
+  esOperativoDia: boolean;
+  esNocturno: boolean;
+  dias: Record<number, CoberturaTurnoDia>;
+}
+
+export interface ResumenCoberturaTurnosServicio {
+  usaMetasPorTurno: boolean;
+  filasTurnos: FilaCoberturaTurno[];
+  rojos: number;
+  amarillos: number;
+  verdes: number;
+  excedentes: number;
+}
 
 @Injectable({ providedIn: 'root' })
 export class CuadranteStore {
@@ -114,6 +146,13 @@ export class CuadranteStore {
       .subscribe((emps) => {
         this.inicializarMatrizCuadrante(emps);
       });
+
+    this.catalogos.empresasActualizadas$
+      .pipe(
+        switchMap(() => this.crearObsCuadrantesAnio(this.catalogos.anioSeleccionado())),
+        takeUntilDestroyed()
+      )
+      .subscribe();
   }
 
   private guardarRotadosEnStorage(mapa: Record<string, string[]>): void {
@@ -127,6 +166,22 @@ export class CuadranteStore {
     this.asignacionesPorPeriodo.update((todo) => ({ ...todo, [key]: nuevoMapa }));
   }
 
+  private resolverEmpleadoConEmpresaActual(
+    emp: EmpleadoHospital,
+    empresasMap: Map<string, EmpresaContratante>
+  ): EmpleadoHospital {
+    const empresaId = emp.empresaContratanteId || emp.empresaContratante?.id;
+    const empresaActual = empresaId ? empresasMap.get(empresaId) : undefined;
+    if (!empresaActual) return emp;
+    const hAplicadas = emp.horasSemanalesOverride ?? empresaActual.horasSemanalesContrato;
+    return {
+      ...emp,
+      empresaContratanteId: empresaActual.id,
+      empresaContratante: empresaActual,
+      horasSemanalesAplicadas: hAplicadas,
+    };
+  }
+
   readonly listaTurnosPaleta = computed<TipoTurnoConfig[]>(() => {
     const srv = this.catalogos.servicioActual();
     const filtroCat = this.filtroCategoriaActiva();
@@ -135,22 +190,33 @@ export class CuadranteStore {
         ? (srv?.reglasPorCargo || []).find((r) => r.categoriaNombre === filtroCat)
         : undefined;
 
+    const codigosMetas = (srv?.metasPorTurno || [])
+      .filter((m) => m.habilitado !== false)
+      .map((m) => m.codigoTurno);
+
     const listaCodigosBase =
       reglaCat?.turnosHabilitados && reglaCat.turnosHabilitados.length > 0
         ? reglaCat.turnosHabilitados
         : srv?.turnosHabilitados && srv.turnosHabilitados.length > 0
-          ? srv.turnosHabilitados
-          : null;
+          ? Array.from(new Set([...srv.turnosHabilitados, ...codigosMetas]))
+          : codigosMetas.length > 0
+            ? codigosMetas
+            : null;
 
     const habilitadosSrv = listaCodigosBase
       ? new Set(listaCodigosBase.map((c) => c.toUpperCase()))
       : null;
     const codigosBaseDescanso = new Set(['L', 'S', 'COMP', 'VAC', 'INC', 'LIC', 'FAM']);
 
-    return this.catalogos.listaTurnosCatalogo().filter((t) => {
+    return this.catalogos.listaTurnosActivosCatalogo().filter((t) => {
       if (t.visibleEnPaleta === false) return false;
       if (!habilitadosSrv) return true;
-      return habilitadosSrv.has(t.codigo.toUpperCase()) || codigosBaseDescanso.has(t.codigo.toUpperCase());
+      const codUp = t.codigo.toUpperCase();
+      return (
+        habilitadosSrv.has(codUp) ||
+        codigosBaseDescanso.has(codUp) ||
+        Boolean(t.horasOrdinarias === 0 && (t.prorrateaMetaContrato || t.descuentaBancoHoras || t.esSistemaObligatorio))
+      );
     });
   });
 
@@ -265,17 +331,24 @@ export class CuadranteStore {
   // Mapa dinámico y continuo de Banco de Horas consolidado por empleado y periodo (empId::anio-mes)
   readonly mapaSaldosContinuos = computed<Record<string, { saldoInicial: number; saldoFinal: number }>>(() => {
     this.catalogos.versionCacheFestivos();
+    const empresasMap = new Map(this.catalogos.empresas().map((e) => [e.id, e]));
     const emps = this.catalogos.empleados();
     const catalogo = this.catalogos.catalogoTurnosMap();
     const asignaciones = this.asignacionesPorPeriodo();
     const saldosOficialesDb = this.saldosConsolidadosMap();
     const estados = this.estadosPorCuadrante();
     const anio = this.catalogos.anioSeleccionado();
+    const predFest = (iso: string) => Boolean(FestivosColombiaHelper.esFestivo(iso));
     const esDescansoPred = predicadoDescansoObligatorio();
+    const habilesPorMes = Array.from({ length: 12 }, (_, idx) =>
+      contarDiasHabilesMes(anio, idx + 1, predFest).diasHabilesMes
+    );
 
     const mapa: Record<string, { saldoInicial: number; saldoFinal: number }> = {};
 
-    for (const emp of emps) {
+    for (const empRaw of emps) {
+      const emp = this.resolverEmpleadoConEmpresaActual(empRaw, empresasMap);
+      const reglas = reglasEmpresaDeEmpleado(emp);
       let saldoAcumulado = 0;
 
       const keyPrevAnio = `${emp.id}::${anio - 1}-12`;
@@ -292,12 +365,14 @@ export class CuadranteStore {
         const saldoKey = `${emp.id}::${periodoKey}`;
         const celdasEmp = asignaciones[periodoKey]?.[emp.id];
 
-        const { horasTrabajadas, horasAmortizadasComp, diasExonerados } = resumirHorasPeriodo(
+        const { horasTrabajadas, horasAmortizadasComp, diasHabilesProrrateados } = resumirHorasPeriodo(
           celdasEmp,
           anio,
           m,
           catalogo,
-          esDescansoPred
+          esDescansoPred,
+          reglas,
+          predFest
         );
 
         const tieneActividadOperativa = horasTrabajadas > 0 || horasAmortizadasComp > 0;
@@ -318,12 +393,17 @@ export class CuadranteStore {
         const saldoInicialMes = r2(saldoAcumulado);
         let saldoFinalMes = saldoInicialMes;
 
-        if (tieneActividadOperativa) {
-          const totalDiasMes = new Date(Date.UTC(anio, m, 0)).getUTCDate();
-          const metaMes = calcularMetaContractualProrrateada(
-            emp.horasContratoMes,
-            totalDiasMes,
-            diasExonerados
+        if (reglas.usaBancoHoras === false) {
+          saldoFinalMes = saldoInicialMes;
+          if (esMesOficialConsolidado) {
+            saldoAcumulado = saldoFinalMes;
+          }
+        } else if (tieneActividadOperativa) {
+          const metaMes = calcularMetaMensualPorDiasHabiles(
+            reglas.horasSemanalesContrato,
+            habilesPorMes[m - 1],
+            diasHabilesProrrateados,
+            reglas.diasBaseSemana
           );
           const diferenciaMes = r2(
             horasTrabajadas - metaMes.horasContratadasEfectivas - horasAmortizadasComp
@@ -350,17 +430,24 @@ export class CuadranteStore {
   });
 
   readonly empleadosConSaldoActualizado = computed<EmpleadoHospital[]>(() => {
+    this.catalogos.versionCacheFestivos();
+    const empresasMap = new Map(this.catalogos.empresas().map((e) => [e.id, e]));
     const emps = this.catalogos.empleados();
     const mapa = this.mapaSaldosContinuos();
     const anio = this.catalogos.anioSeleccionado();
     const mes = this.catalogos.mesSeleccionado();
+    const predFest = (iso: string) => Boolean(FestivosColombiaHelper.esFestivo(iso));
 
-    return emps.map((e) => {
+    return emps.map((eRaw) => {
+      const e = this.resolverEmpleadoConEmpresaActual(eRaw, empresasMap);
+      const nominal = calcularMetaNominalMesEmpleado(e, anio, mes, predFest);
       const key = `${e.id}::${anio}-${mes}`;
       const saldoObj = mapa[key];
       const saldoReal = saldoObj !== undefined ? saldoObj.saldoInicial : e.saldoBancoAnterior;
       return {
         ...e,
+        horasSemanalesAplicadas: nominal.horasSemanalesAplicadas,
+        horasContratoMes: nominal.horasContratadasNominales,
         saldoBancoAnterior: saldoReal,
       };
     });
@@ -369,6 +456,7 @@ export class CuadranteStore {
   readonly filasServicioCompletas = computed(() => {
     const dias = this.diasDelMes();
     const matriz = this.asignaciones();
+    const empresasMap = new Map(this.catalogos.empresas().map((e) => [e.id, e]));
     const listaEmp = this.empleadosServicioSinFiltro();
     const catalogo = this.catalogos.catalogoTurnosMap();
     const saldos = this.saldosConsolidadosMap();
@@ -378,8 +466,11 @@ export class CuadranteStore {
     const srvId = this.catalogos.servicioSeleccionadoId();
     const mapaServicios = new Map(this.catalogos.servicios().map((s) => [s.id, s]));
     const esDescansoPredicado = predicadoDescansoObligatorio();
+    const predFest = (iso: string) => Boolean(FestivosColombiaHelper.esFestivo(iso));
 
-    return listaEmp.map(({ emp, esRotado }) => {
+    return listaEmp.map(({ emp: empRaw, esRotado }) => {
+      const emp = this.resolverEmpleadoConEmpresaActual(empRaw, empresasMap);
+      const reglas = reglasEmpresaDeEmpleado(emp);
       const celdasEmp = matriz[emp.id] || {};
       const keyPeriodo = `${emp.id}::${anio}-${mes}`;
       const saldoCalculado = mapaContinuo[keyPeriodo]?.saldoInicial;
@@ -392,14 +483,18 @@ export class CuadranteStore {
         saldos,
         anio,
         mes,
-        saldoCalculado
+        saldoCalculado,
+        esDescansoPredicado,
+        predFest
       );
       const ultimoTurnoPrevReal = this.obtenerUltimoTurnoMesPrevio(
         emp.id,
         emp.ultimoTurnoMesPrevio || 'L'
       );
-      const empConSaldo = {
+      const empConSaldo: EmpleadoHospital = {
         ...emp,
+        horasSemanalesAplicadas: metricas.horasSemanalesAplicadas,
+        horasContratoMes: metricas.horasContratadasNominales,
         saldoBancoAnterior: metricas.saldoAntReal,
         ultimoTurnoMesPrevio: ultimoTurnoPrevReal,
       };
@@ -414,7 +509,7 @@ export class CuadranteStore {
         if (!cod) continue;
         const cfg = catalogo[cod];
         if (!cfg || cfg.esAusencia) continue;
-        const hOrd = horasLiquidadasCelda(cfg, d.fechaIso, esDescansoPredicado);
+        const hOrd = horasLiquidadasCelda(cfg, d.fechaIso, esDescansoPredicado, reglas);
         if (hOrd <= 0) continue;
 
         const ejecutorId = celda?.servicioEjecutorId || emp.servicioBaseId;
@@ -501,6 +596,187 @@ export class CuadranteStore {
     }
     return resultado;
   });
+
+  readonly resumenCoberturaPorTurnoYDia = computed<ResumenCoberturaTurnosServicio>(() => {
+    const srv = this.catalogos.servicioActual();
+    const srvId = srv?.id || this.catalogos.servicioSeleccionadoId();
+    const dias = this.diasDelMes();
+    const matriz = this.asignaciones();
+    const catalogo = this.catalogos.catalogoTurnosMap();
+    const filtroCat = this.filtroCategoriaActiva();
+    const empsDelCuadrante = this.empleadosServicioSinFiltro().filter(
+      ({ emp }) => filtroCat === 'TODAS' || emp.categoria === filtroCat
+    );
+
+    const mod = srv?.modalidadDias || 'TODOS_24_7';
+    const reglaCat =
+      filtroCat !== 'TODAS'
+        ? (srv?.reglasPorCargo || []).find((r) => r.categoriaNombre === filtroCat)
+        : undefined;
+    const setTurnosCargo =
+      reglaCat?.turnosHabilitados && reglaCat.turnosHabilitados.length > 0
+        ? new Set(reglaCat.turnosHabilitados.map((c) => c.toUpperCase()))
+        : null;
+
+    // 1. Conteo diario por código de turno en el servicio actual
+    const conteoDiaTurno = new Map<number, Map<string, number>>();
+    for (const d of dias) {
+      const porCod = new Map<string, number>();
+      for (const { emp } of empsDelCuadrante) {
+        const celda = matriz[emp.id]?.[d.dia];
+        const cod = (celda?.codigo || '').trim().toUpperCase();
+        if (!cod || cod === 'BLANCO') continue;
+        if (celda?.servicioEjecutorId && celda.servicioEjecutorId !== srvId) continue;
+        const cfg = catalogo[cod];
+        if (!cfg || cfg.esAusencia || cfg.horasOrdinarias <= 0) continue;
+        porCod.set(cod, (porCod.get(cod) || 0) + 1);
+      }
+      conteoDiaTurno.set(d.dia, porCod);
+    }
+
+    // 2. Resolver metas por turno (metasPorTurno explícitas o respaldo desde turnosHabilitados)
+    const metasExplicitas = (srv?.metasPorTurno || []).filter((m) => {
+      if (m.habilitado === false) return false;
+      const codUp = m.codigoTurno.trim().toUpperCase();
+      if (setTurnosCargo && !setTurnosCargo.has(codUp)) return false;
+      const cfg = catalogo[codUp];
+      return Boolean(cfg && cfg.horasOrdinarias > 0 && !cfg.esAusencia && cfg.activo !== false);
+    });
+
+    const usaMetasPorTurno = metasExplicitas.length > 0;
+    let fuentesMeta: MetaTurnoServicio[] = metasExplicitas;
+
+    if (!usaMetasPorTurno) {
+      const codsHab = (
+        reglaCat?.turnosHabilitados && reglaCat.turnosHabilitados.length > 0
+          ? reglaCat.turnosHabilitados
+          : srv?.turnosHabilitados || []
+      ).filter((c) => {
+        const cfg = catalogo[c.trim().toUpperCase()];
+        return Boolean(cfg && cfg.horasOrdinarias > 0 && !cfg.esAusencia && cfg.activo !== false);
+      });
+      const diurnosCount = codsHab.filter((c) => clasificarFranjasTurno(catalogo[c.toUpperCase()]).dia).length;
+      const nocturnosCount = codsHab.filter((c) => clasificarFranjasTurno(catalogo[c.toUpperCase()]).noche).length;
+
+      fuentesMeta = codsHab.map((codRaw) => {
+        const cod = codRaw.trim().toUpperCase();
+        const cfg = catalogo[cod];
+        const fr = clasificarFranjasTurno(cfg);
+        const espBase = fr.noche && !fr.dia
+          ? Math.max(0, Math.ceil((srv?.reqNoche || 0) / Math.max(1, nocturnosCount)))
+          : fr.dia && !fr.noche
+            ? Math.max(0, Math.ceil((srv?.reqDia || 0) / Math.max(1, diurnosCount)))
+            : Math.max(srv?.reqDia || 0, srv?.reqNoche || 0);
+        const espDom = fr.noche && !fr.dia
+          ? Math.max(0, Math.ceil((srv?.reqNocheDomFest ?? srv?.reqNoche ?? 0) / Math.max(1, nocturnosCount)))
+          : fr.dia && !fr.noche
+            ? Math.max(0, Math.ceil((srv?.reqDiaDomFest ?? srv?.reqDia ?? 0) / Math.max(1, diurnosCount)))
+            : Math.max(srv?.reqDiaDomFest ?? srv?.reqDia ?? 0, srv?.reqNocheDomFest ?? srv?.reqNoche ?? 0);
+
+        return {
+          codigoTurno: cod,
+          nombreTurno: cfg?.nombre || cod,
+          colorHex: cfg?.bgHex || '#E0F2FE',
+          habilitado: true,
+          minimoBase: espBase > 0 ? 1 : 0,
+          esperadoBase: espBase,
+          minimoDomFest: espDom > 0 ? 1 : 0,
+          esperadoDomFest: espDom,
+        };
+      });
+    }
+
+    let rojos = 0;
+    let amarillos = 0;
+    let verdes = 0;
+    let excedentes = 0;
+
+    const filasTurnos: FilaCoberturaTurno[] = fuentesMeta.map((m) => {
+      const codUp = m.codigoTurno.trim().toUpperCase();
+      const cfg = catalogo[codUp];
+      const fr = clasificarFranjasTurno(cfg);
+      const diasMap: Record<number, CoberturaTurnoDia> = {};
+
+      for (const d of dias) {
+        const esDomOFest = d.esDomingo || Boolean(d.festivo);
+        const cerrado =
+          (esDomOFest && (mod === 'LUN_VIE_HABILES' || mod === 'LUN_SAB_SIN_FESTIVOS')) ||
+          (d.esSabado && mod === 'LUN_VIE_HABILES');
+        const programados = conteoDiaTurno.get(d.dia)?.get(codUp) || 0;
+
+        if (cerrado) {
+          diasMap[d.dia] = {
+            programados,
+            minimo: 0,
+            esperado: 0,
+            estado: 'VERDE',
+            exceso: programados,
+            cerrado: true,
+          };
+          continue;
+        }
+
+        const minimo = Math.max(0, esDomOFest ? m.minimoDomFest : m.minimoBase);
+        const esperado = Math.max(minimo, esDomOFest ? m.esperadoDomFest : m.esperadoBase);
+        let estado: EstadoCoberturaTurno = 'VERDE';
+        let exceso = 0;
+
+        if (minimo === 0 && esperado === 0) {
+          estado = 'VERDE';
+          exceso = programados;
+        } else if (programados < minimo) {
+          estado = 'ROJO';
+          rojos++;
+        } else if (programados < esperado) {
+          estado = 'AMARILLO';
+          amarillos++;
+        } else {
+          estado = 'VERDE';
+          exceso = Math.max(0, programados - esperado);
+          verdes++;
+          if (exceso > 0) excedentes++;
+        }
+
+        diasMap[d.dia] = {
+          programados,
+          minimo,
+          esperado,
+          estado,
+          exceso,
+          cerrado: false,
+        };
+      }
+
+      return {
+        codigoTurno: codUp,
+        nombreTurno: m.nombreTurno || cfg?.nombre || codUp,
+        colorHex: cfg?.bgHex || m.colorHex || '#E0F2FE',
+        textHex: cfg?.textHex || '#0F172A',
+        borderHex: cfg?.borderHex || '#94A3B8',
+        horario: cfg?.horario || `${m.horaInicio || ''}-${m.horaFin || ''}`,
+        minimoBase: m.minimoBase,
+        esperadoBase: m.esperadoBase,
+        minimoDomFest: m.minimoDomFest,
+        esperadoDomFest: m.esperadoDomFest,
+        esOperativoDia: fr.dia,
+        esNocturno: fr.noche,
+        dias: diasMap,
+      };
+    });
+
+    return {
+      usaMetasPorTurno,
+      filasTurnos,
+      rojos,
+      amarillos,
+      verdes,
+      excedentes,
+    };
+  });
+
+  readonly coberturaPorTurnoYDia = computed<FilaCoberturaTurno[]>(
+    () => this.resumenCoberturaPorTurnoYDia().filasTurnos
+  );
 
   readonly infraccionesActivas = computed<InfraccionNormativa[]>(() => {
     const dias = this.diasDelMes();
@@ -643,7 +919,9 @@ export class CuadranteStore {
       }
 
       if (itemsEmp.length > 0) {
-        const evalSem = evaluarJornadaSemanalPeriodo(itemsEmp);
+        const evalSem = evaluarJornadaSemanalPeriodo(itemsEmp, reglasEmpresaDeEmpleado(f.empleado));
+        const topeExtrasEmp = reglasEmpresaDeEmpleado(f.empleado).topeHorasExtrasSemanal ?? 12;
+        const aplicaTopeEmp = reglasEmpresaDeEmpleado(f.empleado).aplicaTopeHorasExtrasSemanal !== false;
         for (const w of evalSem.semanas) {
           if (!w.excedeTopeAbsoluto || w.semanaFinIso < primerDiaIso || w.semanaInicioIso > ultimoDiaIso) {
             continue;
@@ -658,7 +936,7 @@ export class CuadranteStore {
             empleadoId: f.empleado.id,
             empleadoNombre: f.empleado.nombre,
             dia: diaAnclaObj.dia,
-            mensaje: `${f.empleado.nombre} (Sem ${w.semanaInicioIso.slice(5)}): Excede tope legal de ${w.limiteOrdinarioVigente + 12}h/sem (${w.horasTotales}h programadas; jornada ${w.limiteOrdinarioVigente}h + 12h extras máx. Art. 22 Ley 50/90).`,
+            mensaje: `${f.empleado.nombre} (Sem ${w.semanaInicioIso.slice(5)}): Excede tope legal de ${aplicaTopeEmp ? w.limiteOrdinarioVigente + topeExtrasEmp : w.limiteOrdinarioVigente}h/sem (${w.horasTotales}h programadas; jornada ${w.limiteOrdinarioVigente}h + ${topeExtrasEmp}h extras máx.).`,
           });
         }
         for (const prom of evalSem.promedios3SemanasExcedidos) {
@@ -772,6 +1050,24 @@ export class CuadranteStore {
   };
 
   readonly porcentajeCoberturaGlobal = computed<number>(() => {
+    const resumen = this.resumenCoberturaPorTurnoYDia();
+    if (resumen.usaMetasPorTurno) {
+      let totalChecks = 0;
+      let cumplidos = 0;
+      for (const fila of resumen.filasTurnos) {
+        for (const cell of Object.values(fila.dias)) {
+          if (cell.cerrado || (cell.minimo === 0 && cell.esperado === 0)) continue;
+          totalChecks++;
+          if (cell.estado === 'VERDE') {
+            cumplidos += 1;
+          } else if (cell.estado === 'AMARILLO') {
+            cumplidos += 0.5;
+          }
+        }
+      }
+      return totalChecks > 0 ? Math.round((cumplidos / totalChecks) * 100) : 100;
+    }
+
     const dias = this.diasDelMes();
     const srv = this.catalogos.servicioActual();
     const cob = this.coberturaPorDia();
@@ -794,6 +1090,21 @@ export class CuadranteStore {
     return totalChecks > 0 ? Math.round((cumplidos / totalChecks) * 100) : 100;
   });
 
+  readonly empresasPendientesEnCuadrante = computed<EmpresaContratante[]>(() => {
+    const mapaEmpresas = new Map(this.catalogos.empresas().map((e) => [e.id, e]));
+    const pendientes = new Map<string, EmpresaContratante>();
+    for (const { emp } of this.empleadosServicioSinFiltro()) {
+      const empId = emp.empresaContratanteId || emp.empresaContratante?.id;
+      const empresa =
+        (empId ? mapaEmpresas.get(empId) : undefined) ||
+        (emp.empresaContratante as EmpresaContratante | undefined);
+      if (empresa && empresa.id && empresa.estadoConfiguracion === 'PENDIENTE_REGLAS') {
+        pendientes.set(empresa.id, empresa);
+      }
+    }
+    return Array.from(pendientes.values());
+  });
+
   readonly balanceGlobalBancoServicio = computed<number>(() =>
     r2(this.filasCuadrante().reduce((acc, f) => acc + f.nuevoSaldoBanco, 0))
   );
@@ -806,23 +1117,49 @@ export class CuadranteStore {
     const matriz = this.asignaciones();
     const catalogo = this.catalogos.catalogoTurnosMap();
     const dias = this.diasDelMes();
+    const anio = this.catalogos.anioSeleccionado();
+    const mes = this.catalogos.mesSeleccionado();
+    const predDesc = predicadoDescansoObligatorio();
+    const predFest = (iso: string) => Boolean(FestivosColombiaHelper.esFestivo(iso));
     const mapaServicios = new Map(this.catalogos.servicios().map((s) => [s.id, s]));
 
+    const cargosIds =
+      srvActual.cargosPermitidosIds && srvActual.cargosPermitidosIds.length > 0
+        ? srvActual.cargosPermitidosIds
+        : (srvActual.cargosPermitidos || []).map((c) => c.categoriaId).filter(Boolean);
+    const cargosNombres = (srvActual.cargosPermitidos || [])
+      .map((c) => c.categoriaNombre?.trim().toLowerCase())
+      .filter(Boolean);
+    const tieneRestriccionCargo = cargosIds.length > 0 || cargosNombres.length > 0;
+
     return todos
-      .filter((e) => idsHermanos.includes(e.servicioBaseId) && !yaIncluidos.has(e.id))
+      .filter((e) => {
+        if (!idsHermanos.includes(e.servicioBaseId) || yaIncluidos.has(e.id)) return false;
+        if (!tieneRestriccionCargo) return true;
+        const matchId = Boolean(e.categoriaId && cargosIds.includes(e.categoriaId));
+        const matchNombre = Boolean(e.categoria && cargosNombres.includes(e.categoria.trim().toLowerCase()));
+        return matchId || matchNombre;
+      })
       .map((e) => {
         const srvOrigen = mapaServicios.get(e.servicioBaseId);
+        const reglas = reglasEmpresaDeEmpleado(e);
+        const nominal = calcularMetaNominalMesEmpleado(e, anio, mes, predFest);
         const celdasEmp = matriz[e.id] || {};
         let horasMesActual = 0;
         for (const d of dias) {
           const cod = celdasEmp[d.dia]?.codigo || '';
           const cfg = cod ? catalogo[cod] : undefined;
           if (cfg && !cfg.esAusencia) {
-            horasMesActual += horasLiquidadasCelda(cfg, d.fechaIso);
+            horasMesActual = r2(horasMesActual + horasLiquidadasCelda(cfg, d.fechaIso, predDesc, reglas));
           }
         }
         return {
           ...e,
+          horasContratoMes: nominal.horasContratadasNominales,
+          horasContratadasNominales: nominal.horasContratadasNominales,
+          horasSemanalesAplicadas: nominal.horasSemanalesAplicadas,
+          empresaCodigo: e.empresaContratante?.codigo || reglas.codigo || 'CST',
+          empresaNombre: e.empresaContratante?.nombre || reglas.nombre || 'Régimen CST',
           servicioBaseCodigo: srvOrigen?.codigo || 'APOYO',
           servicioBaseNombre: srvOrigen?.nombre || 'Servicio de Apoyo',
           horasProgramadasMes: horasMesActual,
@@ -957,18 +1294,39 @@ export class CuadranteStore {
     const syncEmpleados$ = this.catalogos.esAdminTh()
       ? this.api
           .sincronizarEmpleadosIntranet()
-          .pipe(catchError(() => of({ ok: false, creados: 0, actualizados: 0 })))
-      : of({ ok: false, creados: 0, actualizados: 0 });
+          .pipe(catchError(() => of({ ok: false, creados: 0, actualizados: 0, empresasPendientes: [] })))
+      : of({ ok: false, creados: 0, actualizados: 0, empresasPendientes: [] });
+
+    let empresasPendientesDetectadas: Array<{ codigo: string; nombre: string; recienCreada?: boolean }> = [];
 
     syncEmpleados$
       .pipe(
         concatMap((resEmp: any) => {
-          if (resEmp && (resEmp.creados > 0 || resEmp.actualizados > 0)) {
-            return this.api.getEmpleados().pipe(
-              map((empsDb) => this.catalogos.aplicarEmpleadosDesdeDb(empsDb)),
-              catchError(() => of(null)),
-              concatMap(() => this.api.sincronizarNovedadesIntranet(anio, mes))
-            );
+          empresasPendientesDetectadas = Array.isArray(resEmp?.empresasPendientes)
+            ? resEmp.empresasPendientes
+            : [];
+          if (
+            resEmp &&
+            (resEmp.creados > 0 || resEmp.actualizados > 0 || empresasPendientesDetectadas.length > 0)
+          ) {
+            return forkJoin([
+              this.api.getEmpresas().pipe(
+                map((lista) => this.catalogos.aplicarEmpresasDesdeDb(lista)),
+                catchError(() => of(null))
+              ),
+              this.api.getCategorias().pipe(
+                map((cats) => this.catalogos.aplicarCategoriasDesdeDb(cats)),
+                catchError(() => of(null))
+              ),
+              this.api.getServicios().pipe(
+                map((srvs) => this.catalogos.aplicarServiciosDesdeDb(srvs)),
+                catchError(() => of(null))
+              ),
+              this.api.getEmpleados().pipe(
+                map((empsDb) => this.catalogos.aplicarEmpleadosDesdeDb(empsDb)),
+                catchError(() => of(null))
+              ),
+            ]).pipe(concatMap(() => this.api.sincronizarNovedadesIntranet(anio, mes)));
           }
           return this.api.sincronizarNovedadesIntranet(anio, mes);
         }),
@@ -998,7 +1356,12 @@ export class CuadranteStore {
           });
           this.ultimaSincronizacionIntranet.set(horaActual);
 
-          if (res && res.ok && !silencioso) {
+          if (empresasPendientesDetectadas.length > 0) {
+            const listadoEmp = empresasPendientesDetectadas.map((e) => `${e.nombre} (${e.codigo})`).join(', ');
+            this.notificacion.mostrar(
+              `⚠️ Intranet detectó empresa(s) nueva(s) con reglas pendientes por confirmar: ${listadoEmp}. Revísalas en Configuración → Empresas.`
+            );
+          } else if (res && res.ok && !silencioso) {
             this.notificacion.mostrar(
               `✅ Intranet al día (${horaActual}): ${res.totalSincronizadas} ausencias aplicadas (${res.celdasBloqueadas} días protegidos).`
             );
@@ -1537,11 +1900,11 @@ export class CuadranteStore {
     const filaEmp = { ...(actualMap[empId] || {}) };
     const celdaActual = filaEmp[dia];
     const cfgActual = celdaActual?.codigo ? this.catalogos.catalogoTurnosMap()[celdaActual.codigo] : undefined;
+    const esAusenciaBloqueada = cfgActual
+      ? Boolean(cfgActual.esAusencia)
+      : esCodigoExoneracionContrato(celdaActual?.codigo);
 
-    if (
-      (esCodigoExoneracionContrato(celdaActual?.codigo) || cfgActual?.esAusencia) &&
-      nuevoCodigo !== celdaActual?.codigo
-    ) {
+    if (esAusenciaBloqueada && nuevoCodigo !== celdaActual?.codigo) {
       this.notificacion.mostrar(
         `🔒 Celda bloqueada: Novedad oficial de Intranet (${celdaActual?.codigo}). Las ausencias oficiales solo pueden ser gestionadas desde Gestión Humana.`
       );
@@ -1774,12 +2137,10 @@ export class CuadranteStore {
       for (const d of this.diasDelMes()) {
         const celda = fila[d.dia];
         const cfgCelda = celda?.codigo ? catalogo[celda.codigo] : undefined;
-        if (
-          !celda ||
-          celda.codigo === '' ||
-          esCodigoExoneracionContrato(celda.codigo) ||
-          cfgCelda?.esAusencia
-        ) {
+        const esAusenciaProtegida = cfgCelda
+          ? Boolean(cfgCelda.esAusencia)
+          : esCodigoExoneracionContrato(celda?.codigo);
+        if (!celda || celda.codigo === '' || esAusenciaProtegida) {
           continue;
         }
         if (celda.servicioEjecutorId && celda.servicioEjecutorId !== srvId) {
@@ -1891,7 +2252,7 @@ export class CuadranteStore {
       srvId,
       dias: this.diasDelMes(),
       catalogo: this.catalogos.catalogoTurnosMap(),
-      listaTurnosCatalogo: this.catalogos.listaTurnosCatalogo(),
+      listaTurnosCatalogo: this.catalogos.listaTurnosActivosCatalogo(),
       prevMapSnapshot,
       filasBase: this.filasServicioCompletas(),
       filtroCategoriaActiva: this.filtroCategoriaActiva(),
@@ -2113,6 +2474,14 @@ export class CuadranteStore {
       nuevoEstado = 'PUBLICADO';
       msgExito = `✅ Cuadro de turnos de ${srvNombre} (${mesNombre} ${anio}) publicado oficialmente.`;
     } else if (actual === 'PUBLICADO') {
+      const pendientes = this.empresasPendientesEnCuadrante();
+      if (pendientes.length > 0) {
+        const listado = pendientes.map((e) => `${e.nombre} (${e.codigo})`).join(', ');
+        this.notificacion.mostrar(
+          `⛔ No se puede cerrar para Nómina: hay empresa(s) con reglas pendientes por confirmar (${listado}). Confírmalas en Configuración → Empresas.`
+        );
+        return;
+      }
       nuevoEstado = 'CERRADO_NOMINA';
       msgExito = `✅ Mes de ${mesNombre} ${anio} (${srvNombre}) cerrado para Nómina.`;
     } else {
@@ -2249,7 +2618,7 @@ export class CuadranteStore {
     const mes = this.catalogos.mesSeleccionado();
     const srvActual = this.catalogos.servicioActual();
     const encabezadosDias = dias.map((d) => `Dia_${d.dia}`).join(';');
-    const header = `Periodo;Documento;Colaborador;Cargo;Servicio;Contrato_Mes;Contrato_Efectivo_Mes;HOD;HON;HDFD;HDFN;Horas_Trabajadas;Recargo_Nocturno_Pct;Recargo_Dominical_Festivo_Pct;Recargo_Nocturno_Dominical_Festivo_Pct;Domingos_Laborados;Dom_Fest_Laborados;Compensatorio_Causado;Dias_VAC;Dias_INC;Dias_LIC;Dias_FAM;Saldo_Banco_Anterior;Diferencia_Mes;Nuevo_Saldo_Banco;${encabezadosDias}`;
+    const header = `Periodo;Documento;Colaborador;Cargo;Empresa;Regimen_Semanal_H;Servicio;Dias_Habiles_Mes;Dias_Habiles_Prorrateados;Meta_Nominal_H;Prorrateo_H;Meta_Neta_H;HOD;HON;HDFD;HDFN;Horas_Trabajadas;Amortizadas_COMP_H;Recargo_Nocturno_Pct;Recargo_Dominical_Festivo_Pct;Recargo_Nocturno_Dominical_Festivo_Pct;Domingos_Laborados;Dom_Fest_Laborados;Compensatorio_Causado;Dias_VAC;Dias_INC;Dias_LIC;Dias_FAM;Saldo_Banco_Anterior;Diferencia_Mes;Nuevo_Saldo_Banco;${encabezadosDias}`;
     const periodoCsv = `${anio}-${String(mes).padStart(2, '0')}`;
 
     const lineas = filas.map((f) => {
@@ -2259,14 +2628,20 @@ export class CuadranteStore {
         csvTexto(f.empleado.documento),
         csvTexto(f.empleado.nombre),
         csvTexto(f.empleado.categoria),
+        csvTexto(f.empresaNombre),
+        numeroCsv(f.horasSemanalesAplicadas),
         csvTexto(srvActual.nombre),
-        numeroCsv(f.empleado.horasContratoMes),
+        f.diasHabilesMes,
+        f.diasHabilesProrrateados,
+        numeroCsv(f.horasContratadasNominales),
+        numeroCsv(f.horasExoneradas),
         numeroCsv(f.horasContratadasEfectivas),
         numeroCsv(f.hod),
         numeroCsv(f.hon),
         numeroCsv(f.hdfd),
         numeroCsv(f.hdfn),
         numeroCsv(f.horasTrabajadas),
+        numeroCsv(f.horasAmortizadasComp),
         formatearPorcentaje(f.recargos.nocturno),
         formatearPorcentaje(f.recargos.dominical),
         formatearPorcentaje(f.recargos.nocturnoDominical),

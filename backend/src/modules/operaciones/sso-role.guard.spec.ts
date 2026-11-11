@@ -89,6 +89,11 @@ class StubGuardRoutesController {
   recalcular() {
     return { ok: true };
   }
+
+  @Post('empresas')
+  crearEmpresa() {
+    return { ok: true };
+  }
 }
 
 describe('SsoRoleGuard (RBAC + Sliding Session)', () => {
@@ -225,6 +230,12 @@ describe('SsoRoleGuard (RBAC + Sliding Session)', () => {
       .expect(403);
 
     await request(app.getHttpServer())
+      .post('/api/v1/empresas')
+      .set('Authorization', `Bearer ${tokenCoord}`)
+      .send({})
+      .expect(403);
+
+    await request(app.getHttpServer())
       .put('/api/v1/cuadrantes/estado')
       .set('Authorization', `Bearer ${tokenCoord}`)
       .send({ servicioId: 'srv-urg', estado: 'CERRADO_NOMINA' })
@@ -272,6 +283,12 @@ describe('SsoRoleGuard (RBAC + Sliding Session)', () => {
 
     await request(app.getHttpServer())
       .post('/api/v1/servicios-admin')
+      .set('Authorization', `Bearer ${tokenTh}`)
+      .send({})
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post('/api/v1/empresas')
       .set('Authorization', `Bearer ${tokenTh}`)
       .send({})
       .expect(201);

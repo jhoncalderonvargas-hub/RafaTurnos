@@ -130,11 +130,11 @@ describe('PermutasController (Máquina de estados + Concurrencia) & CalendarioIc
       asignacionTurno: {
         findUnique: jest.fn(async ({ where }: any) => {
           const eid = where?.empleadoId_fecha?.empleadoId;
-          const cod = eid === emp1.id ? snapshotOri : snapshotDes;
+          const cod = eid === emp1.id || eid === 'emp-aux' ? snapshotOri : snapshotDes;
           return {
             id: `asig-${eid}`,
             empleadoId: eid,
-            servicioEjecutorId: 'srv-urg',
+            servicioEjecutorId: eid === 'emp-aux' || eid === 'emp-tec' ? 'srv-fact' : 'srv-urg',
             tipoTurno: tiposTurno.find((t) => t.codigo === cod),
           };
         }),
@@ -366,5 +366,108 @@ describe('PermutasController (Máquina de estados + Concurrencia) & CalendarioIc
     expect(resIcs.text).toContain('DTSTART;TZID=America/Bogota:20261120T230000');
     expect(resIcs.text).toContain('DTEND;TZID=America/Bogota:20261121T070000');
     expect(resIcs.text).toContain('END:VCALENDAR');
+  });
+
+  it('permite permuta multi-cargo cuando permitePermutaEntreCargos=true, bloquea si false, y respeta bloqueaPermutas en TipoTurno', async () => {
+    const empAux = {
+      id: 'emp-aux',
+      documento: '2001',
+      nombre: 'Auxiliar Facturación',
+      categoriaId: 'cat-aux',
+      categoria: { id: 'cat-aux', nombre: 'Auxiliar de Facturación' },
+      servicioBaseId: 'srv-fact',
+    };
+    const empTec = {
+      id: 'emp-tec',
+      documento: '2002',
+      nombre: 'Técnico Facturación',
+      categoriaId: 'cat-tec',
+      categoria: { id: 'cat-tec', nombre: 'Técnico Administrativo' },
+      servicioBaseId: 'srv-fact',
+    };
+
+    prismaMock.empleado.findFirst.mockImplementation(async ({ where }: any) => {
+      const keys = (where?.OR || []).flatMap((o: any) => Object.values(o));
+      const pool = [emp1, emp2, empMed, empAux, empTec];
+      return pool.find((e) => keys.includes(e.id) || keys.includes(e.documento)) || null;
+    });
+
+    // Caso 1: servicio multi-cargo habilitado -> permite intercambio entre cargos equivalentes
+    prismaMock.servicio.findFirst.mockResolvedValue({
+      id: 'srv-fact',
+      codigo: 'FACT-URG',
+      nombre: 'Facturación Urgencias',
+      permitePermutaEntreCargos: true,
+      cargosPermitidos: [{ categoriaId: 'cat-aux' }, { categoriaId: 'cat-tec' }],
+    });
+
+    const simOk = await request(app.getHttpServer())
+      .post('/api/v1/permutas/simular')
+      .send({
+        solicitanteId: 'emp-aux',
+        solicitanteCategoria: 'Auxiliar de Facturación',
+        receptorId: 'emp-tec',
+        receptorCategoria: 'Técnico Administrativo',
+        servicioId: 'srv-fact',
+        anio: 2026,
+        mes: 11,
+        diaOrigen: 20,
+        turnoOrigen: 'M8',
+        diaDestino: 22,
+        turnoDestino: 'N8',
+      })
+      .expect(201);
+    expect(simOk.body.permitida).toBe(true);
+
+    await request(app.getHttpServer())
+      .post('/api/v1/permutas')
+      .send({
+        solicitanteId: 'emp-aux',
+        receptorId: 'emp-tec',
+        servicioId: 'srv-fact',
+        anio: 2026,
+        mes: 11,
+        diaOrigen: 20,
+        turnoOrigen: 'M8',
+        diaDestino: 22,
+        turnoDestino: 'N8',
+      })
+      .expect(201);
+
+    // Caso 2: mismo servicio pero permitePermutaEntreCargos = false -> rechaza 409
+    prismaMock.servicio.findFirst.mockResolvedValueOnce({
+      id: 'srv-fact',
+      codigo: 'FACT-URG',
+      nombre: 'Facturación Urgencias',
+      permitePermutaEntreCargos: false,
+      cargosPermitidos: [{ categoriaId: 'cat-aux' }, { categoriaId: 'cat-tec' }],
+    });
+    await request(app.getHttpServer())
+      .post('/api/v1/permutas')
+      .send({
+        solicitanteId: 'emp-aux',
+        receptorId: 'emp-tec',
+        servicioId: 'srv-fact',
+        anio: 2026,
+        mes: 11,
+        diaOrigen: 20,
+        turnoOrigen: 'M8',
+        diaDestino: 22,
+        turnoDestino: 'N8',
+      })
+      .expect(409);
+
+    // Caso 3: Turno custom con bloqueaPermutas=true rechaza intercambio (409)
+    prismaMock.tipoTurno.findMany.mockResolvedValueOnce([
+      ...tiposTurno,
+      { codigo: 'CAP_BLQ', nombre: 'Capacitación Obligatoria', horasOrdinarias: 8, bloqueaPermutas: true, esAusencia: false },
+    ]);
+    await request(app.getHttpServer())
+      .post('/api/v1/permutas')
+      .send({
+        ...payloadBase,
+        turnoOrigen: 'CAP_BLQ',
+      })
+      .expect(409);
   });
 });

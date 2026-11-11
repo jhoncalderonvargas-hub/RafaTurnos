@@ -52,7 +52,7 @@ export class AppComponent implements OnInit {
   readonly vistaActual = signal<
     'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'AUDITORIA' | 'PORTAL_EMPLEADO' | 'CONFIGURACION'
   >('PLANIFICADOR');
-  readonly subVistaConfig = signal<'SERVICIOS' | 'CATALOGO_TURNOS' | 'FESTIVOS'>('SERVICIOS');
+  readonly subVistaConfig = signal<'SERVICIOS' | 'EMPRESAS' | 'CATALOGO_TURNOS' | 'FESTIVOS'>('SERVICIOS');
   readonly sidebarFijo = signal<boolean>(false);
   readonly sidebarHovered = signal<boolean>(false);
   readonly sidebarExpandido = computed<boolean>(() => this.sidebarFijo() || this.sidebarHovered());
@@ -206,10 +206,22 @@ export class AppComponent implements OnInit {
     const mes = this.catalogos.mesSeleccionado();
 
     forkJoin([
+      this.api.getEmpresas().pipe(
+        map((emps) => this.catalogos.aplicarEmpresasDesdeDb(emps)),
+        catchError(() => of(null))
+      ),
+      this.api.getPlantillasEmpresas().pipe(
+        map((plantillas) => this.catalogos.aplicarPlantillasDesdeDb(plantillas)),
+        catchError(() => of(null))
+      ),
       this.api.getMacroprocesos().pipe(
         map((lista) => {
           if (Array.isArray(lista) && lista.length > 0) this.catalogos.macroprocesos.set(lista);
         }),
+        catchError(() => of(null))
+      ),
+      this.api.getCategorias().pipe(
+        map((cats) => this.catalogos.aplicarCategoriasDesdeDb(cats)),
         catchError(() => of(null))
       ),
       this.api.getServicios().pipe(
@@ -263,6 +275,15 @@ export class AppComponent implements OnInit {
   irAConfigurarServiciosApoyo(): void {
     this.cuadrante.modalRotacionAbierto.set(false);
     this.subVistaConfig.set('SERVICIOS');
+    this.vistaActual.set('CONFIGURACION');
+  }
+
+  irAConfigurarEmpresas(): void {
+    if (!this.catalogos.esAdminTh()) {
+      this.notificacion.mostrar('ℹ️ La gestión de empresas contratantes está reservada a Talento Humano / Admin.');
+      return;
+    }
+    this.subVistaConfig.set('EMPRESAS');
     this.vistaActual.set('CONFIGURACION');
   }
 

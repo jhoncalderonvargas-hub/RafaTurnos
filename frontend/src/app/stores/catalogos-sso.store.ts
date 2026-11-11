@@ -2,12 +2,16 @@ import { computed, inject, Injectable, signal } from '@angular/core';
 import { catchError, forkJoin, map, Observable, of, Subject } from 'rxjs';
 import {
   CATALOGO_TURNOS,
+  CategoriaProfesionalItem,
   CodigoTurno,
   EmpleadoHospital,
+  EmpresaContratante,
   FestivoEntry,
   MacroprocesoInfo,
+  MetaTurnoServicio,
   ModalidadDiasServicio,
   NOMBRES_MESES,
+  PlantillaEmpresaOption,
   ReglaCargoServicio,
   RolUsuarioSso,
   ServicioHospitalario,
@@ -16,12 +20,17 @@ import {
 } from '../models';
 import { TurnosApiService } from '../turnos-api.service';
 import { FestivosColombiaHelper } from '../festivos-colombia.helper';
+import { calcularMetaNominalMesEmpleado } from '../calculo-turnos.helper';
 import {
+  CODIGOS_TURNOS_SISTEMA_OBLIGATORIOS,
+  combinarReglasEmpresa,
   desglosarHorarioOrdinario,
   esCodigoExoneracionContrato,
   esFechaIsoValida,
   hoyColombiaIso,
+  ModoAmortizacionBanco,
   obtenerHorasAmortizacionTurno,
+  UMBRAL_HORAS_TURNO_NOCTURNO,
 } from '../shared/liquidacion-horas';
 import { clasificarFranjasTurno } from './autocompletado.service';
 import { NotificacionStore } from './notificacion.store';
@@ -83,18 +92,31 @@ export class CatalogosSsoStore {
 
   // Catálogos reactivos cargados desde Base de Datos y Mapa de Procesos Intranet
   readonly macroprocesos = signal<MacroprocesoInfo[]>([]);
+  readonly categoriasProfesionales = signal<CategoriaProfesionalItem[]>([]);
+  readonly empresas = signal<EmpresaContratante[]>([]);
+  readonly plantillasEmpresa = signal<PlantillaEmpresaOption[]>([]);
   readonly servicios = signal<ServicioHospitalario[]>([]);
   readonly servicioSeleccionadoId = signal<string>('');
   readonly empleados = signal<EmpleadoHospital[]>([]);
   readonly catalogoTurnosMap = signal<Record<string, TipoTurnoConfig>>({ ...CATALOGO_TURNOS });
 
   readonly empleadosActualizados$ = new Subject<EmpleadoHospital[]>();
+  readonly empresasActualizadas$ = new Subject<void>();
+
+  readonly empresasPendientes = computed<EmpresaContratante[]>(() =>
+    this.empresas().filter((e) => e.estadoConfiguracion === 'PENDIENTE_REGLAS')
+  );
 
   // Lista maestra del catálogo (sin los alias duplicados M, T, N, G12 ni el marcador interno BLANCO)
   readonly listaTurnosCatalogo = computed<TipoTurnoConfig[]>(() => {
     const aliasOcultos = new Set(['M', 'T', 'N', 'G12', 'BLANCO']);
     return Object.values(this.catalogoTurnosMap()).filter((t) => !aliasOcultos.has(t.codigo));
   });
+
+  // Turnos activos en el catálogo (excluye turnos archivados para nuevos servicios y paleta)
+  readonly listaTurnosActivosCatalogo = computed<TipoTurnoConfig[]>(() =>
+    this.listaTurnosCatalogo().filter((t) => t.activo !== false)
+  );
 
   // Servicios autorizados según el rol de la sesión SSO activa
   readonly serviciosVisibles = computed<ServicioHospitalario[]>(() => {
@@ -169,13 +191,16 @@ export class CatalogosSsoStore {
     'LIC',
     'FAM',
   ]);
+  readonly nuevoServicioPermitePermutaEntreCargos = signal<boolean>(false);
+  readonly nuevoServicioCargosPermitidosIds = signal<string[]>([]);
+  readonly nuevoServicioMetasPorTurno = signal<MetaTurnoServicio[]>([]);
   readonly nuevoServicioReglasPorCargo = signal<ReglaCargoServicio[]>([]);
   readonly enlaceHermanoSrv1 = signal<string>('');
   readonly enlaceHermanoSrv2 = signal<string>('');
 
   readonly turnosOperativosHabilitadosEnForm = computed<TipoTurnoConfig[]>(() => {
     const hab = new Set(this.nuevoServicioTurnosHabilitados().map((c) => c.toUpperCase()));
-    return this.listaTurnosCatalogo().filter(
+    return this.listaTurnosActivosCatalogo().filter(
       (t) => t.horasOrdinarias > 0 && !t.esAusencia && hab.has(t.codigo.toUpperCase())
     );
   });
@@ -190,7 +215,11 @@ export class CatalogosSsoStore {
   readonly turnoFormMinutosAlmuerzo = signal<number>(0);
   readonly turnoFormColorKey = signal<string>('AZUL_CIELO');
   readonly turnoFormNocturnoPesado = signal<boolean>(false);
+  readonly turnoFormProrrateaMeta = signal<boolean>(false);
+  readonly turnoFormEsAusencia = signal<boolean>(false);
+  readonly turnoFormBloqueaPermutas = signal<boolean>(false);
   readonly turnoFormDescuentaBanco = signal<boolean>(false);
+  readonly turnoFormModoAmortizacion = signal<ModoAmortizacionBanco>('HORAS_FIJAS');
   readonly turnoFormHorasAmortizacion = signal<number>(8);
 
   readonly temasColorTurno = [
@@ -285,17 +314,42 @@ export class CatalogosSsoStore {
   }
 
   mapearEmpleadosDesdeBackend(rawEmps: any[]): EmpleadoHospital[] {
+    const anio = this.anioSeleccionado();
+    const mes = this.mesSeleccionado();
+    const predFest = (iso: string) => Boolean(FestivosColombiaHelper.esFestivo(iso));
+
     return rawEmps.map((e) => {
       const saldoObj = e.saldosBancoHoras && e.saldosBancoHoras[0];
       const saldoAnt = saldoObj ? Number(saldoObj.saldoFinalAcumulado || 0) : 0;
+      const empresaContratante: Partial<EmpresaContratante> | null = e.empresaContratante
+        ? {
+            ...e.empresaContratante,
+            horasSemanalesContrato: Number(e.empresaContratante.horasSemanalesContrato) || 42,
+            diasBaseSemana: Number(e.empresaContratante.diasBaseSemana) || 6,
+          }
+        : null;
+      const horasSemanalesOverride =
+        e.horasSemanalesOverride !== undefined && e.horasSemanalesOverride !== null
+          ? Number(e.horasSemanalesOverride)
+          : null;
+      const reglas = combinarReglasEmpresa(
+        empresaContratante || undefined,
+        horasSemanalesOverride ?? (!empresaContratante && e.horasSemanalesLey ? Number(e.horasSemanalesLey) : undefined)
+      );
 
-      return {
+      const mappedBase: EmpleadoHospital = {
         id: e.id,
         documento: e.documento,
         nombre: e.nombre,
-        categoria: e.categoria ? (e.categoria.nombre || e.categoria) : 'Personal Asistencial',
+        categoria: e.categoria ? e.categoria.nombre || e.categoria : 'Personal Asistencial',
+        categoriaId: e.categoriaId || e.categoria?.id,
         servicioBaseId: e.servicioBaseId,
-        horasContratoMes: e.horasContratoMes || 168,
+        empresaContratanteId: e.empresaContratanteId || empresaContratante?.id,
+        empresaContratante,
+        horasSemanalesOverride,
+        horasSemanalesLey: e.horasSemanalesLey !== undefined ? Number(e.horasSemanalesLey) : reglas.horasSemanalesContrato,
+        horasSemanalesAplicadas: reglas.horasSemanalesContrato,
+        horasContratoMes: 0,
         saldoBancoAnterior: saldoAnt,
         saldoBancoOrigen: saldoObj
           ? {
@@ -306,6 +360,117 @@ export class CatalogosSsoStore {
           : undefined,
         ultimoTurnoMesPrevio: 'L' as CodigoTurno,
       };
+
+      const nominalMes = calcularMetaNominalMesEmpleado(mappedBase, anio, mes, predFest);
+      return {
+        ...mappedBase,
+        horasContratoMes: nominalMes.horasContratadasNominales,
+      };
+    });
+  }
+
+  aplicarEmpresasDesdeDb(emps: EmpresaContratante[]): void {
+    if (Array.isArray(emps)) {
+      this.empresas.set(emps);
+    }
+  }
+
+  aplicarPlantillasDesdeDb(plantillas: PlantillaEmpresaOption[]): void {
+    if (Array.isArray(plantillas)) {
+      this.plantillasEmpresa.set(plantillas);
+    }
+  }
+
+  aplicarCategoriasDesdeDb(cats: CategoriaProfesionalItem[]): void {
+    if (Array.isArray(cats)) {
+      this.categoriasProfesionales.set(cats);
+    }
+  }
+
+  recargarEmpresas(): void {
+    this.api.getEmpresas().subscribe({
+      next: (lista) => this.aplicarEmpresasDesdeDb(lista),
+      error: () => {},
+    });
+  }
+
+  recargarCategorias(): void {
+    this.api.getCategorias().subscribe({
+      next: (lista) => this.aplicarCategoriasDesdeDb(lista),
+      error: () => {},
+    });
+  }
+
+  recargarEmpleados(): void {
+    this.api.getEmpleados().subscribe({
+      next: (empsDb) => this.aplicarEmpleadosDesdeDb(empsDb),
+      error: () => {},
+    });
+  }
+
+  crearEmpresa(dto: Partial<EmpresaContratante> & { confirmar?: boolean }): void {
+    this.api.crearEmpresa(dto).subscribe({
+      next: (creada) => {
+        this.notificacion.mostrar(`✅ Empresa "${creada.nombre}" (${creada.codigo}) creada.`);
+        this.recargarEmpresas();
+        this.empresasActualizadas$.next();
+      },
+      error: (err) => {
+        const msg = err?.error?.message || 'Error al crear la empresa contratante.';
+        this.notificacion.mostrar(`⛔ ${msg}`);
+      },
+    });
+  }
+
+  actualizarEmpresa(id: string, dto: Partial<EmpresaContratante> & { confirmar?: boolean }): void {
+    this.api.actualizarEmpresa(id, dto).subscribe({
+      next: (act) => {
+        this.notificacion.mostrar(`✅ Reglas de "${act.nombre}" actualizadas y periodos abiertos recalculados.`);
+        this.recargarEmpresas();
+        this.recargarEmpleados();
+        this.empresasActualizadas$.next();
+      },
+      error: (err) => {
+        const msg = err?.error?.message || 'Error al actualizar la empresa contratante.';
+        this.notificacion.mostrar(`⛔ ${msg}`);
+      },
+    });
+  }
+
+  confirmarReglasEmpresa(id: string, dto?: Partial<EmpresaContratante>): void {
+    this.api.confirmarReglasEmpresa(id, dto).subscribe({
+      next: (act) => {
+        this.notificacion.mostrar(`✅ Reglas normativas de "${act.nombre}" confirmadas.`);
+        this.recargarEmpresas();
+        this.recargarEmpleados();
+        this.empresasActualizadas$.next();
+      },
+      error: (err) => {
+        const msg = err?.error?.message || 'Error al confirmar reglas de la empresa.';
+        this.notificacion.mostrar(`⛔ ${msg}`);
+      },
+    });
+  }
+
+  eliminarEmpresa(emp: EmpresaContratante): void {
+    this.notificacion.abrirConfirmacion({
+      titulo: '🗑️ Eliminar Empresa Contratante',
+      mensaje: `¿Seguro que deseas eliminar la empresa "${emp.nombre}" (${emp.codigo})?`,
+      textoBotonConfirmar: 'Sí, Eliminar',
+      esPeligroso: true,
+      onConfirmar: () => {
+        this.api.eliminarEmpresa(emp.id).subscribe({
+          next: (res) => {
+            this.notificacion.mostrar(`✅ ${res?.mensaje || 'Empresa eliminada.'}`);
+            this.recargarEmpresas();
+            this.empresasActualizadas$.next();
+          },
+          error: (err) => {
+            const msg = err?.error?.message || 'Error al eliminar la empresa.';
+            this.notificacion.mostrar(`⛔ ${msg}`);
+          },
+        });
+      },
     });
   }
 
@@ -356,6 +521,29 @@ export class CatalogosSsoStore {
             : existente?.horario || (horasOrd > 0 ? `${horaIni} - ${horaFin}` : 'Descanso / Novedad');
 
         const tema = temaEncontrado || this.temasColorTurno[0];
+        const activo = t.activo !== undefined ? Boolean(t.activo) : existente?.activo ?? true;
+        const esAusencia =
+          t.esAusencia !== undefined
+            ? Boolean(t.esAusencia)
+            : existente?.esAusencia ?? esCodigoExoneracionContrato(cod);
+        const prorrateaMetaContrato =
+          t.prorrateaMetaContrato !== undefined
+            ? Boolean(t.prorrateaMetaContrato)
+            : existente?.prorrateaMetaContrato ?? esCodigoExoneracionContrato(cod);
+        const bloqueaPermutas =
+          t.bloqueaPermutas !== undefined
+            ? Boolean(t.bloqueaPermutas)
+            : existente?.bloqueaPermutas ?? (esAusencia || cod === 'DISP' || cod === 'BLANCO');
+        const descuentaBancoHoras = !!(t.descuentaBancoHoras ?? existente?.descuentaBancoHoras);
+        const modoAmortizacionBanco =
+          t.modoAmortizacionBanco ||
+          existente?.modoAmortizacionBanco ||
+          (cod === 'COMP' && descuentaBancoHoras ? 'DIA_HABIL_EMPRESA' : 'HORAS_FIJAS');
+        const esSistemaObligatorio =
+          t.esSistemaObligatorio !== undefined
+            ? Boolean(t.esSistemaObligatorio)
+            : existente?.esSistemaObligatorio ?? CODIGOS_TURNOS_SISTEMA_OBLIGATORIOS.has(cod);
+
         copia[cod] = {
           codigo: cod,
           nombre: t.nombre || existente?.nombre || cod,
@@ -369,18 +557,23 @@ export class CatalogosSsoStore {
           bgHex: t.colorHex || existente?.bgHex || tema.bgHex,
           textHex: temaEncontrado ? temaEncontrado.textHex : existente?.textHex || tema.textHex,
           borderHex: temaEncontrado ? temaEncontrado.borderHex : existente?.borderHex || tema.borderHex,
-          esAusencia: existente?.esAusencia ?? esCodigoExoneracionContrato(cod),
+          esAusencia,
+          prorrateaMetaContrato,
+          bloqueaPermutas,
           esNocturnoPesado: Boolean(
             t.esNocturnoPesado ?? existente?.esNocturnoPesado ?? cod === 'G24'
           ),
-          descuentaBancoHoras: !!(t.descuentaBancoHoras ?? existente?.descuentaBancoHoras),
+          descuentaBancoHoras,
+          modoAmortizacionBanco,
           horasAmortizacionBanco:
             t.horasAmortizacionBanco !== undefined
               ? t.horasAmortizacionBanco === null
                 ? null
                 : Number(t.horasAmortizacionBanco)
               : existente?.horasAmortizacionBanco,
-          visibleEnPaleta: ['M', 'T', 'N', 'G12'].includes(cod)
+          esSistemaObligatorio,
+          activo,
+          visibleEnPaleta: ['M', 'T', 'N', 'G12'].includes(cod) || !activo
             ? false
             : t.visibleEnPaleta !== undefined
               ? Boolean(t.visibleEnPaleta)
@@ -474,7 +667,193 @@ export class CatalogosSsoStore {
     });
   }
 
-  // Administración de Servicios y Servicios de Apoyo
+  // Administración de Servicios, Cargos Permitidos, Metas por Turno y Adscripción
+  private construirMetasDesdeTurnosSeleccionados(
+    turnosCodigos: string[],
+    metasActuales: MetaTurnoServicio[],
+    modalidad?: ModalidadDiasServicio
+  ): MetaTurnoServicio[] {
+    const catalogo = this.catalogoTurnosMap();
+    const mapaExistentes = new Map(
+      metasActuales.map((m) => [m.codigoTurno.trim().toUpperCase(), m])
+    );
+    const cierraDomFest =
+      modalidad === 'LUN_SAB_SIN_FESTIVOS' || modalidad === 'LUN_VIE_HABILES';
+
+    const metas: MetaTurnoServicio[] = [];
+    for (const rawCod of turnosCodigos) {
+      const cod = rawCod.trim().toUpperCase();
+      const cfg = catalogo[cod];
+      if (!cfg || cfg.horasOrdinarias <= 0 || cfg.esAusencia || cfg.activo === false) continue;
+
+      const prev = mapaExistentes.get(cod);
+      const minimoBase = prev ? Math.max(0, Number(prev.minimoBase) || 0) : 1;
+      const esperadoBase = prev ? Math.max(minimoBase, Number(prev.esperadoBase) || minimoBase) : Math.max(1, minimoBase);
+      const minimoDomFest = cierraDomFest
+        ? 0
+        : prev
+          ? Math.max(0, Number(prev.minimoDomFest) || 0)
+          : minimoBase;
+      const esperadoDomFest = cierraDomFest
+        ? 0
+        : prev
+          ? Math.max(minimoDomFest, Number(prev.esperadoDomFest) || minimoDomFest)
+          : esperadoBase;
+
+      metas.push({
+        id: prev?.id,
+        tipoTurnoId: prev?.tipoTurnoId,
+        codigoTurno: cod,
+        nombreTurno: cfg.nombre,
+        colorHex: cfg.bgHex,
+        horaInicio: cfg.horaInicio,
+        horaFin: cfg.horaFin,
+        horasOrdinarias: cfg.horasOrdinarias,
+        horasNocturnas: cfg.horasNocturnas,
+        esNocturnoPesado: cfg.esNocturnoPesado,
+        habilitado: true,
+        minimoBase,
+        esperadoBase,
+        minimoDomFest,
+        esperadoDomFest,
+      });
+    }
+    return metas;
+  }
+
+  private actualizarTotalesDerivadosDesdeMetas(metas: MetaTurnoServicio[]): void {
+    const catalogo = this.catalogoTurnosMap();
+    let reqD = 0;
+    let reqN = 0;
+    let reqDDom = 0;
+    let reqNDom = 0;
+
+    for (const m of metas) {
+      if (m.habilitado === false) continue;
+      const cfg = catalogo[m.codigoTurno.toUpperCase()];
+      const hOrd = Number(cfg?.horasOrdinarias ?? m.horasOrdinarias ?? 0);
+      if (hOrd <= 0) continue;
+
+      const hNoc = Number(cfg?.horasNocturnas ?? m.horasNocturnas ?? 0);
+      const pesado = Boolean(cfg?.esNocturnoPesado ?? m.esNocturnoPesado);
+      const es24h = hOrd >= 24;
+      const esNoche = pesado || hNoc >= UMBRAL_HORAS_TURNO_NOCTURNO;
+
+      if (es24h) {
+        reqD += m.esperadoBase;
+        reqN += m.esperadoBase;
+        reqDDom += m.esperadoDomFest;
+        reqNDom += m.esperadoDomFest;
+      } else if (esNoche) {
+        reqN += m.esperadoBase;
+        reqNDom += m.esperadoDomFest;
+      } else {
+        reqD += m.esperadoBase;
+        reqDDom += m.esperadoDomFest;
+      }
+    }
+
+    this.nuevoServicioReqDia.set(reqD);
+    this.nuevoServicioReqNoche.set(reqN);
+    this.nuevoServicioReqDiaDomFest.set(reqDDom);
+    this.nuevoServicioReqNocheDomFest.set(reqNDom);
+  }
+
+  alternarCargoPermitidoEnServicioForm(categoriaId: string): void {
+    const id = String(categoriaId || '').trim();
+    if (!id) return;
+    this.nuevoServicioCargosPermitidosIds.update((lista) =>
+      lista.includes(id) ? lista.filter((x) => x !== id) : [...lista, id]
+    );
+  }
+
+  actualizarMetaTurnoEnServicioForm(
+    codigoTurno: string,
+    campo: 'minimoBase' | 'esperadoBase' | 'minimoDomFest' | 'esperadoDomFest',
+    valor: number
+  ): void {
+    const cod = codigoTurno.trim().toUpperCase();
+    const num = Math.max(0, Math.round(Number(valor) || 0));
+
+    const actualizadas = this.nuevoServicioMetasPorTurno().map((m) => {
+      if (m.codigoTurno.toUpperCase() !== cod) return m;
+      const next = { ...m, [campo]: num };
+      if (campo === 'minimoBase' && next.esperadoBase < next.minimoBase) {
+        next.esperadoBase = next.minimoBase;
+      }
+      if (campo === 'esperadoBase' && next.esperadoBase < next.minimoBase) {
+        next.minimoBase = next.esperadoBase;
+      }
+      if (campo === 'minimoDomFest' && next.esperadoDomFest < next.minimoDomFest) {
+        next.esperadoDomFest = next.minimoDomFest;
+      }
+      if (campo === 'esperadoDomFest' && next.esperadoDomFest < next.minimoDomFest) {
+        next.minimoDomFest = next.esperadoDomFest;
+      }
+      return next;
+    });
+
+    this.nuevoServicioMetasPorTurno.set(actualizadas);
+    this.actualizarTotalesDerivadosDesdeMetas(actualizadas);
+  }
+
+  sincronizarModalidadEnMetasForm(modalidad: ModalidadDiasServicio): void {
+    this.nuevoServicioModalidadDias.set(modalidad);
+    const cierra = modalidad === 'LUN_SAB_SIN_FESTIVOS' || modalidad === 'LUN_VIE_HABILES';
+    const actualizadas = this.nuevoServicioMetasPorTurno().map((m) =>
+      cierra
+        ? { ...m, minimoDomFest: 0, esperadoDomFest: 0 }
+        : modalidad === 'TODOS_24_7'
+          ? { ...m, minimoDomFest: m.minimoBase, esperadoDomFest: m.esperadoBase }
+          : m
+    );
+    if (actualizadas.length > 0) {
+      this.nuevoServicioMetasPorTurno.set(actualizadas);
+      this.actualizarTotalesDerivadosDesdeMetas(actualizadas);
+    }
+  }
+
+  adscribirEmpleadoAServicio(empleadoId: string, servicioBaseId: string): void {
+    this.api.adscribirEmpleado(empleadoId, servicioBaseId).subscribe({
+      next: (res) => {
+        const msgBase = '✅ Colaborador adscrito correctamente al servicio.';
+        this.notificacion.mostrar(
+          res.advertenciaCargoCompatible ? `${msgBase} (${res.advertenciaCargoCompatible})` : msgBase
+        );
+        this.recargarEmpleados();
+        this.recargarServicios();
+      },
+      error: (err) => {
+        const msg = err?.error?.message || 'Error al adscribir colaborador.';
+        this.notificacion.mostrar(`⛔ ${msg}`);
+      },
+    });
+  }
+
+  adscribirLoteAServicio(empleadoIds: string[], servicioBaseId: string): void {
+    if (!empleadoIds || empleadoIds.length === 0) {
+      this.notificacion.mostrar('ℹ️ Selecciona al menos un colaborador para adscribir o trasladar.');
+      return;
+    }
+    this.api.adscribirLote(empleadoIds, servicioBaseId).subscribe({
+      next: (res) => {
+        const adv =
+          res.advertenciasCargo && res.advertenciasCargo.length > 0
+            ? ` ⚠️ ${res.advertenciasCargo.length} cargo(s) aún no están habilitados en destino.`
+            : '';
+        this.notificacion.mostrar(
+          `✅ ${res.trasladados} colaborador(es) trasladado(s) a ${res.servicioNombre}.${adv}`
+        );
+        this.recargarEmpleados();
+        this.recargarServicios();
+      },
+      error: (err) => {
+        const msg = err?.error?.message || 'Error al trasladar lote de colaboradores.';
+        this.notificacion.mostrar(`⛔ ${msg}`);
+      },
+    });
+  }
+
   alternarTurnoEnServicioForm(codigo: string): void {
     const cod = codigo.toUpperCase();
     const actuales = this.nuevoServicioTurnosHabilitados();
@@ -487,6 +866,15 @@ export class CatalogosSsoStore {
       }
       const nuevos = actuales.filter((c) => c !== cod);
       this.nuevoServicioTurnosHabilitados.set(nuevos);
+      const metas = this.construirMetasDesdeTurnosSeleccionados(
+        nuevos,
+        this.nuevoServicioMetasPorTurno(),
+        this.nuevoServicioModalidadDias()
+      );
+      this.nuevoServicioMetasPorTurno.set(metas);
+      if (metas.length > 0) {
+        this.actualizarTotalesDerivadosDesdeMetas(metas);
+      }
 
       const srvTieneDia = nuevos.some((c) => catalogo[c] && clasificarFranjasTurno(catalogo[c]).dia);
       const srvTieneNoche = nuevos.some((c) => catalogo[c] && clasificarFranjasTurno(catalogo[c]).noche);
@@ -515,7 +903,17 @@ export class CatalogosSsoStore {
         })
       );
     } else {
-      this.nuevoServicioTurnosHabilitados.set([...actuales, cod]);
+      const nuevos = [...actuales, cod];
+      this.nuevoServicioTurnosHabilitados.set(nuevos);
+      const metas = this.construirMetasDesdeTurnosSeleccionados(
+        nuevos,
+        this.nuevoServicioMetasPorTurno(),
+        this.nuevoServicioModalidadDias()
+      );
+      this.nuevoServicioMetasPorTurno.set(metas);
+      if (metas.length > 0) {
+        this.actualizarTotalesDerivadosDesdeMetas(metas);
+      }
       this.nuevoServicioReglasPorCargo.update((reglas) =>
         reglas.map((r) => ({
           ...r,
@@ -539,7 +937,7 @@ export class CatalogosSsoStore {
     } else if (plantilla === 'ADMINISTRATIVO') {
       nuevos = ['ADM', 'M6', 'T6', ...baseDescansos];
     } else {
-      nuevos = this.listaTurnosCatalogo().map((t) => t.codigo);
+      nuevos = this.listaTurnosActivosCatalogo().map((t) => t.codigo);
     }
 
     const catalogo = this.catalogoTurnosMap();
@@ -547,13 +945,23 @@ export class CatalogosSsoStore {
     const srvTieneNoche = nuevos.some((c) => catalogo[c.toUpperCase()] && clasificarFranjasTurno(catalogo[c.toUpperCase()]).noche);
 
     this.nuevoServicioTurnosHabilitados.set(nuevos);
-    if (!srvTieneDia) {
-      this.nuevoServicioReqDia.set(0);
-      this.nuevoServicioReqDiaDomFest.set(0);
-    }
-    if (!srvTieneNoche) {
-      this.nuevoServicioReqNoche.set(0);
-      this.nuevoServicioReqNocheDomFest.set(0);
+    const metas = this.construirMetasDesdeTurnosSeleccionados(
+      nuevos,
+      this.nuevoServicioMetasPorTurno(),
+      this.nuevoServicioModalidadDias()
+    );
+    this.nuevoServicioMetasPorTurno.set(metas);
+    if (metas.length > 0) {
+      this.actualizarTotalesDerivadosDesdeMetas(metas);
+    } else {
+      if (!srvTieneDia) {
+        this.nuevoServicioReqDia.set(0);
+        this.nuevoServicioReqDiaDomFest.set(0);
+      }
+      if (!srvTieneNoche) {
+        this.nuevoServicioReqNoche.set(0);
+        this.nuevoServicioReqNocheDomFest.set(0);
+      }
     }
 
     this.nuevoServicioReglasPorCargo.update((reglas) =>
@@ -633,7 +1041,8 @@ export class CatalogosSsoStore {
     this.nuevoServicioCodigo.set(srv.codigo);
     this.nuevoServicioNombre.set(srv.nombre);
     this.nuevoServicioTipoAsistencia.set(srv.tipoAsistencia || 'URGENCIAS');
-    this.nuevoServicioModalidadDias.set(srv.modalidadDias || 'TODOS_24_7');
+    const mod = srv.modalidadDias || 'TODOS_24_7';
+    this.nuevoServicioModalidadDias.set(mod);
     const catalogo = this.catalogoTurnosMap();
     const turnosSrv =
       srv.turnosHabilitados && srv.turnosHabilitados.length > 0
@@ -641,13 +1050,31 @@ export class CatalogosSsoStore {
         : ['M8', 'T8', 'N8', 'M6', 'T6', 'N12', 'D12', 'G24', 'ADM', 'MD', 'AP', 'DISP', 'S', 'L', 'COMP', 'VAC', 'INC', 'LIC', 'FAM'];
     this.nuevoServicioTurnosHabilitados.set(turnosSrv);
 
-    const srvTieneNoche = turnosSrv.some((c) => catalogo[c.toUpperCase()] && clasificarFranjasTurno(catalogo[c.toUpperCase()]).noche);
-    const srvTieneDia = turnosSrv.some((c) => catalogo[c.toUpperCase()] && clasificarFranjasTurno(catalogo[c.toUpperCase()]).dia);
+    this.nuevoServicioPermitePermutaEntreCargos.set(Boolean(srv.permitePermutaEntreCargos));
+    const cargosIds =
+      srv.cargosPermitidosIds && srv.cargosPermitidosIds.length > 0
+        ? [...srv.cargosPermitidosIds]
+        : (srv.cargosPermitidos || []).map((c) => c.categoriaId).filter(Boolean);
+    this.nuevoServicioCargosPermitidosIds.set(cargosIds);
 
-    this.nuevoServicioReqDia.set(srvTieneDia ? (srv.reqDia ?? 4) : 0);
-    this.nuevoServicioReqNoche.set(srvTieneNoche ? (srv.reqNoche ?? 2) : 0);
-    this.nuevoServicioReqDiaDomFest.set(srvTieneDia ? (srv.reqDiaDomFest ?? srv.reqDia ?? 4) : 0);
-    this.nuevoServicioReqNocheDomFest.set(srvTieneNoche ? (srv.reqNocheDomFest ?? srv.reqNoche ?? 2) : 0);
+    const metasSrv = this.construirMetasDesdeTurnosSeleccionados(
+      turnosSrv,
+      srv.metasPorTurno || [],
+      mod
+    );
+    this.nuevoServicioMetasPorTurno.set(metasSrv);
+
+    if (srv.metasPorTurno && srv.metasPorTurno.length > 0) {
+      this.actualizarTotalesDerivadosDesdeMetas(metasSrv);
+    } else {
+      const srvTieneNoche = turnosSrv.some((c) => catalogo[c.toUpperCase()] && clasificarFranjasTurno(catalogo[c.toUpperCase()]).noche);
+      const srvTieneDia = turnosSrv.some((c) => catalogo[c.toUpperCase()] && clasificarFranjasTurno(catalogo[c.toUpperCase()]).dia);
+
+      this.nuevoServicioReqDia.set(srvTieneDia ? (srv.reqDia ?? 4) : 0);
+      this.nuevoServicioReqNoche.set(srvTieneNoche ? (srv.reqNoche ?? 2) : 0);
+      this.nuevoServicioReqDiaDomFest.set(srvTieneDia ? (srv.reqDiaDomFest ?? srv.reqDia ?? 4) : 0);
+      this.nuevoServicioReqNocheDomFest.set(srvTieneNoche ? (srv.reqNocheDomFest ?? srv.reqNoche ?? 2) : 0);
+    }
 
     if (srv.reglasPorCargo && srv.reglasPorCargo.length > 0) {
       this.nuevoServicioReglasPorCargo.set(
@@ -712,7 +1139,7 @@ export class CatalogosSsoStore {
     this.nuevoServicioReqNoche.set(2);
     this.nuevoServicioReqDiaDomFest.set(2);
     this.nuevoServicioReqNocheDomFest.set(1);
-    this.nuevoServicioTurnosHabilitados.set([
+    const turnosDef = [
       'M8',
       'T8',
       'N8',
@@ -725,7 +1152,11 @@ export class CatalogosSsoStore {
       'INC',
       'LIC',
       'FAM',
-    ]);
+    ];
+    this.nuevoServicioTurnosHabilitados.set(turnosDef);
+    this.nuevoServicioPermitePermutaEntreCargos.set(false);
+    this.nuevoServicioCargosPermitidosIds.set([]);
+    this.nuevoServicioMetasPorTurno.set([]);
     this.nuevoServicioReglasPorCargo.set([]);
   }
 
@@ -734,6 +1165,20 @@ export class CatalogosSsoStore {
     const nom = this.nuevoServicioNombre().trim();
     const tipo = this.nuevoServicioTipoAsistencia();
     const modalidadDias = this.nuevoServicioModalidadDias();
+    const turnosHabilitados = this.nuevoServicioTurnosHabilitados();
+    const metasPorTurno = this.nuevoServicioMetasPorTurno();
+    const cargosPermitidosIds = this.nuevoServicioCargosPermitidosIds();
+    const permitePermutaEntreCargos = this.nuevoServicioPermitePermutaEntreCargos();
+
+    for (const m of metasPorTurno) {
+      if (m.minimoBase > m.esperadoBase || m.minimoDomFest > m.esperadoDomFest) {
+        this.notificacion.mostrar(
+          `⛔ Meta inválida para el turno "${m.codigoTurno}": Mínimo no puede superar a Esperado.`
+        );
+        return;
+      }
+    }
+
     const reqDia = Math.max(0, Number(this.nuevoServicioReqDia()) || 0);
     const reqNoche = Math.max(0, Number(this.nuevoServicioReqNoche()) || 0);
     const reqDiaDomFest =
@@ -748,7 +1193,6 @@ export class CatalogosSsoStore {
         : modalidadDias === 'LUN_SAB_SIN_FESTIVOS' || modalidadDias === 'LUN_VIE_HABILES'
           ? 0
           : reqNoche;
-    const turnosHabilitados = this.nuevoServicioTurnosHabilitados();
     const reglasPorCargo = this.nuevoServicioReglasPorCargo().map((r) => ({
       ...r,
       reqDiaDomFest:
@@ -779,23 +1223,40 @@ export class CatalogosSsoStore {
       return;
     }
 
+    const payloadBase: any = {
+      codigo: cod,
+      nombre: nom,
+      tipoAsistencia: tipo,
+      modalidadDias,
+      permitePermutaEntreCargos,
+      cargosPermitidosIds,
+      turnosHabilitados,
+      reglasPorCargo,
+    };
+
+    if (metasPorTurno.length > 0) {
+      payloadBase.metasPorTurno = metasPorTurno.map((m) => ({
+        tipoTurnoId: m.tipoTurnoId,
+        codigoTurno: m.codigoTurno,
+        habilitado: m.habilitado !== false,
+        minimoBase: m.minimoBase,
+        esperadoBase: m.esperadoBase,
+        minimoDomFest: m.minimoDomFest,
+        esperadoDomFest: m.esperadoDomFest,
+      }));
+    } else {
+      payloadBase.reqDia = reqDia;
+      payloadBase.reqNoche = reqNoche;
+      payloadBase.reqDiaDomFest = reqDiaDomFest;
+      payloadBase.reqNocheDomFest = reqNocheDomFest;
+    }
+
     if (editandoId) {
       this.api
-        .actualizarServicio(editandoId, {
-          codigo: cod,
-          nombre: nom,
-          tipoAsistencia: tipo,
-          reqDia,
-          reqNoche,
-          modalidadDias,
-          reqDiaDomFest,
-          reqNocheDomFest,
-          turnosHabilitados,
-          reglasPorCargo,
-        })
+        .actualizarServicio(editandoId, payloadBase)
         .subscribe({
           next: () => {
-            this.notificacion.mostrar(`✅ Servicio "${nom}", metas por cargo y turnos habilitados actualizados en PostgreSQL.`);
+            this.notificacion.mostrar(`✅ Servicio "${nom}", cargos permitidos y metas por turno actualizados en PostgreSQL.`);
             this.cancelarEdicionServicio();
             this.recargarServicios();
           },
@@ -806,18 +1267,7 @@ export class CatalogosSsoStore {
         });
     } else {
       this.api
-        .crearServicio({
-          codigo: cod,
-          nombre: nom,
-          tipoAsistencia: tipo,
-          reqDia,
-          reqNoche,
-          modalidadDias,
-          reqDiaDomFest,
-          reqNocheDomFest,
-          turnosHabilitados,
-          reglasPorCargo,
-        })
+        .crearServicio(payloadBase)
         .subscribe({
           next: () => {
             this.notificacion.mostrar(`✅ Servicio "${nom}" creado y persistido en PostgreSQL.`);
@@ -952,6 +1402,36 @@ export class CatalogosSsoStore {
   }
 
   // Gestión del Catálogo Maestro de Tipos de Turno
+  cambiarTurnoModoJornadaForm(modo: 'HORARIO' | 'GUARDIA_24H' | 'DESCANSO'): void {
+    this.turnoFormModoJornada.set(modo);
+    if (modo !== 'DESCANSO') {
+      this.turnoFormProrrateaMeta.set(false);
+      this.turnoFormEsAusencia.set(false);
+      this.turnoFormDescuentaBanco.set(false);
+    }
+  }
+
+  cambiarTurnoProrrateaMetaForm(valor: boolean): void {
+    const activo = Boolean(valor);
+    this.turnoFormProrrateaMeta.set(activo);
+    if (activo) {
+      this.turnoFormModoJornada.set('DESCANSO');
+      this.turnoFormDescuentaBanco.set(false);
+      this.turnoFormNocturnoPesado.set(false);
+    }
+  }
+
+  cambiarTurnoDescuentaBancoForm(valor: boolean): void {
+    const activo = Boolean(valor);
+    this.turnoFormDescuentaBanco.set(activo);
+    if (activo) {
+      this.turnoFormModoJornada.set('DESCANSO');
+      this.turnoFormProrrateaMeta.set(false);
+      this.turnoFormEsAusencia.set(false);
+      this.turnoFormNocturnoPesado.set(false);
+    }
+  }
+
   cargarTurnoParaEdicion(turno: TipoTurnoConfig): void {
     this.turnoEditandoCodigo.set(turno.codigo);
     this.turnoFormCodigo.set(turno.codigo);
@@ -969,7 +1449,15 @@ export class CatalogosSsoStore {
     this.turnoFormHoraFin.set(turno.horaFin || '15:00');
     this.turnoFormMinutosAlmuerzo.set(turno.minutosAlmuerzo ?? 0);
     this.turnoFormNocturnoPesado.set(!!turno.esNocturnoPesado);
+    this.turnoFormProrrateaMeta.set(Boolean(turno.prorrateaMetaContrato));
+    this.turnoFormEsAusencia.set(Boolean(turno.esAusencia));
+    this.turnoFormBloqueaPermutas.set(Boolean(turno.bloqueaPermutas));
     this.turnoFormDescuentaBanco.set(!!turno.descuentaBancoHoras);
+    this.turnoFormModoAmortizacion.set(
+      (turno.modoAmortizacionBanco as ModoAmortizacionBanco) === 'DIA_HABIL_EMPRESA'
+        ? 'DIA_HABIL_EMPRESA'
+        : 'HORAS_FIJAS'
+    );
     this.turnoFormHorasAmortizacion.set(
       turno.descuentaBancoHoras ? obtenerHorasAmortizacionTurno(turno) || 8 : 8
     );
@@ -991,7 +1479,11 @@ export class CatalogosSsoStore {
     this.turnoFormMinutosAlmuerzo.set(0);
     this.turnoFormColorKey.set('AZUL_CIELO');
     this.turnoFormNocturnoPesado.set(false);
+    this.turnoFormProrrateaMeta.set(false);
+    this.turnoFormEsAusencia.set(false);
+    this.turnoFormBloqueaPermutas.set(false);
     this.turnoFormDescuentaBanco.set(false);
+    this.turnoFormModoAmortizacion.set('HORAS_FIJAS');
     this.turnoFormHorasAmortizacion.set(8);
   }
 
@@ -1005,15 +1497,32 @@ export class CatalogosSsoStore {
     }
 
     const modo = this.turnoFormModoJornada();
+    const esObligatorio = CODIGOS_TURNOS_SISTEMA_OBLIGATORIOS.has(codigo);
+    if (esObligatorio && modo !== 'DESCANSO') {
+      this.notificacion.mostrar(
+        `⛔ El turno obligatorio "${codigo}" debe permanecer en modo Descanso / Novedad (0 h).`
+      );
+      return;
+    }
+
     const calc = this.calculoAutomaticoHorasTurno();
     if (modo === 'HORARIO' && calc.ordinarias <= 0) {
       this.notificacion.mostrar('⛔ En modo Horario Fijo/Rotativo, la duración neta debe ser mayor a 0h (si dura 24h usa Guardia 24h).');
       return;
     }
 
+    const prorrateaMeta = modo === 'DESCANSO' && this.turnoFormProrrateaMeta();
+    const descuentaBanco = modo === 'DESCANSO' && this.turnoFormDescuentaBanco();
+    if (prorrateaMeta && descuentaBanco) {
+      this.notificacion.mostrar(
+        '⛔ Un turno no puede prorratear la meta de días hábiles y amortizar Banco de Horas al mismo tiempo.'
+      );
+      return;
+    }
+
     const horaInicioFinal = modo === 'DESCANSO' ? '00:00' : this.turnoFormHoraInicio();
     const horaFinFinal = modo === 'DESCANSO' ? '00:00' : modo === 'GUARDIA_24H' ? horaInicioFinal : this.turnoFormHoraFin();
-    const descuentaBanco = this.turnoFormDescuentaBanco();
+    const modoAmortizacion = descuentaBanco ? this.turnoFormModoAmortizacion() : 'HORAS_FIJAS';
     const horasAmortizacionBanco = descuentaBanco
       ? Math.max(0.5, Number(this.turnoFormHorasAmortizacion()) || 8)
       : null;
@@ -1025,6 +1534,9 @@ export class CatalogosSsoStore {
     const prevCatalogo = this.catalogoTurnosMap();
     const prevServiciosHab = this.nuevoServicioTurnosHabilitados();
     const existente = prevCatalogo[codigo];
+    const esAusencia = modo === 'DESCANSO' ? this.turnoFormEsAusencia() : false;
+    const bloqueaPermutas = this.turnoFormBloqueaPermutas();
+
     const nuevoTurno: TipoTurnoConfig = {
       codigo,
       nombre,
@@ -1038,10 +1550,15 @@ export class CatalogosSsoStore {
       bgHex: tema.bgHex,
       textHex: tema.textHex,
       borderHex: tema.borderHex,
-      esAusencia: existente?.esAusencia ?? esCodigoExoneracionContrato(codigo),
+      esAusencia,
+      prorrateaMetaContrato: prorrateaMeta,
+      bloqueaPermutas,
       esNocturnoPesado: modo === 'DESCANSO' ? false : this.turnoFormNocturnoPesado(),
       descuentaBancoHoras: descuentaBanco,
+      modoAmortizacionBanco: modoAmortizacion,
       horasAmortizacionBanco,
+      esSistemaObligatorio: existente?.esSistemaObligatorio ?? esObligatorio,
+      activo: existente?.activo ?? true,
       visibleEnPaleta: existente?.visibleEnPaleta ?? true,
     };
 
@@ -1066,14 +1583,22 @@ export class CatalogosSsoStore {
         minutosAlmuerzo: nuevoTurno.minutosAlmuerzo || 0,
         colorHex: nuevoTurno.bgHex,
         descuentaBancoHoras: nuevoTurno.descuentaBancoHoras,
+        modoAmortizacionBanco: modoAmortizacion,
         horasAmortizacionBanco,
+        prorrateaMetaContrato: prorrateaMeta,
+        esAusencia,
+        bloqueaPermutas,
         modoJornada: modo,
         esNocturnoPesado: nuevoTurno.esNocturnoPesado,
         visibleEnPaleta: nuevoTurno.visibleEnPaleta,
+        activo: nuevoTurno.activo,
       })
       .subscribe({
-        next: () => {
-          this.notificacion.mostrar(`✅ Turno [${codigo}] "${nombre}" guardado en el catálogo.`);
+        next: (respDb) => {
+          if (respDb) {
+            this.aplicarCatalogoTurnosDesdeDb([respDb]);
+          }
+          this.notificacion.mostrar(`✅ Turno [${codigo}] "${nombre}" guardado y liquidación actualizada.`);
           this.limpiarFormularioTurno();
         },
         error: (err) => {
@@ -1085,10 +1610,74 @@ export class CatalogosSsoStore {
       });
   }
 
+  archivarTipoTurno(codigo: string): void {
+    const cod = codigo.trim().toUpperCase();
+    const item = this.catalogoTurnosMap()[cod];
+    if (!item) return;
+    if (item.esSistemaObligatorio || CODIGOS_TURNOS_SISTEMA_OBLIGATORIOS.has(cod)) {
+      this.notificacion.mostrar(`⛔ El turno "${cod}" es obligatorio del sistema y no puede archivarse.`);
+      return;
+    }
+
+    const nuevoEstado = item.activo === false;
+    this.api.archivarTipoTurno(cod, nuevoEstado).subscribe({
+      next: (respDb) => {
+        this.aplicarCatalogoTurnosDesdeDb([respDb]);
+        this.notificacion.mostrar(
+          nuevoEstado
+            ? `✅ Turno [${cod}] reactivado en catálogo y paleta.`
+            : `📦 Turno [${cod}] archivado (su historial permanece intacto).`
+        );
+      },
+      error: (err) => {
+        const msg = err?.error?.message || 'Error al archivar/reactivar turno.';
+        this.notificacion.mostrar(`⛔ ${msg}`);
+      },
+    });
+  }
+
+  eliminarTipoTurno(turno: TipoTurnoConfig): void {
+    const cod = turno.codigo.trim().toUpperCase();
+    if (turno.esSistemaObligatorio || CODIGOS_TURNOS_SISTEMA_OBLIGATORIOS.has(cod)) {
+      this.notificacion.mostrar(`⛔ El turno "${cod}" es obligatorio del sistema y no puede eliminarse.`);
+      return;
+    }
+
+    this.notificacion.abrirConfirmacion({
+      titulo: '🗑️ Eliminar Turno del Catálogo',
+      mensaje: `¿Seguro que deseas eliminar permanentemente el turno [${cod}] "${turno.nombre}"? Solo es posible si no tiene asignaciones registradas.`,
+      textoBotonConfirmar: 'Sí, Eliminar',
+      esPeligroso: true,
+      onConfirmar: () => {
+        this.api.eliminarTipoTurno(cod).subscribe({
+          next: (res) => {
+            this.catalogoTurnosMap.update((actual) => {
+              const copia = { ...actual };
+              delete copia[cod];
+              return copia;
+            });
+            if (this.turnoEditandoCodigo() === cod) {
+              this.limpiarFormularioTurno();
+            }
+            this.notificacion.mostrar(`✅ ${res?.mensaje || `Turno ${cod} eliminado.`}`);
+          },
+          error: (err) => {
+            const msg = err?.error?.message || 'Error al eliminar el turno en PostgreSQL.';
+            this.notificacion.mostrar(`⛔ ${msg}`);
+          },
+        });
+      },
+    });
+  }
+
   alternarVisibilidadTurnoPaleta(codigo: string): void {
     const prevCatalogo = this.catalogoTurnosMap();
     const itemActual = prevCatalogo[codigo];
     if (!itemActual) return;
+    if (itemActual.activo === false) {
+      this.notificacion.mostrar('ℹ️ Reactiva este turno archivado para volver a mostrarlo en la paleta.');
+      return;
+    }
     const nuevoValor = itemActual.visibleEnPaleta === false ? true : false;
 
     this.catalogoTurnosMap.update((actual) => ({
@@ -1111,9 +1700,14 @@ export class CatalogosSsoStore {
         minutosAlmuerzo: itemActual.minutosAlmuerzo || 0,
         colorHex: itemActual.bgHex,
         descuentaBancoHoras: itemActual.descuentaBancoHoras,
+        modoAmortizacionBanco: itemActual.modoAmortizacionBanco || 'HORAS_FIJAS',
         horasAmortizacionBanco: itemActual.horasAmortizacionBanco ?? null,
+        prorrateaMetaContrato: itemActual.prorrateaMetaContrato ?? false,
+        esAusencia: itemActual.esAusencia,
+        bloqueaPermutas: itemActual.bloqueaPermutas ?? false,
         esNocturnoPesado: itemActual.esNocturnoPesado,
         visibleEnPaleta: nuevoValor,
+        activo: itemActual.activo ?? true,
       })
       .subscribe({
         error: (err) => {

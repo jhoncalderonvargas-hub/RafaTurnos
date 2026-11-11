@@ -5,31 +5,24 @@
  * se regeneran con `node scripts/sync-shared.mjs` (y `node scripts/verificar-liquidacion.mjs` falla si divergen).
  *
  * Principios (desacoplamiento financiero, Doc 10): el sistema NO calcula dinero. Mide HORAS por concepto
- * (HOD, HON, HDFD, HDFN) y expone los PORCENTAJES de recargo legalmente vigentes en cada fecha para que Nómina
- * los aplique con sus propios divisores y salarios.
+ * (HOD, HON, HDFD, HDFN) y expone los PORCENTAJES de recargo legalmente vigentes en cada empresa/fecha para que
+ * Nómina los aplique con sus propios divisores y salarios.
  *
- * Base normativa (verificada a nov-2026):
- *  - Art. 160 CST modificado por Art. 10 Ley 2466/2025: trabajo diurno 06:00–19:00 y nocturno 19:00–06:00,
- *    vigente desde el 25-dic-2025 (6 meses después de la sanción, 25-jun-2025). Antes (Ley 789/2002): nocturno desde 21:00.
- *  - Art. 168 CST: recargo nocturno 35%; extra diurna 25%; extra nocturna 75%.
- *  - Art. 179 CST modificado por Art. 14 Ley 2466/2025: trabajo en día de descanso obligatorio (domingo/festivo),
- *    recargo gradual: 75% (hasta 30-jun-2025), 80% (desde 1-jul-2025), 90% (desde 1-jul-2026), 100% (desde 1-jul-2027).
- *  - Ley 2101/2021: jornada máxima 48→47 (15-jul-2023)→46 (15-jul-2024)→44 (15-jul-2025)→42 h/sem (15-jul-2026).
+ * Soporta múltiples regímenes contractuales simultáneos (`ReglasEmpresaContrato`):
+ *  - Planta Pública ESE (Decreto 1042: 44 h/sem, nocturno 18:00–06:00, dominical/festivo 100%).
+ *  - Operadores Privados / Temporales (CST + Ley 2101 + Ley 2466: 42 h/sem, nocturno 19:00–06:00, dom gradual 90%->100%).
+ *  - Regímenes Personalizados / Agremiaciones con parámetros configurables desde Talento Humano.
  *
- * Reglas de liquidación de una hora trabajada (se evalúa MINUTO A MINUTO sobre la fecha calendario REAL del minuto):
- *  1. Franja: nocturna si minuto >= inicio nocturno vigente en ESA fecha, o minuto < 06:00; diurna en otro caso.
- *  2. Día: descanso obligatorio si la fecha calendario real (00:00–24:00) es domingo o festivo.
- *     Un turno que cruza medianoche se parte en las 00:00: cada tramo toma el tipo de día de SU fecha.
- *  3. Concepto: HOD (hábil diurna), HON (hábil nocturna), HDFD (dom/fest diurna), HDFN (dom/fest nocturna).
- *  4. Descanso intermedio no computable (Art. 167 CST, `minutosAlmuerzo`): se descuenta del concepto de MENOR recargo
- *     disponible (orden HOD → HON → HDFD → HDFN), criterio pro operario. Es la única convención no fijada por la ley.
- *  5. Todo el turno se liquida en el periodo (mes) de su fecha de INICIO; los recargos usan la fecha real de cada hora.
+ * Meta mensual universal por Días Hábiles (`!esDomingo && !esFestivo`):
+ *  - `horasContratadasNominales = r2((diasHabilesMes * horasSemanales) / diasBaseSemana)`
+ *  - Prorrateo selectivo: únicamente cuentan fechas con `TipoTurno.prorrateaMetaContrato === true` que caigan en DÍA HÁBIL.
+ *  - `horasContratadasEfectivas = r2(((diasHabilesMes - diasHabilesProrrateados) * horasSemanales) / diasBaseSemana)`
  */
 
 // ───────────────────────────── Constantes normativas ─────────────────────────────
 
 export const MINUTOS_DIA = 1440;
-/** Fin de la franja nocturna (06:00), invariable en todas las vigencias. */
+/** Fin de la franja nocturna (06:00), estándar por defecto. */
 export const FIN_NOCTURNO_MIN = 6 * 60;
 
 /** Vigencias del inicio de la franja nocturna (Art. 160 CST). Ordenadas por `desde` ascendente. */
@@ -68,11 +61,23 @@ export const DESCANSO_MINIMO_ENTRE_TURNOS_MIN = 12 * 60;
 /** Tope semanal de horas extras según Art. 22 Ley 50/1990 y Ley 2101/2021 (máx. 2 h/día, 12 h/semana). */
 export const TOPE_HORAS_EXTRAS_SEMANALES = 12;
 
-/** Horas amortizadas por defecto por cada turno compensatorio (COMP) cuando el tipo de turno no define un valor distinto. */
+/** Horas amortizadas por defecto por cada turno compensatorio (COMP) cuando usa modo HORAS_FIJAS sin valor explícito. */
 export const HORAS_AMORTIZACION_COMP_DEFAULT = 8;
 
-/** Códigos oficiales de ausencia o exoneración remunerada que prorratean la meta contractual mensual. */
+/** Respaldo legacy de códigos de exoneración cuando un objeto turno no trae `prorrateaMetaContrato`. */
 export const CODIGOS_EXONERACION_CONTRATO: ReadonlySet<string> = new Set(['VAC', 'INC', 'LIC', 'FAM']);
+
+/** Turnos estructurales obligatorios del sistema (protegidos contra borrado o cambio de código). */
+export const CODIGOS_TURNOS_SISTEMA_OBLIGATORIOS: ReadonlySet<string> = new Set([
+  'BLANCO',
+  'L',
+  'S',
+  'COMP',
+  'VAC',
+  'INC',
+  'LIC',
+  'FAM',
+]);
 
 /** Umbrales compartidos para el semáforo de Banco de Horas (Planificador, Reportes y Nómina). */
 export const SEMAFORO_BANCO_HORAS = {
@@ -81,6 +86,124 @@ export const SEMAFORO_BANCO_HORAS = {
   ATENCION_NEG: -6,
   CRITICO_NEG: -18,
 } as const;
+
+// ───────────────────────────── Reglas Multi-Empresa ─────────────────────────────
+
+export type PlantillaNormativaEmpresa = 'DECRETO_1042' | 'CST_LEY_2466' | 'PERSONALIZADA';
+export type ModoRecargoDominicalEmpresa = 'LEY_2466' | 'FIJO';
+export type ModoAmortizacionBanco = 'DIA_HABIL_EMPRESA' | 'HORAS_FIJAS';
+
+export interface ReglasEmpresaContrato {
+  empresaId?: string;
+  codigo?: string;
+  nombre?: string;
+  estadoConfiguracion?: 'CONFIRMADA' | 'PENDIENTE_REGLAS' | string;
+  plantillaNormativa?: PlantillaNormativaEmpresa | string;
+  horasSemanalesContrato: number;
+  diasBaseSemana: number;
+  horaInicioNocturnoMin?: number | null;
+  horaFinNocturnoMin?: number | null;
+  porcentajeRecargoNocturno?: number;
+  modoRecargoDominical?: ModoRecargoDominicalEmpresa | string;
+  porcentajeRecargoDominicalFijo?: number | null;
+  aplicaTopeHorasExtrasSemanal?: boolean;
+  topeHorasExtrasSemanal?: number;
+  usaBancoHoras?: boolean;
+}
+
+export const PLANTILLA_DECRETO_1042: ReglasEmpresaContrato = {
+  plantillaNormativa: 'DECRETO_1042',
+  horasSemanalesContrato: 44,
+  diasBaseSemana: 6,
+  horaInicioNocturnoMin: 18 * 60,
+  horaFinNocturnoMin: 6 * 60,
+  porcentajeRecargoNocturno: 0.35,
+  modoRecargoDominical: 'FIJO',
+  porcentajeRecargoDominicalFijo: 1.0,
+  aplicaTopeHorasExtrasSemanal: true,
+  topeHorasExtrasSemanal: 12,
+  usaBancoHoras: true,
+};
+
+export const PLANTILLA_CST_LEY_2466: ReglasEmpresaContrato = {
+  plantillaNormativa: 'CST_LEY_2466',
+  horasSemanalesContrato: 42,
+  diasBaseSemana: 6,
+  horaInicioNocturnoMin: 19 * 60,
+  horaFinNocturnoMin: 6 * 60,
+  porcentajeRecargoNocturno: 0.35,
+  modoRecargoDominical: 'LEY_2466',
+  porcentajeRecargoDominicalFijo: null,
+  aplicaTopeHorasExtrasSemanal: true,
+  topeHorasExtrasSemanal: 12,
+  usaBancoHoras: true,
+};
+
+export const PLANTILLA_PERSONALIZADA_DEFAULT: ReglasEmpresaContrato = {
+  ...PLANTILLA_CST_LEY_2466,
+  plantillaNormativa: 'PERSONALIZADA',
+};
+
+export function resolverPlantillaEmpresa(
+  plantilla?: PlantillaNormativaEmpresa | string | null
+): ReglasEmpresaContrato {
+  const key = String(plantilla || '').trim().toUpperCase();
+  if (key === 'DECRETO_1042') return { ...PLANTILLA_DECRETO_1042 };
+  if (key === 'PERSONALIZADA') return { ...PLANTILLA_PERSONALIZADA_DEFAULT };
+  return { ...PLANTILLA_CST_LEY_2466 };
+}
+
+export function combinarReglasEmpresa(
+  empresa?: Partial<ReglasEmpresaContrato> | null,
+  horasSemanalesOverride?: number | null
+): ReglasEmpresaContrato {
+  const base = resolverPlantillaEmpresa(empresa?.plantillaNormativa);
+  const hOverride = Number(horasSemanalesOverride);
+  const hEmpresa = Number(empresa?.horasSemanalesContrato);
+  const horasSemanalesContrato =
+    Number.isFinite(hOverride) && hOverride > 0
+      ? hOverride
+      : Number.isFinite(hEmpresa) && hEmpresa > 0
+        ? hEmpresa
+        : base.horasSemanalesContrato;
+
+  return {
+    ...base,
+    ...(empresa || {}),
+    horasSemanalesContrato,
+    diasBaseSemana:
+      empresa?.diasBaseSemana && empresa.diasBaseSemana > 0
+        ? Math.round(empresa.diasBaseSemana)
+        : base.diasBaseSemana,
+    horaInicioNocturnoMin:
+      empresa?.horaInicioNocturnoMin !== undefined
+        ? empresa.horaInicioNocturnoMin
+        : base.horaInicioNocturnoMin,
+    horaFinNocturnoMin:
+      empresa?.horaFinNocturnoMin !== undefined
+        ? empresa.horaFinNocturnoMin
+        : base.horaFinNocturnoMin,
+    porcentajeRecargoNocturno:
+      empresa?.porcentajeRecargoNocturno !== undefined && empresa.porcentajeRecargoNocturno >= 0
+        ? empresa.porcentajeRecargoNocturno
+        : base.porcentajeRecargoNocturno,
+    modoRecargoDominical: empresa?.modoRecargoDominical || base.modoRecargoDominical,
+    porcentajeRecargoDominicalFijo:
+      empresa?.porcentajeRecargoDominicalFijo !== undefined
+        ? empresa.porcentajeRecargoDominicalFijo
+        : base.porcentajeRecargoDominicalFijo,
+    aplicaTopeHorasExtrasSemanal:
+      empresa?.aplicaTopeHorasExtrasSemanal !== undefined
+        ? Boolean(empresa.aplicaTopeHorasExtrasSemanal)
+        : base.aplicaTopeHorasExtrasSemanal,
+    topeHorasExtrasSemanal:
+      empresa?.topeHorasExtrasSemanal !== undefined && empresa.topeHorasExtrasSemanal >= 0
+        ? empresa.topeHorasExtrasSemanal
+        : base.topeHorasExtrasSemanal,
+    usaBancoHoras:
+      empresa?.usaBancoHoras !== undefined ? Boolean(empresa.usaBancoHoras) : base.usaBancoHoras,
+  };
+}
 
 // ───────────────────────────── Tipos ─────────────────────────────
 
@@ -97,6 +220,7 @@ export interface RecargosVigentes {
 }
 
 export interface TurnoLiquidable {
+  codigo?: string;
   horaInicio?: string;
   horaFin?: string;
   horasOrdinarias: number;
@@ -105,7 +229,10 @@ export interface TurnoLiquidable {
   horasNocturnas?: number;
   minutosAlmuerzo?: number;
   esAusencia?: boolean;
+  prorrateaMetaContrato?: boolean;
+  bloqueaPermutas?: boolean;
   descuentaBancoHoras?: boolean;
+  modoAmortizacionBanco?: ModoAmortizacionBanco | string;
   horasAmortizacionBanco?: number | null;
 }
 
@@ -135,6 +262,7 @@ export type PredicadoDescanso = (fechaIso: string) => boolean;
 
 export interface ItemPeriodo {
   fechaIso: string;
+  codigo?: string;
   turno: TurnoLiquidable | undefined | null;
 }
 
@@ -169,8 +297,24 @@ export interface EvaluacionJornadaPeriodo {
   semanasSobreOrdinario: number;
   semanasSobreTopeAbsoluto: number;
   promedios3SemanasExcedidos: Array<{ desdeSemana: string; hastaSemana: string; promedio: number; limite: number }>;
-  /** True si hay al menos una semana > límite + 12h extras (Art. 22 Ley 50/90) o promedio 3 semanas > límite (Art. 165 CST). */
+  /** True si hay al menos una semana > límite + tope extras o promedio 3 semanas > límite (Art. 165 CST). */
   tieneInfraccionSemanal: boolean;
+}
+
+export interface ResumenDiasHabilesMes {
+  diasDelMes: number;
+  diasHabilesMes: number;
+  fechasHabilesIso: string[];
+}
+
+export interface ResultadoMetaDiasHabiles {
+  horasSemanalesAplicadas: number;
+  diasHabilesMes: number;
+  diasHabilesProrrateados: number;
+  diasHabilesObjetivo: number;
+  horasContratadasNominales: number;
+  horasExoneradas: number;
+  horasContratadasEfectivas: number;
 }
 
 // ───────────────────────────── Fechas ─────────────────────────────
@@ -239,6 +383,38 @@ export function crearPredicadoDescanso(esFestivo: (fechaIso: string) => boolean 
   return (fechaIso: string) => esDomingo(fechaIso) || Boolean(esFestivo(fechaIso));
 }
 
+/**
+ * Concepto único de Día Hábil Colombia: todo día calendario distinto a domingo y distinto a festivo (oficial o cívico).
+ */
+export function esDiaHabilColombia(
+  fechaIso: string,
+  esFestivo: (fechaIso: string) => boolean | undefined | null
+): boolean {
+  return !esDomingo(fechaIso) && !Boolean(esFestivo(fechaIso));
+}
+
+/** Cuenta los días hábiles del mes calendario (`!esDomingo && !esFestivo`). */
+export function contarDiasHabilesMes(
+  anio: number,
+  mes: number,
+  esFestivo: (fechaIso: string) => boolean | undefined | null
+): ResumenDiasHabilesMes {
+  const diasDelMes = new Date(Date.UTC(anio, mes, 0)).getUTCDate();
+  const mm = String(mes).padStart(2, '0');
+  const fechasHabilesIso: string[] = [];
+  for (let dia = 1; dia <= diasDelMes; dia++) {
+    const iso = `${anio}-${mm}-${String(dia).padStart(2, '0')}`;
+    if (esDiaHabilColombia(iso, esFestivo)) {
+      fechasHabilesIso.push(iso);
+    }
+  }
+  return {
+    diasDelMes,
+    diasHabilesMes: fechasHabilesIso.length,
+    fechasHabilesIso,
+  };
+}
+
 function valorVigente<T extends { desde: string }>(tabla: ReadonlyArray<T>, fechaIso: string): T {
   let vigente = tabla[0];
   for (const fila of tabla) {
@@ -248,31 +424,70 @@ function valorVigente<T extends { desde: string }>(tabla: ReadonlyArray<T>, fech
   return vigente;
 }
 
-// ───────────────────────────── Vigencias ─────────────────────────────
+// ───────────────────────────── Vigencias y Parametrización ─────────────────────────────
 
-export function inicioNocturnoVigente(fechaIso: string): number {
+export function finNocturnoVigente(reglas?: Partial<ReglasEmpresaContrato> | null): number {
+  const val = Number(reglas?.horaFinNocturnoMin);
+  return Number.isFinite(val) && val >= 0 && val <= 720 ? val : FIN_NOCTURNO_MIN;
+}
+
+export function inicioNocturnoVigente(
+  fechaIso: string,
+  reglas?: Partial<ReglasEmpresaContrato> | null
+): number {
+  if (reglas?.horaInicioNocturnoMin !== undefined && reglas?.horaInicioNocturnoMin !== null) {
+    const val = Number(reglas.horaInicioNocturnoMin);
+    if (Number.isFinite(val) && val >= 720 && val <= MINUTOS_DIA) {
+      return val;
+    }
+  }
   return valorVigente(VIGENCIAS_INICIO_NOCTURNO, fechaIso).inicioMin;
 }
 
-export function jornadaSemanalLegalVigente(fechaIso: string): number {
+export function jornadaSemanalLegalVigente(
+  fechaIso: string,
+  reglas?: Partial<ReglasEmpresaContrato> | null
+): number {
+  const h = Number(reglas?.horasSemanalesContrato);
+  if (Number.isFinite(h) && h > 0) return h;
   return valorVigente(VIGENCIAS_JORNADA_SEMANAL, fechaIso).horas;
 }
 
-/** Divisor mensual de la hora ordinaria = (jornada semanal / 6 días) × 30 días (p. ej. 42 h → 210). */
-export function divisorHorasMensualesVigente(fechaIso: string): number {
-  return (jornadaSemanalLegalVigente(fechaIso) / 6) * 30;
+/** Divisor mensual de la hora ordinaria = (jornada semanal / 6 días) × 30 días (p. ej. 42 h → 210; 44 h → 220). */
+export function divisorHorasMensualesVigente(
+  fechaIso: string,
+  reglas?: Partial<ReglasEmpresaContrato> | null
+): number {
+  const diasSem = reglas?.diasBaseSemana && reglas.diasBaseSemana > 0 ? reglas.diasBaseSemana : 6;
+  return r2((jornadaSemanalLegalVigente(fechaIso, reglas) / diasSem) * 30);
 }
 
 export const r2 = (n: number): number => Math.round(n * 100) / 100;
 
 /**
- * Horas que amortiza un turno compensatorio en el Banco de Horas.
- * Toma el valor configurado en `TipoTurno.horasAmortizacionBanco` (> 0) o `HORAS_AMORTIZACION_COMP_DEFAULT` (8h).
+ * Horas que amortiza un turno compensatorio en el Banco de Horas:
+ * - `'DIA_HABIL_EMPRESA'`: amortiza `horasSemanalesEmpresa / diasBaseSemana` (7.33 h en 44 h/sem; 7.00 h en 42 h/sem).
+ * - `'HORAS_FIJAS'`: usa `turno.horasAmortizacionBanco` (> 0) o `HORAS_AMORTIZACION_COMP_DEFAULT` (8 h).
  */
 export function obtenerHorasAmortizacionTurno(
-  turno: { descuentaBancoHoras?: boolean; horasAmortizacionBanco?: number | null } | undefined | null
+  turno:
+    | {
+        descuentaBancoHoras?: boolean;
+        modoAmortizacionBanco?: ModoAmortizacionBanco | string | null;
+        horasAmortizacionBanco?: number | null;
+      }
+    | undefined
+    | null,
+  horasSemanalesEmpresa = 42,
+  diasBaseSemana = 6
 ): number {
   if (!turno?.descuentaBancoHoras) return 0;
+  const modo = String(turno.modoAmortizacionBanco || 'HORAS_FIJAS').trim().toUpperCase();
+  if (modo === 'DIA_HABIL_EMPRESA') {
+    const hSem = Math.max(0, Number(horasSemanalesEmpresa) || 42);
+    const dBase = Math.max(1, Number(diasBaseSemana) || 6);
+    return r2(hSem / dBase);
+  }
   const val = Number(turno.horasAmortizacionBanco);
   return Number.isFinite(val) && val > 0 ? r2(val) : HORAS_AMORTIZACION_COMP_DEFAULT;
 }
@@ -290,9 +505,67 @@ export function esCodigoExoneracionContrato(codigo?: string | null): boolean {
   return CODIGOS_EXONERACION_CONTRATO.has((codigo || '').trim().toUpperCase());
 }
 
+/** Determina si el turno prorratea la meta mensual usando la propiedad configurable y fallback legacy por código. */
+export function esTurnoProrrateable(
+  turno: { prorrateaMetaContrato?: boolean; codigo?: string } | undefined | null,
+  codigoFallback?: string
+): boolean {
+  if (turno && typeof turno.prorrateaMetaContrato === 'boolean') {
+    return turno.prorrateaMetaContrato;
+  }
+  return esCodigoExoneracionContrato(turno?.codigo ?? codigoFallback);
+}
+
+/** Cuenta únicamente los días hábiles (`!esDomingo && !esFestivo`) cuya asignación tiene `prorrateaMetaContrato === true`. */
+export function contarDiasHabilesProrrateados(
+  items: ReadonlyArray<ItemPeriodo>,
+  esFestivo: (fechaIso: string) => boolean | undefined | null
+): number {
+  const fechasContadas = new Set<string>();
+  for (const it of items) {
+    if (!it?.fechaIso) continue;
+    if (!esTurnoProrrateable(it.turno, it.codigo ?? it.turno?.codigo)) continue;
+    if (esDiaHabilColombia(it.fechaIso, esFestivo)) {
+      fechasContadas.add(it.fechaIso);
+    }
+  }
+  return fechasContadas.size;
+}
+
 /**
- * Prorratea las horas contractuales del mes descontando `horasContratoMes / diasMes` por cada día
- * con novedad oficial remunerada o exoneración (VAC, INC, LIC, FAM), evitando deudas injustas en Banco de Horas.
+ * Fórmula maestra de meta mensual dinámica por Días Hábiles y Prorrateo Selectivo:
+ *  - `horasContratadasNominales = r2((diasHabilesMes * horasSemanalesContrato) / diasBaseSemana)`
+ *  - `horasContratadasEfectivas = r2(((diasHabilesMes - diasHabilesProrrateados) * horasSemanalesContrato) / diasBaseSemana)`
+ */
+export function calcularMetaMensualPorDiasHabiles(
+  horasSemanalesContrato: number,
+  diasHabilesMes: number,
+  diasHabilesProrrateados = 0,
+  diasBaseSemana = 6
+): ResultadoMetaDiasHabiles {
+  const hSem = Math.max(0, Number(horasSemanalesContrato) || 0);
+  const dBase = Math.max(1, Number(diasBaseSemana) || 6);
+  const dHab = Math.max(0, Math.round(Number(diasHabilesMes) || 0));
+  const dPror = Math.max(0, Math.min(dHab, Math.round(Number(diasHabilesProrrateados) || 0)));
+  const dObj = Math.max(0, dHab - dPror);
+
+  const horasContratadasNominales = dHab === 0 ? 0 : r2((dHab * hSem) / dBase);
+  const horasContratadasEfectivas = dObj === 0 ? 0 : r2((dObj * hSem) / dBase);
+  const horasExoneradas = Math.max(0, r2(horasContratadasNominales - horasContratadasEfectivas));
+
+  return {
+    horasSemanalesAplicadas: r2(hSem),
+    diasHabilesMes: dHab,
+    diasHabilesProrrateados: dPror,
+    diasHabilesObjetivo: dObj,
+    horasContratadasNominales,
+    horasExoneradas,
+    horasContratadasEfectivas,
+  };
+}
+
+/**
+ * Prorrateo legacy proporcional por días del mes. Conservado por compatibilidad con utilidades existentes.
  */
 export function calcularMetaContractualProrrateada(
   horasContratoMes: number,
@@ -327,12 +600,28 @@ export function evaluarEstadoBancoHoras(saldo: number): 'EQUILIBRADO' | 'ATENCIO
   return 'EQUILIBRADO';
 }
 
-export function recargosVigentes(fechaIso: string): RecargosVigentes {
-  const dominical = valorVigente(VIGENCIAS_RECARGO_DOMINICAL, fechaIso).valor;
+export function recargosVigentes(
+  fechaIso: string,
+  reglas?: Partial<ReglasEmpresaContrato> | null
+): RecargosVigentes {
+  const nocturno =
+    reglas?.porcentajeRecargoNocturno !== undefined && reglas.porcentajeRecargoNocturno >= 0
+      ? reglas.porcentajeRecargoNocturno
+      : RECARGO_NOCTURNO;
+
+  const usaDomFijo =
+    String(reglas?.modoRecargoDominical || '').toUpperCase() === 'FIJO' &&
+    reglas?.porcentajeRecargoDominicalFijo !== undefined &&
+    reglas?.porcentajeRecargoDominicalFijo !== null;
+
+  const dominical = usaDomFijo
+    ? Math.max(0, Number(reglas!.porcentajeRecargoDominicalFijo))
+    : valorVigente(VIGENCIAS_RECARGO_DOMINICAL, fechaIso).valor;
+
   return {
-    nocturno: RECARGO_NOCTURNO,
+    nocturno,
     dominical,
-    nocturnoDominical: r2(dominical + RECARGO_NOCTURNO),
+    nocturnoDominical: r2(dominical + nocturno),
     extraDiurna: RECARGO_EXTRA_DIURNA,
     extraNocturna: RECARGO_EXTRA_NOCTURNA,
     extraDiurnaDominical: r2(dominical + RECARGO_EXTRA_DIURNA),
@@ -345,15 +634,23 @@ export function formatearPorcentaje(fraccion: number): string {
   return `${Math.round(fraccion * 100)}%`;
 }
 
-/** Texto de la franja diurna/nocturna vigente en una fecha, p. ej. "06:00–19:00" / "19:00–06:00". */
-export function textoFranjasVigentes(fechaIso: string): { diurna: string; nocturna: string } {
+/** Texto de la franja diurna/nocturna vigente en una fecha, p. ej. "06:00–19:00" o "18:00–06:00". */
+export function textoFranjasVigentes(
+  fechaIso: string,
+  reglas?: Partial<ReglasEmpresaContrato> | null
+): { diurna: string; nocturna: string } {
   const hh = (min: number) => `${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
-  const ini = inicioNocturnoVigente(fechaIso);
-  return { diurna: `${hh(FIN_NOCTURNO_MIN)}–${hh(ini)}`, nocturna: `${hh(ini)}–${hh(FIN_NOCTURNO_MIN)}` };
+  const ini = inicioNocturnoVigente(fechaIso, reglas);
+  const fin = finNocturnoVigente(reglas);
+  return { diurna: `${hh(fin)}–${hh(ini)}`, nocturna: `${hh(ini)}–${hh(fin)}` };
 }
 
-/** Franjas, jornada y recargos a mostrar en la cabecera de un periodo mensual (al ÚLTIMO día del mes; avisa si cambian en ese mes o desde el cierre del mes previo). */
-export function resumenNormativoPeriodo(anio: number, mes: number): {
+/** Franjas, jornada y recargos a mostrar en la cabecera de un periodo mensual. */
+export function resumenNormativoPeriodo(
+  anio: number,
+  mes: number,
+  reglas?: Partial<ReglasEmpresaContrato> | null
+): {
   recargos: RecargosVigentes;
   franjas: { diurna: string; nocturna: string };
   jornadaSemanalHoras: number;
@@ -368,15 +665,15 @@ export function resumenNormativoPeriodo(anio: number, mes: number): {
   const ultimoDia = new Date(Date.UTC(anio, mes, 0)).getUTCDate();
   const ultimo = `${anio}-${mm}-${String(ultimoDia).padStart(2, '0')}`;
   return {
-    recargos: recargosVigentes(ultimo),
-    franjas: textoFranjasVigentes(ultimo),
-    jornadaSemanalHoras: jornadaSemanalLegalVigente(ultimo),
-    divisorHorasMensuales: divisorHorasMensualesVigente(ultimo),
-    franjaCambiaEnElMes: inicioNocturnoVigente(primero) !== inicioNocturnoVigente(ultimo),
+    recargos: recargosVigentes(ultimo, reglas),
+    franjas: textoFranjasVigentes(ultimo, reglas),
+    jornadaSemanalHoras: jornadaSemanalLegalVigente(ultimo, reglas),
+    divisorHorasMensuales: divisorHorasMensualesVigente(ultimo, reglas),
+    franjaCambiaEnElMes: inicioNocturnoVigente(primero, reglas) !== inicioNocturnoVigente(ultimo, reglas),
     recargoDominicalCambiaEnElMes:
-      recargosVigentes(cierreMesPrevio).dominical !== recargosVigentes(ultimo).dominical,
+      recargosVigentes(cierreMesPrevio, reglas).dominical !== recargosVigentes(ultimo, reglas).dominical,
     jornadaSemanalCambiaEnElMes:
-      jornadaSemanalLegalVigente(primero) !== jornadaSemanalLegalVigente(ultimo),
+      jornadaSemanalLegalVigente(primero, reglas) !== jornadaSemanalLegalVigente(ultimo, reglas),
   };
 }
 
@@ -389,9 +686,16 @@ export function parseHoraMin(hhmm?: string): number | null {
   return (h === 24 ? 0 : h) * 60 + m;
 }
 
-/** ¿El minuto del día (0–1439) de la fecha dada pertenece a la franja nocturna? */
-export function esMinutoNocturno(minutoDelDia: number, fechaIso: string): boolean {
-  return minutoDelDia >= inicioNocturnoVigente(fechaIso) || minutoDelDia < FIN_NOCTURNO_MIN;
+/** ¿El minuto del día (0–1439) de la fecha dada pertenece a la franja nocturna según empresa o ley? */
+export function esMinutoNocturno(
+  minutoDelDia: number,
+  fechaIso: string,
+  reglas?: Partial<ReglasEmpresaContrato> | null
+): boolean {
+  return (
+    minutoDelDia >= inicioNocturnoVigente(fechaIso, reglas) ||
+    minutoDelDia < finNocturnoVigente(reglas)
+  );
 }
 
 /** Duración bruta en minutos del horario. Si fin < inicio cruza medianoche. `permitirMismaHora24h` controla si inicio===fin equivale a 24 h (guardia) o es inválido. */
@@ -408,9 +712,9 @@ export function duracionHorarioMin(
 }
 
 type TramoBase = Omit<TramoLiquidado, 'esDescansoObligatorio'>;
-/** Caché de la segmentación (depende solo de fecha y horario, no de festivos cívicos que pueden cambiar). No mutar. */
+/** Caché de segmentación indexada también por franja nocturna para soportar múltiples empresas sin colisión. */
 const CACHE_TRAMOS = new Map<string, ReadonlyArray<TramoBase>>();
-const CACHE_TRAMOS_MAX = 60000;
+const CACHE_TRAMOS_MAX = 80000;
 
 /**
  * Parte un horario en tramos por fecha calendario real y franja (diurna/nocturna), sin descuento de almuerzo.
@@ -420,35 +724,51 @@ export function segmentarHorario(
   fechaInicioIso: string,
   horaInicio: string,
   horaFin: string,
-  esDescansoObligatorio: PredicadoDescanso
+  esDescansoObligatorio: PredicadoDescanso,
+  reglas?: Partial<ReglasEmpresaContrato> | null
 ): TramoLiquidado[] {
-  return segmentarBase(fechaInicioIso, horaInicio, horaFin).map((t) => ({
+  return segmentarBase(fechaInicioIso, horaInicio, horaFin, reglas).map((t) => ({
     ...t,
     esDescansoObligatorio: esDescansoObligatorio(t.fechaIso),
   }));
 }
 
-function segmentarBase(fechaInicioIso: string, horaInicio: string, horaFin: string): ReadonlyArray<TramoBase> {
-  const clave = `${fechaInicioIso}|${horaInicio}|${horaFin}`;
+function segmentarBase(
+  fechaInicioIso: string,
+  horaInicio: string,
+  horaFin: string,
+  reglas?: Partial<ReglasEmpresaContrato> | null
+): ReadonlyArray<TramoBase> {
+  const fechaDia1 = sumarDiasIso(fechaInicioIso, 1);
+  const ini0 = inicioNocturnoVigente(fechaInicioIso, reglas);
+  const ini1 = inicioNocturnoVigente(fechaDia1, reglas);
+  const finNoc = finNocturnoVigente(reglas);
+
+  const clave = `${fechaInicioIso}|${horaInicio}|${horaFin}|${ini0}|${ini1}|${finNoc}`;
   const cacheado = CACHE_TRAMOS.get(clave);
   if (cacheado) return cacheado;
-  const tramos = calcularTramosBase(fechaInicioIso, horaInicio, horaFin);
+  const tramos = calcularTramosBase(fechaInicioIso, fechaDia1, horaInicio, horaFin, ini0, ini1, finNoc);
   if (CACHE_TRAMOS.size >= CACHE_TRAMOS_MAX) CACHE_TRAMOS.clear();
   CACHE_TRAMOS.set(clave, tramos);
   return tramos;
 }
 
-function calcularTramosBase(fechaInicioIso: string, horaInicio: string, horaFin: string): TramoBase[] {
+function calcularTramosBase(
+  fechaInicioIso: string,
+  fechaDia1: string,
+  horaInicio: string,
+  horaFin: string,
+  ini0: number,
+  ini1: number,
+  finNoc: number
+): TramoBase[] {
   const s = parseHoraMin(horaInicio);
   const duracion = duracionHorarioMin(horaInicio, horaFin);
   if (s === null || duracion === null) return [];
   const e = s + duracion; // absoluto, < 2880
-  const fechaDia1 = sumarDiasIso(fechaInicioIso, 1);
-  const ini0 = inicioNocturnoVigente(fechaInicioIso);
-  const ini1 = inicioNocturnoVigente(fechaDia1);
 
   const cortes = new Set<number>([s, e]);
-  for (const c of [FIN_NOCTURNO_MIN, ini0, MINUTOS_DIA, MINUTOS_DIA + FIN_NOCTURNO_MIN, MINUTOS_DIA + ini1]) {
+  for (const c of [finNoc, ini0, MINUTOS_DIA, MINUTOS_DIA + finNoc, MINUTOS_DIA + ini1]) {
     if (c > s && c < e) cortes.add(c);
   }
   const orden = Array.from(cortes).sort((a, b) => a - b);
@@ -457,8 +777,12 @@ function calcularTramosBase(fechaInicioIso: string, horaInicio: string, horaFin:
   for (let i = 0; i < orden.length - 1; i++) {
     const a = orden[i];
     const b = orden[i + 1];
-    const fechaIso = a < MINUTOS_DIA ? fechaInicioIso : fechaDia1;
-    const nocturno = esMinutoNocturno(a % MINUTOS_DIA, fechaIso);
+    const isDia0 = a < MINUTOS_DIA;
+    const fechaIso = isDia0 ? fechaInicioIso : fechaDia1;
+    const minDelDia = a % MINUTOS_DIA;
+    const iniVigente = isDia0 ? ini0 : ini1;
+    const nocturno = minDelDia >= iniVigente || minDelDia < finNoc;
+
     let tramo = acumulado.get(fechaIso);
     if (!tramo) {
       tramo = { fechaIso, minutosDiurnos: 0, minutosNocturnos: 0 };
@@ -513,14 +837,15 @@ interface BucketTramo {
 function liquidarTurnoConDetalleTramos(
   turno: TurnoLiquidable | undefined | null,
   fechaInicioIso: string,
-  esDescansoObligatorio: PredicadoDescanso
+  esDescansoObligatorio: PredicadoDescanso,
+  reglas?: Partial<ReglasEmpresaContrato> | null
 ): { minutos: MinutosLiquidados; netosPorFecha: Array<{ fechaIso: string; esDescanso: boolean; min: number }> } {
   const cero: MinutosLiquidados = { hod: 0, hon: 0, hdfd: 0, hdfn: 0 };
   if (!turnoEsLaborado(turno)) return { minutos: cero, netosPorFecha: [] };
 
   const tramos =
     turno.horaInicio && turno.horaFin
-      ? segmentarHorario(fechaInicioIso, turno.horaInicio, turno.horaFin, esDescansoObligatorio)
+      ? segmentarHorario(fechaInicioIso, turno.horaInicio, turno.horaFin, esDescansoObligatorio, reglas)
       : [];
 
   if (tramos.length === 0) {
@@ -587,9 +912,10 @@ function liquidarTurnoConDetalleTramos(
 export function liquidarTurnoMinutos(
   turno: TurnoLiquidable | undefined | null,
   fechaInicioIso: string,
-  esDescansoObligatorio: PredicadoDescanso
+  esDescansoObligatorio: PredicadoDescanso,
+  reglas?: Partial<ReglasEmpresaContrato> | null
 ): MinutosLiquidados {
-  return liquidarTurnoConDetalleTramos(turno, fechaInicioIso, esDescansoObligatorio).minutos;
+  return liquidarTurnoConDetalleTramos(turno, fechaInicioIso, esDescansoObligatorio, reglas).minutos;
 }
 
 export function minutosAHoras(min: MinutosLiquidados): HorasLiquidadas {
@@ -601,27 +927,29 @@ export function minutosAHoras(min: MinutosLiquidados): HorasLiquidadas {
 export function liquidarTurno(
   turno: TurnoLiquidable | undefined | null,
   fechaInicioIso: string,
-  esDescansoObligatorio: PredicadoDescanso
+  esDescansoObligatorio: PredicadoDescanso,
+  reglas?: Partial<ReglasEmpresaContrato> | null
 ): HorasLiquidadas {
-  return minutosAHoras(liquidarTurnoMinutos(turno, fechaInicioIso, esDescansoObligatorio));
+  return minutosAHoras(liquidarTurnoMinutos(turno, fechaInicioIso, esDescansoObligatorio, reglas));
 }
 
 /**
- * Desglose de un horario para el catálogo de turnos, tomando un día hábil ordinario con las franjas vigentes en `fechaRefIso`.
- * Devuelve horas ordinarias netas (descontado almuerzo), diurnas y nocturnas.
+ * Desglose de un horario para el catálogo de turnos, tomando un día hábil ordinario con las franjas vigentes.
  */
 export function desglosarHorarioOrdinario(
   horaInicio: string,
   horaFin: string,
   minutosAlmuerzo: number,
   fechaRefIso: string,
-  permitirMismaHora24h = true
+  permitirMismaHora24h = true,
+  reglas?: Partial<ReglasEmpresaContrato> | null
 ): { ordinarias: number; diurnas: number; nocturnas: number } | null {
   if (duracionHorarioMin(horaInicio, horaFin, permitirMismaHora24h) === null) return null;
   const m = liquidarTurnoMinutos(
     { horaInicio, horaFin, horasOrdinarias: 1, minutosAlmuerzo },
     fechaRefIso,
-    () => false
+    () => false,
+    reglas
   );
   const h = minutosAHoras(m);
   return { ordinarias: h.total, diurnas: h.hod, nocturnas: h.hon };
@@ -637,7 +965,11 @@ export function esTurnoNocturnoPrincipal(
 
 // ───────────────────────────── Liquidación de un periodo ─────────────────────────────
 
-export function liquidarPeriodo(items: ReadonlyArray<ItemPeriodo>, esDescansoObligatorio: PredicadoDescanso): LiquidacionPeriodo {
+export function liquidarPeriodo(
+  items: ReadonlyArray<ItemPeriodo>,
+  esDescansoObligatorio: PredicadoDescanso,
+  reglas?: Partial<ReglasEmpresaContrato> | null
+): LiquidacionPeriodo {
   const acum: MinutosLiquidados = { hod: 0, hon: 0, hdfd: 0, hdfn: 0 };
   const detalle: DetalleDiaLiquidado[] = [];
   const fechasDescanso = new Set<string>();
@@ -648,7 +980,8 @@ export function liquidarPeriodo(items: ReadonlyArray<ItemPeriodo>, esDescansoObl
     const { minutos: mins, netosPorFecha } = liquidarTurnoConDetalleTramos(
       it.turno,
       it.fechaIso,
-      esDescansoObligatorio
+      esDescansoObligatorio,
+      reglas
     );
     acum.hod += mins.hod;
     acum.hon += mins.hon;
@@ -684,20 +1017,29 @@ export function lunesDeSemanaIso(fechaIso: string): string {
 }
 
 /**
- * Evalúa la jornada semanal del periodo bajo Ley 2101/2021 (máx. 42 h/sem desde 15-jul-2026),
- * Art. 22 Ley 50/1990 (máx. +12 h extras/sem) y Art. 165 CST (turnos sucesivos: promedio de 3 semanas <= límite legal).
+ * Evalúa la jornada semanal del periodo respetando la empresa contratante (42 h CST, 44 h Decreto 1042, etc.),
+ * el tope semanal de extras y la regla de turnos sucesivos del Art. 165 CST (promedio de 3 semanas <= límite ordinario).
  */
-export function evaluarJornadaSemanalPeriodo(items: ReadonlyArray<ItemPeriodo>): EvaluacionJornadaPeriodo {
+export function evaluarJornadaSemanalPeriodo(
+  items: ReadonlyArray<ItemPeriodo>,
+  reglas?: Partial<ReglasEmpresaContrato> | null
+): EvaluacionJornadaPeriodo {
   const porSemanaMin = new Map<string, number>();
 
   for (const it of items) {
     if (!turnoEsLaborado(it.turno)) continue;
-    const m = liquidarTurnoMinutos(it.turno, it.fechaIso, () => false);
+    const m = liquidarTurnoMinutos(it.turno, it.fechaIso, () => false, reglas);
     const totalMin = m.hod + m.hon + m.hdfd + m.hdfn;
     if (totalMin <= 0) continue;
     const lun = lunesDeSemanaIso(it.fechaIso);
     porSemanaMin.set(lun, (porSemanaMin.get(lun) || 0) + totalMin);
   }
+
+  const aplicaTope = reglas?.aplicaTopeHorasExtrasSemanal !== false;
+  const topeExtras =
+    reglas?.topeHorasExtrasSemanal !== undefined && reglas.topeHorasExtrasSemanal >= 0
+      ? Number(reglas.topeHorasExtrasSemanal)
+      : TOPE_HORAS_EXTRAS_SEMANALES;
 
   const semanasOrdenadas = Array.from(porSemanaMin.keys()).sort();
   const semanas: EvaluacionSemanaJornada[] = [];
@@ -705,7 +1047,7 @@ export function evaluarJornadaSemanalPeriodo(items: ReadonlyArray<ItemPeriodo>):
 
   for (const lun of semanasOrdenadas) {
     const dom = sumarDiasIso(lun, 6);
-    const limite = jornadaSemanalLegalVigente(dom);
+    const limite = jornadaSemanalLegalVigente(dom, reglas);
     if (limite > limiteOrdinarioMaximo) limiteOrdinarioMaximo = limite;
     const horasTotales = r2((porSemanaMin.get(lun) || 0) / 60);
     semanas.push({
@@ -714,7 +1056,7 @@ export function evaluarJornadaSemanalPeriodo(items: ReadonlyArray<ItemPeriodo>):
       horasTotales,
       limiteOrdinarioVigente: limite,
       excedeOrdinario: horasTotales > limite,
-      excedeTopeAbsoluto: horasTotales > limite + TOPE_HORAS_EXTRAS_SEMANALES,
+      excedeTopeAbsoluto: aplicaTope ? horasTotales > limite + topeExtras : false,
     });
   }
 
@@ -723,7 +1065,6 @@ export function evaluarJornadaSemanalPeriodo(items: ReadonlyArray<ItemPeriodo>):
     const w0 = semanas[i];
     const w1 = semanas[i + 1];
     const w2 = semanas[i + 2];
-    // Solo evaluar ventanas realmente contiguas (3 semanas consecutivas en calendario)
     if (sumarDiasIso(w0.semanaInicioIso, 7) !== w1.semanaInicioIso || sumarDiasIso(w1.semanaInicioIso, 7) !== w2.semanaInicioIso) {
       continue;
     }

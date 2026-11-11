@@ -135,10 +135,17 @@ export type VistaApp = 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'AUDITORIA' |
               class="side-item"
               [class.active]="vistaActual === 'CONFIGURACION'"
               (click)="itemNavegacionClick.emit('CONFIGURACION')"
-              title="Configuración (Servicios, Catálogo de Turnos y Festivos)">
+              title="Configuración (Empresas, Servicios, Catálogo de Turnos y Festivos)">
               <span class="side-icon">⚙️</span>
               @if (!sidebarContraido) {
                 <span class="side-label">Configuración</span>
+              }
+              @if (empresasPendientesCount > 0) {
+                <span
+                  class="pill-count pill-warn"
+                  [title]="empresasPendientesCount + ' empresa(s) contratante(s) pendiente(s) por confirmar reglas'">
+                  {{ empresasPendientesCount }}
+                </span>
               }
             </button>
           }
@@ -193,6 +200,7 @@ export class SidebarNavegacionComponent {
   @Input() esAdminTh = false;
   @Input() notificacionesSolicitudesCount = 0;
   @Input() propuestasRecibidasCount = 0;
+  @Input() empresasPendientesCount = 0;
   @Input() sesionActual: SesionUsuarioSso | null = null;
 
   @Output() alternarFijarSidebar = new EventEmitter<void>();

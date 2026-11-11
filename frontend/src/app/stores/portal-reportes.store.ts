@@ -5,13 +5,17 @@ import {
   CodigoTurno,
   DiaColumna,
   EmpleadoHospital,
+  EmpresaContratante,
   PermutaItem,
   SesionUsuarioSso,
   TODOS_LOS_MESES,
 } from '../models';
 import { TurnosApiService } from '../turnos-api.service';
 import { FestivosColombiaHelper } from '../festivos-colombia.helper';
-import { calcularMetricasMesColaborador } from '../calculo-turnos.helper';
+import {
+  calcularMetaNominalMesEmpleado,
+  calcularMetricasMesColaborador,
+} from '../calculo-turnos.helper';
 import {
   esCodigoExoneracionContrato,
   formatearPorcentaje,
@@ -33,7 +37,20 @@ export class PortalReportesStore {
   // Reportes y Analítica Hospitalaria
   readonly subVistaReportes = signal<'PRE_NOMINA' | 'EQUIDAD' | 'BANCO_HORAS' | 'AUSENTISMO'>('PRE_NOMINA');
   readonly filtroReporteServicioId = signal<string>('TODOS');
+  readonly filtroReporteEmpresaId = signal<string>('TODOS');
   readonly busquedaReporteTexto = signal<string>('');
+
+  readonly empresasDisponiblesReportes = computed<EmpresaContratante[]>(() => {
+    const lista = this.catalogos.empresas();
+    if (lista.length > 0) return lista;
+    const derivadas = new Map<string, EmpresaContratante>();
+    for (const e of this.catalogos.empleados()) {
+      if (e.empresaContratante?.id) {
+        derivadas.set(e.empresaContratante.id, e.empresaContratante as EmpresaContratante);
+      }
+    }
+    return Array.from(derivadas.values());
+  });
 
   // Portal del Colaborador y iCal
   readonly empleadoPortalId = signal<string>('');
@@ -169,33 +186,71 @@ export class PortalReportesStore {
   readonly datosEmpleadoPortal = computed(() => {
     const id = this.empleadoPortalId();
     const sesion = this.catalogos.sesionActual();
+    const empresasMap = new Map(this.catalogos.empresas().map((e) => [e.id, e]));
     const emps = this.catalogos.empleados();
-    const emp =
-      emps.find((e) => e.id === id) ||
-      (sesion && (sesion.empleadoId === id || sesion.documento === id)
-        ? {
-            id: sesion.empleadoId,
-            documento: sesion.documento,
-            nombre: sesion.nombre,
-            categoria: sesion.categoria,
-            servicioBaseId: sesion.servicioBaseId,
-            horasContratoMes: 168,
-            saldoBancoAnterior: 0,
-            ultimoTurnoMesPrevio: 'L' as CodigoTurno,
-          }
-        : emps[0] || {
-            id: '',
-            documento: '',
-            nombre: 'Cargando colaborador...',
-            categoria: 'Personal Asistencial',
-            servicioBaseId: '',
-            horasContratoMes: 168,
-            saldoBancoAnterior: 0,
-            ultimoTurnoMesPrevio: 'L' as CodigoTurno,
-          });
-
     const anio = this.catalogos.anioSeleccionado();
     const mes = this.mesSeleccionadoPortal();
+    const predFest = (iso: string) => Boolean(FestivosColombiaHelper.esFestivo(iso));
+
+    const encontrarEmp = emps.find((e) => e.id === id);
+    let empBase: EmpleadoHospital;
+    if (encontrarEmp) {
+      const eId = encontrarEmp.empresaContratanteId || encontrarEmp.empresaContratante?.id;
+      const empAct = eId ? empresasMap.get(eId) : undefined;
+      empBase = empAct
+        ? {
+            ...encontrarEmp,
+            empresaContratanteId: empAct.id,
+            empresaContratante: empAct,
+            horasSemanalesAplicadas: encontrarEmp.horasSemanalesOverride ?? empAct.horasSemanalesContrato,
+          }
+        : encontrarEmp;
+    } else if (sesion && (sesion.empleadoId === id || sesion.documento === id)) {
+      const empSesionAct = sesion.empresaContratanteId ? empresasMap.get(sesion.empresaContratanteId) : undefined;
+      empBase = {
+        id: sesion.empleadoId,
+        documento: sesion.documento,
+        nombre: sesion.nombre,
+        categoria: sesion.categoria,
+        servicioBaseId: sesion.servicioBaseId,
+        empresaContratanteId: sesion.empresaContratanteId ?? undefined,
+        empresaContratante:
+          empSesionAct ||
+          (sesion.empresaCodigo || sesion.horasSemanalesAplicadas
+            ? {
+                id: sesion.empresaContratanteId ?? undefined,
+                codigo: sesion.empresaCodigo ?? 'CST_DEFAULT',
+                nombre: sesion.empresaNombre ?? sesion.empresaCodigo ?? 'Régimen CST',
+                estadoConfiguracion: sesion.empresaEstadoConfiguracion ?? 'CONFIRMADA',
+                horasSemanalesContrato: sesion.horasSemanalesAplicadas ?? 42,
+              }
+            : null),
+        horasSemanalesAplicadas: sesion.horasSemanalesAplicadas,
+        horasContratoMes: 0,
+        saldoBancoAnterior: 0,
+        ultimoTurnoMesPrevio: 'L' as CodigoTurno,
+      };
+    } else {
+      empBase =
+        emps[0] || {
+          id: '',
+          documento: '',
+          nombre: 'Cargando colaborador...',
+          categoria: 'Personal Asistencial',
+          servicioBaseId: '',
+          horasContratoMes: 0,
+          saldoBancoAnterior: 0,
+          ultimoTurnoMesPrevio: 'L' as CodigoTurno,
+        };
+    }
+
+    const nominal = calcularMetaNominalMesEmpleado(empBase, anio, mes, predFest);
+    const emp: EmpleadoHospital = {
+      ...empBase,
+      horasSemanalesAplicadas: nominal.horasSemanalesAplicadas,
+      horasContratoMes: nominal.horasContratadasNominales,
+    };
+
     const dias = this.diasDelMesPortal();
     const celdasEmp = this.asignacionesMesPortal()[emp.id] || {};
     const keyPeriodo = `${emp.id}::${anio}-${mes}`;
@@ -209,10 +264,17 @@ export class PortalReportesStore {
       this.cuadrante.saldosConsolidadosMap(),
       anio,
       mes,
-      saldoCalculado
+      saldoCalculado,
+      undefined,
+      predFest
     );
     const servicioBase = this.catalogos.servicios().find((s) => s.id === emp.servicioBaseId) || this.catalogos.servicioActual();
-    const empConSaldo = { ...emp, saldoBancoAnterior: metricas.saldoAntReal };
+    const empConSaldo: EmpleadoHospital = {
+      ...emp,
+      horasContratoMes: metricas.horasContratadasNominales,
+      horasSemanalesAplicadas: metricas.horasSemanalesAplicadas,
+      saldoBancoAnterior: metricas.saldoAntReal,
+    };
 
     return {
       empleado: empConSaldo,
@@ -259,34 +321,61 @@ export class PortalReportesStore {
             id: sesion.empleadoId,
             servicioBaseId: sesion.servicioBaseId,
             categoria: sesion.categoria,
+            categoriaId: undefined as string | undefined,
           }
         : null);
     if (!actual) return [];
 
     const srvDiaId = this.servicioDiaSeleccionadoPortal().id;
+    const srvDiaObj = this.catalogos.servicios().find((s) => s.id === srvDiaId);
     const dia = this.diaPermutaSeleccionado();
     const matriz = this.asignacionesMesPortal();
     const catalogo = this.catalogos.catalogoTurnosMap();
 
+    const cargoEnServicio = (emp: { categoriaId?: string; categoria: string }): boolean => {
+      const ids =
+        srvDiaObj?.cargosPermitidosIds && srvDiaObj.cargosPermitidosIds.length > 0
+          ? srvDiaObj.cargosPermitidosIds
+          : (srvDiaObj?.cargosPermitidos || []).map((c) => c.categoriaId).filter(Boolean);
+      const nombres = (srvDiaObj?.cargosPermitidos || [])
+        .map((c) => c.categoriaNombre?.trim().toLowerCase())
+        .filter(Boolean);
+      if (emp.categoriaId && ids.includes(emp.categoriaId)) return true;
+      if (emp.categoria && nombres.includes(emp.categoria.trim().toLowerCase())) return true;
+      return false;
+    };
+
+    const permiteMultiCargo = Boolean(srvDiaObj?.permitePermutaEntreCargos);
+
     return emps.filter((e) => {
-      if (e.id === actual.id || e.categoria !== actual.categoria) return false;
+      if (e.id === actual.id) return false;
+      const mismoCargo =
+        Boolean(e.categoriaId && actual.categoriaId && e.categoriaId === actual.categoriaId) ||
+        e.categoria.trim().toLowerCase() === actual.categoria.trim().toLowerCase();
+      if (!mismoCargo && !(permiteMultiCargo && cargoEnServicio(actual) && cargoEnServicio(e))) {
+        return false;
+      }
+
       const celdaPar = matriz[e.id]?.[dia];
       const codPar = (celdaPar?.codigo || '').trim().toUpperCase();
       const ejecutaEnSrvDia = celdaPar?.servicioEjecutorId === srvDiaId;
       const esDePlanta = e.servicioBaseId === srvDiaId;
       if (!esDePlanta && !ejecutaEnSrvDia) return false;
 
+      const cfgPar = codPar ? catalogo[codPar] : undefined;
+      const esAusPar = cfgPar ? Boolean(cfgPar.esAusencia) : esCodigoExoneracionContrato(codPar);
+
       if (
         celdaPar?.servicioEjecutorId &&
         celdaPar.servicioEjecutorId !== srvDiaId &&
         codPar !== '' &&
         codPar !== 'L' &&
-        !esCodigoExoneracionContrato(codPar)
+        !esAusPar
       ) {
         return false;
       }
 
-      if (esCodigoExoneracionContrato(codPar) || (codPar && catalogo[codPar]?.esAusencia)) {
+      if (esAusPar || cfgPar?.bloqueaPermutas) {
         return false;
       }
 
@@ -334,17 +423,30 @@ export class PortalReportesStore {
     return this.permutasAuditoria.listaPermutas().filter((p) => p.solicitanteId === id);
   });
 
-  // Filas consolidadas para Reportes (Multi-servicio o filtrado según alcance RBAC del rol)
+  // Filas consolidadas para Reportes (Multi-servicio / Multi-empresa o filtrado según alcance RBAC del rol)
   readonly datosReporteCalculados = computed(() => {
     const sesion = this.catalogos.sesionActual();
     if (this.catalogos.esColaborador()) {
       return [];
     }
     const srvFiltro = this.filtroReporteServicioId();
+    const empFiltro = this.filtroReporteEmpresaId();
     const textoBusqueda = this.busquedaReporteTexto().trim().toLowerCase();
     const dias = this.cuadrante.diasDelMes();
     const matriz = this.cuadrante.asignaciones();
-    const todosEmps = this.catalogos.empleados();
+    const empresasMap = new Map(this.catalogos.empresas().map((e) => [e.id, e]));
+    const todosEmps = this.catalogos.empleados().map((e) => {
+      const ecId = e.empresaContratanteId || e.empresaContratante?.id;
+      const empAct = ecId ? empresasMap.get(ecId) : undefined;
+      return empAct
+        ? {
+            ...e,
+            empresaContratanteId: empAct.id,
+            empresaContratante: empAct,
+            horasSemanalesAplicadas: e.horasSemanalesOverride ?? empAct.horasSemanalesContrato,
+          }
+        : e;
+    });
     const catalogo = this.catalogos.catalogoTurnosMap();
     const mapaServicios = new Map(this.catalogos.servicios().map((s) => [s.id, s]));
 
@@ -356,12 +458,19 @@ export class PortalReportesStore {
     if (srvFiltro !== 'TODOS') {
       filtrados = filtrados.filter((e) => e.servicioBaseId === srvFiltro);
     }
+    if (empFiltro !== 'TODOS') {
+      filtrados = filtrados.filter(
+        (e) => (e.empresaContratanteId || e.empresaContratante?.id) === empFiltro
+      );
+    }
     if (textoBusqueda) {
       filtrados = filtrados.filter(
         (e) =>
           e.nombre.toLowerCase().includes(textoBusqueda) ||
           e.documento.includes(textoBusqueda) ||
-          e.categoria.toLowerCase().includes(textoBusqueda)
+          e.categoria.toLowerCase().includes(textoBusqueda) ||
+          (e.empresaContratante?.nombre || '').toLowerCase().includes(textoBusqueda) ||
+          (e.empresaContratante?.codigo || '').toLowerCase().includes(textoBusqueda)
       );
     }
 
@@ -369,6 +478,7 @@ export class PortalReportesStore {
     const mes = this.catalogos.mesSeleccionado();
     const saldos = this.cuadrante.saldosConsolidadosMap();
     const mapaContinuo = this.cuadrante.mapaSaldosContinuos();
+    const predFest = (iso: string) => Boolean(FestivosColombiaHelper.esFestivo(iso));
 
     return filtrados.map((emp) => {
       const srvObj = mapaServicios.get(emp.servicioBaseId);
@@ -385,13 +495,19 @@ export class PortalReportesStore {
         saldos,
         anio,
         mes,
-        saldoCalculado
+        saldoCalculado,
+        undefined,
+        predFest
       );
 
       return {
-        emp,
+        emp: {
+          ...emp,
+          horasContratoMes: metricas.horasContratadasNominales,
+          horasSemanalesAplicadas: metricas.horasSemanalesAplicadas,
+        },
         servicioNombre,
-        horasContratoMes: emp.horasContratoMes,
+        horasContratoMes: metricas.horasContratadasNominales,
         saldoBancoAnterior: metricas.saldoAntReal,
         ...metricas,
       };
@@ -523,7 +639,7 @@ export class PortalReportesStore {
     const comp = this.catalogos.empleados().find((e) => e.id === this.companeroPermutaId());
 
     if (!comp) {
-      this.notificacion.mostrar('ℹ️ No hay compañeros con el mismo cargo disponibles.');
+      this.notificacion.mostrar('ℹ️ No hay compañeros con cargo compatible disponibles.');
       return;
     }
 
@@ -545,7 +661,13 @@ export class PortalReportesStore {
       dia,
       miTurno,
       turnoComp,
-      { anio: anioPortal, mes: mesPortal, matriz: matrizPortal, totalDias: totalDiasPortal }
+      {
+        anio: anioPortal,
+        mes: mesPortal,
+        matriz: matrizPortal,
+        totalDias: totalDiasPortal,
+        servicioId: srvDiaId,
+      }
     );
     if (!check.valida) {
       this.notificacion.mostrar(`⛔ ${check.motivo}`);
@@ -651,7 +773,7 @@ export class PortalReportesStore {
     let lineas: string[] = [];
 
     if (sub === 'PRE_NOMINA') {
-      header = 'Periodo;Documento;Colaborador;Servicio;Cargo;Contrato;Contrato_Efectivo;HOD;HON;HDFD;HDFN;Total_Mes;Recargo_Nocturno_Pct;Recargo_Dominical_Festivo_Pct;Recargo_Nocturno_Dominical_Festivo_Pct;Domingos_Laborados;Dom_Fest_Laborados;Compensatorio_CST;VAC_Dias;INC_Dias;LIC_Dias;FAM_Dias;Saldo_Banco_Ant;Mov_Mes;Nuevo_Saldo_Banco';
+      header = 'Periodo;Documento;Colaborador;Servicio;Cargo;Empresa;Regimen_Semanal_H;Dias_Habiles_Mes;Dias_Habiles_Prorrateados;Meta_Nominal_H;Prorrateo_H;Meta_Neta_H;HOD;HON;HDFD;HDFN;Total_Mes;Amortizadas_COMP_H;Recargo_Nocturno_Pct;Recargo_Dominical_Festivo_Pct;Recargo_Nocturno_Dominical_Festivo_Pct;Domingos_Laborados;Dom_Fest_Laborados;Compensatorio_CST;VAC_Dias;INC_Dias;LIC_Dias;FAM_Dias;Saldo_Banco_Ant;Mov_Mes;Nuevo_Saldo_Banco';
       lineas = filas.map((f) =>
         [
           periodoCsv,
@@ -659,13 +781,19 @@ export class PortalReportesStore {
           csvTexto(f.emp.nombre),
           csvTexto(f.servicioNombre),
           csvTexto(f.emp.categoria),
-          numeroCsv(f.horasContratoMes),
+          csvTexto(f.empresaNombre),
+          numeroCsv(f.horasSemanalesAplicadas),
+          f.diasHabilesMes,
+          f.diasHabilesProrrateados,
+          numeroCsv(f.horasContratadasNominales),
+          numeroCsv(f.horasExoneradas),
           numeroCsv(f.horasContratadasEfectivas),
           numeroCsv(f.hod),
           numeroCsv(f.hon),
           numeroCsv(f.hdfd),
           numeroCsv(f.hdfn),
           numeroCsv(f.horasTrabajadas),
+          numeroCsv(f.horasAmortizadasComp),
           formatearPorcentaje(f.recargos.nocturno),
           formatearPorcentaje(f.recargos.dominical),
           formatearPorcentaje(f.recargos.nocturnoDominical),
@@ -682,7 +810,7 @@ export class PortalReportesStore {
         ].join(';')
       );
     } else if (sub === 'EQUIDAD') {
-      header = 'Periodo;Documento;Colaborador;Servicio;Cargo;Turnos_Noche;Domingos_Laborados;Dom_Fest_Laborados;Total_Horas_Nocturnas;Compensatorio_Legal;Nivel_Fatiga';
+      header = 'Periodo;Documento;Colaborador;Servicio;Cargo;Empresa;Turnos_Noche;Domingos_Laborados;Dom_Fest_Laborados;Total_Horas_Nocturnas;Compensatorio_Legal;Nivel_Fatiga';
       lineas = filas.map((f) =>
         [
           periodoCsv,
@@ -690,6 +818,7 @@ export class PortalReportesStore {
           csvTexto(f.emp.nombre),
           csvTexto(f.servicioNombre),
           csvTexto(f.emp.categoria),
+          csvTexto(f.empresaNombre),
           f.conteoNoches,
           f.conteoDomingos,
           f.conteoDomFest,
@@ -699,7 +828,7 @@ export class PortalReportesStore {
         ].join(';')
       );
     } else if (sub === 'BANCO_HORAS') {
-      header = 'Periodo;Documento;Colaborador;Servicio;Cargo;Saldo_Anterior;Horas_Trabajadas;Contrato_Efectivo;Amortizadas_COMP;Mov_Mes;Nuevo_Saldo_Continuo;Estado_Riesgo';
+      header = 'Periodo;Documento;Colaborador;Servicio;Cargo;Empresa;Regimen_Semanal_H;Dias_Habiles_Mes;Meta_Nominal_H;Prorrateo_H;Meta_Neta_H;Saldo_Anterior;Horas_Trabajadas;Amortizadas_COMP;Mov_Mes;Nuevo_Saldo_Continuo;Estado_Riesgo';
       lineas = filas.map((f) =>
         [
           periodoCsv,
@@ -707,9 +836,14 @@ export class PortalReportesStore {
           csvTexto(f.emp.nombre),
           csvTexto(f.servicioNombre),
           csvTexto(f.emp.categoria),
+          csvTexto(f.empresaNombre),
+          numeroCsv(f.horasSemanalesAplicadas),
+          f.diasHabilesMes,
+          numeroCsv(f.horasContratadasNominales),
+          numeroCsv(f.horasExoneradas),
+          numeroCsv(f.horasContratadasEfectivas),
           numeroCsv(f.saldoBancoAnterior),
           numeroCsv(f.horasTrabajadas),
-          numeroCsv(f.horasContratadasEfectivas),
           numeroCsv(f.horasAmortizadasComp),
           numeroCsv(f.diferenciaMes),
           numeroCsv(f.nuevoSaldoBanco),
@@ -717,7 +851,7 @@ export class PortalReportesStore {
         ].join(';')
       );
     } else {
-      header = 'Periodo;Documento;Colaborador;Servicio;Cargo;Dias_Vacaciones;Dias_Incapacidad;Dias_Licencia;Dias_Dia_Familia;Total_Ausencia_Dias';
+      header = 'Periodo;Documento;Colaborador;Servicio;Cargo;Empresa;Dias_Vacaciones;Dias_Incapacidad;Dias_Licencia;Dias_Dia_Familia;Total_Ausencia_Dias';
       lineas = filas.map((f) =>
         [
           periodoCsv,
@@ -725,6 +859,7 @@ export class PortalReportesStore {
           csvTexto(f.emp.nombre),
           csvTexto(f.servicioNombre),
           csvTexto(f.emp.categoria),
+          csvTexto(f.empresaNombre),
           f.diasVac,
           f.diasInc,
           f.diasLic,

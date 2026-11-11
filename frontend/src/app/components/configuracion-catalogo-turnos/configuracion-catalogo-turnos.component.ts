@@ -3,7 +3,9 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TipoTurnoConfig } from '../../models';
 import {
+  CODIGOS_TURNOS_SISTEMA_OBLIGATORIOS,
   hoyColombiaIso,
+  ModoAmortizacionBanco,
   obtenerHorasAmortizacionTurno,
   textoFranjasVigentes,
 } from '../../shared/liquidacion-horas';
@@ -77,6 +79,7 @@ export interface TemaColorTurno {
             <label for="turno-form-modo">Tipo de Jornada:</label>
             <select
               id="turno-form-modo"
+              [disabled]="esTurnoSistemaObligatorioForm"
               [ngModel]="turnoFormModoJornada"
               (ngModelChange)="cambiarTurnoFormModoJornada.emit($event)"
             >
@@ -84,6 +87,11 @@ export interface TemaColorTurno {
               <option value="GUARDIA_24H">Guardia 24 Horas (desglose Diurnas/Nocturnas automático según hora de inicio)</option>
               <option value="DESCANSO">Descanso / Novedad (0 horas laboradas)</option>
             </select>
+            @if (esTurnoSistemaObligatorioForm) {
+              <small class="hint-sistema-obligatorio">
+                🔒 Turno obligatorio del sistema ({{ turnoFormCodigo.toUpperCase() }}): permanece en modo Descanso / Novedad (0 h) y no puede archivarse ni eliminarse.
+              </small>
+            }
           </div>
 
           @if (turnoFormModoJornada !== 'DESCANSO') {
@@ -112,18 +120,18 @@ export interface TemaColorTurno {
 
             @if (turnoFormModoJornada === 'HORARIO') {
               <div class="form-row">
-                <label for="turno-form-almuerzo">🍽️ Tiempo de Almuerzo / Descanso Intermedio (No computable - Art. 167 CST):</label>
-                <select
+                <label for="turno-form-almuerzo">🍽️ Minutos de Almuerzo / Descanso Intermedio (No computable — Art. 167 CST):</label>
+                <input
                   id="turno-form-almuerzo"
+                  type="number"
+                  min="0"
+                  max="480"
+                  step="5"
+                  placeholder="Ej: 0, 45, 60"
                   [ngModel]="turnoFormMinutosAlmuerzo"
                   (ngModelChange)="cambiarTurnoFormMinutosAlmuerzo.emit(+$event)"
-                >
-                  <option [ngValue]="0">0 min — Sin descuento (Turno asistencial continuo / Relevo interno)</option>
-                  <option [ngValue]="30">30 min (0.5 h descontadas de la jornada)</option>
-                  <option [ngValue]="60">60 min (1.0 h descontada — Jornada partida / Administrativo)</option>
-                  <option [ngValue]="90">90 min (1.5 h descontadas de la jornada)</option>
-                  <option [ngValue]="120">120 min (2.0 h descontadas de la jornada)</option>
-                </select>
+                />
+                <small class="hint-campo">0 min = turno continuo sin descuento; ej. 60 min descuenta 1.0 h de la duración bruta.</small>
               </div>
             }
           }
@@ -135,9 +143,12 @@ export interface TemaColorTurno {
               <span class="calc-sub">({{ calc.horarioTexto }}@if (calc.minutosAlmuerzo > 0) { • 🍽️ -{{ calc.minutosAlmuerzo }} min almuerzo })</span>
             </div>
             <div class="calc-pills">
-              <span class="calc-pill-day">☀️ Diurnas ({{ franjasHoy.diurna }}): <strong>{{ calc.diurnas }}h</strong></span>
-              <span class="calc-pill-night">🌙 Nocturnas ({{ franjasHoy.nocturna }}): <strong>{{ calc.nocturnas }}h</strong></span>
+              <span class="calc-pill-day">☀️ Diurnas ref. ({{ franjasHoy.diurna }}): <strong>{{ calc.diurnas }}h</strong></span>
+              <span class="calc-pill-night">🌙 Nocturnas ref. ({{ franjasHoy.nocturna }}): <strong>{{ calc.nocturnas }}h</strong></span>
             </div>
+            <small class="calc-empresa-note">
+              ℹ️ Vista previa calculada con referencia CST ({{ franjasHoy.nocturna }}). En el cuadrante y pre-nómina, cada colaborador liquida según la franja nocturna de su empresa contratante (ej. 18:00–06:00 Decreto 1042 o 19:00–06:00 CST).
+            </small>
           </div>
 
           <div class="form-row">
@@ -162,36 +173,83 @@ export interface TemaColorTurno {
           </div>
 
           <div class="form-checks">
-            <label class="check-row">
+            <label class="check-row" [class.check-disabled]="turnoFormModoJornada === 'DESCANSO'">
               <input
                 type="checkbox"
+                [disabled]="turnoFormModoJornada === 'DESCANSO'"
                 [ngModel]="turnoFormNocturnoPesado"
                 (ngModelChange)="cambiarTurnoFormNocturnoPesado.emit($event)"
               />
               <span>🌙 Exige descanso al día siguiente (Saliente <code>S</code> o Libre <code>L</code>)</span>
             </label>
 
+            <label class="check-row" [class.check-disabled]="turnoFormDescuentaBanco">
+              <input
+                type="checkbox"
+                [disabled]="turnoFormDescuentaBanco"
+                [ngModel]="turnoFormProrrateaMeta"
+                (ngModelChange)="cambiarTurnoFormProrrateaMeta.emit($event)"
+              />
+              <span>📉 Prorratea la meta mensual de días hábiles (ej. Día Libre Remunerado, Vacaciones, Incapacidad)</span>
+            </label>
+
+            <label class="check-row" [class.check-disabled]="turnoFormModoJornada !== 'DESCANSO'">
+              <input
+                type="checkbox"
+                [disabled]="turnoFormModoJornada !== 'DESCANSO'"
+                [ngModel]="turnoFormEsAusencia"
+                (ngModelChange)="cambiarTurnoFormEsAusencia.emit($event)"
+              />
+              <span>🩹 Novedad de Ausentismo RRHH (se contabiliza en Reporte de Ausentismo)</span>
+            </label>
+
             <label class="check-row">
               <input
                 type="checkbox"
+                [ngModel]="turnoFormBloqueaPermutas"
+                (ngModelChange)="cambiarTurnoFormBloqueaPermutas.emit($event)"
+              />
+              <span>🔒 Bloquea permutas desde el Portal del Colaborador</span>
+            </label>
+
+            <label class="check-row" [class.check-disabled]="turnoFormProrrateaMeta">
+              <input
+                type="checkbox"
+                [disabled]="turnoFormProrrateaMeta"
                 [ngModel]="turnoFormDescuentaBanco"
                 (ngModelChange)="cambiarTurnoFormDescuentaBanco.emit($event)"
               />
-              <span>🏦 Descuenta {{ turnoFormDescuentaBanco ? turnoFormHorasAmortizacion : 8 }} horas del Banco de Horas (Compensatorio)</span>
+              <span>🏦 Descuenta horas del Banco de Horas (Compensatorio — incompatible con Prorrateo)</span>
             </label>
 
             @if (turnoFormDescuentaBanco) {
-              <div class="form-row amortizacion-banco-box">
-                <label for="turno-form-amortizacion" class="amortizacion-banco-label">Horas que amortiza en Banco de Horas (por defecto 8h; ej. 7h bajo 42h/sem):</label>
-                <input
-                  id="turno-form-amortizacion"
-                  type="number"
-                  min="0.5"
-                  max="24"
-                  step="0.5"
-                  [ngModel]="turnoFormHorasAmortizacion"
-                  (ngModelChange)="cambiarTurnoFormHorasAmortizacion.emit(+$event)"
-                />
+              <div class="amortizacion-banco-box">
+                <div class="form-row">
+                  <label for="turno-form-modo-amortizacion" class="amortizacion-banco-label">Modo de Amortización en Banco de Horas:</label>
+                  <select
+                    id="turno-form-modo-amortizacion"
+                    [ngModel]="turnoFormModoAmortizacion"
+                    (ngModelChange)="cambiarTurnoFormModoAmortizacion.emit($event)"
+                  >
+                    <option value="DIA_HABIL_EMPRESA">⏱️ 1 día hábil según empresa del colaborador (44h→7.33h · 42h→7.00h)</option>
+                    <option value="HORAS_FIJAS">🔢 Cantidad fija de horas configurables</option>
+                  </select>
+                </div>
+
+                @if (turnoFormModoAmortizacion === 'HORAS_FIJAS') {
+                  <div class="form-row">
+                    <label for="turno-form-amortizacion" class="amortizacion-banco-label">Horas fijas que amortiza en Banco de Horas:</label>
+                    <input
+                      id="turno-form-amortizacion"
+                      type="number"
+                      min="0.5"
+                      max="24"
+                      step="0.5"
+                      [ngModel]="turnoFormHorasAmortizacion"
+                      (ngModelChange)="cambiarTurnoFormHorasAmortizacion.emit(+$event)"
+                    />
+                  </div>
+                }
               </div>
             }
           </div>
@@ -269,7 +327,7 @@ export interface TemaColorTurno {
             </thead>
             <tbody>
               @for (t of turnosFiltrados; track t.codigo) {
-                <tr>
+                <tr [class.row-archivado]="t.activo === false">
                   <td class="col-turno">
                     <div class="turno-cell-cluster">
                       <span
@@ -281,9 +339,17 @@ export interface TemaColorTurno {
                       </span>
                       <div class="turno-info-block">
                         <span class="turno-title">{{ t.nombre }}</span>
-                        @if (t.esAusencia) {
-                          <span class="badge-custom-sm">Novedad</span>
-                        }
+                        <div class="turno-sub-badges">
+                          @if (t.esSistemaObligatorio) {
+                            <span class="badge-sistema-sm" title="Turno obligatorio del sistema (protegido)">🔒 Sistema</span>
+                          }
+                          @if (t.activo === false) {
+                            <span class="badge-archivado-sm" title="Turno archivado (no disponible en paleta)">📦 Archivado</span>
+                          }
+                          @if (t.esAusencia) {
+                            <span class="badge-custom-sm">Novedad</span>
+                          }
+                        </div>
                       </div>
                     </div>
                   </td>
@@ -311,11 +377,23 @@ export interface TemaColorTurno {
                       @if (t.esNocturnoPesado) {
                         <span class="badge-nuevo" title="Exige descanso Saliente o Libre al día siguiente">🌙 Post-Turno</span>
                       }
-                      @if (t.descuentaBancoHoras) {
-                        @let horasAmort = horasAmortizacionTurno(t);
-                        <span class="badge-banco-mini" [title]="'Amortiza ' + horasAmort + 'h del Banco de Horas'">🏦 -{{ horasAmort }}h Banco</span>
+                      @if (t.prorrateaMetaContrato) {
+                        <span class="badge-prorrateo-sm" title="Reduce la meta mensual en 1 día hábil cuando se programa en día hábil">📉 Prorratea D.H.</span>
                       }
-                      @if (!t.esNocturnoPesado && !t.descuentaBancoHoras && !t.esAusencia && (!t.minutosAlmuerzo || t.minutosAlmuerzo === 0)) {
+                      @if (t.bloqueaPermutas) {
+                        <span class="badge-bloqueo-sm" title="Bloquea solicitudes de permuta en el Portal">🔒 No Permutas</span>
+                      }
+                      @if (t.descuentaBancoHoras) {
+                        @if (t.modoAmortizacionBanco === 'DIA_HABIL_EMPRESA') {
+                          <span class="badge-banco-mini" title="Amortiza 1 día hábil de la empresa del colaborador (44h→7.33h / 42h→7h)">
+                            🏦 -1 D.H. Empresa
+                          </span>
+                        } @else {
+                          @let horasAmort = horasAmortizacionTurno(t);
+                          <span class="badge-banco-mini" [title]="'Amortiza ' + horasAmort + 'h fijas del Banco de Horas'">🏦 -{{ horasAmort }}h Banco</span>
+                        }
+                      }
+                      @if (!t.esNocturnoPesado && !t.descuentaBancoHoras && !t.esAusencia && !t.prorrateaMetaContrato && !t.bloqueaPermutas && (!t.minutosAlmuerzo || t.minutosAlmuerzo === 0)) {
                         <span class="text-muted-sm">Continuo</span>
                       }
                     </div>
@@ -325,11 +403,12 @@ export interface TemaColorTurno {
                       <button
                         type="button"
                         class="btn-palette-toggle"
-                        [class.active]="t.visibleEnPaleta !== false"
+                        [disabled]="t.activo === false"
+                        [class.active]="t.visibleEnPaleta !== false && t.activo !== false"
                         [attr.aria-pressed]="t.visibleEnPaleta !== false"
                         (click)="alternarVisibilidadTurnoPaleta.emit(t.codigo)"
-                        [title]="t.visibleEnPaleta !== false ? 'Visible en paleta rápida del cuadrante' : 'Oculto en paleta'">
-                        {{ t.visibleEnPaleta !== false ? '✅ Paleta' : '👁️ Oculto' }}
+                        [title]="t.activo === false ? 'Reactiva el turno para mostrarlo en paleta' : (t.visibleEnPaleta !== false ? 'Visible en paleta rápida del cuadrante' : 'Oculto en paleta')">
+                        {{ t.visibleEnPaleta !== false && t.activo !== false ? '✅ Paleta' : '👁️ Oculto' }}
                       </button>
                       <button
                         type="button"
@@ -337,6 +416,22 @@ export interface TemaColorTurno {
                         (click)="cargarTurnoParaEdicion.emit(t)"
                         title="Editar este turno en el formulario">
                         ✏️ Editar
+                      </button>
+                      <button
+                        type="button"
+                        class="btn-action-icon"
+                        [disabled]="t.esSistemaObligatorio"
+                        (click)="archivarTipoTurno.emit(t.codigo)"
+                        [title]="t.esSistemaObligatorio ? 'Turno obligatorio del sistema: no puede archivarse' : (t.activo === false ? 'Reactivar este turno' : 'Archivar turno (mantiene historial)')">
+                        {{ t.activo === false ? '♻️' : '📦' }}
+                      </button>
+                      <button
+                        type="button"
+                        class="btn-action-icon btn-action-danger"
+                        [disabled]="t.esSistemaObligatorio"
+                        (click)="eliminarTipoTurno.emit(t)"
+                        [title]="t.esSistemaObligatorio ? 'Turno obligatorio del sistema: no puede eliminarse' : 'Eliminar turno (solo sin asignaciones)'">
+                        🗑️
                       </button>
                     </div>
                   </td>
@@ -393,7 +488,11 @@ export class ConfiguracionCatalogoTurnosComponent {
   @Input() temasColorTurno: TemaColorTurno[] = [];
   @Input() turnoFormColorKey = 'AZUL_CIELO';
   @Input() turnoFormNocturnoPesado = false;
+  @Input() turnoFormProrrateaMeta = false;
+  @Input() turnoFormEsAusencia = false;
+  @Input() turnoFormBloqueaPermutas = false;
   @Input() turnoFormDescuentaBanco = false;
+  @Input() turnoFormModoAmortizacion: ModoAmortizacionBanco = 'HORAS_FIJAS';
   @Input() turnoFormHorasAmortizacion = 8;
   @Input() listaTurnosCatalogo: TipoTurnoConfig[] = [];
 
@@ -406,11 +505,24 @@ export class ConfiguracionCatalogoTurnosComponent {
   @Output() cambiarTurnoFormMinutosAlmuerzo = new EventEmitter<number>();
   @Output() cambiarTurnoFormColorKey = new EventEmitter<string>();
   @Output() cambiarTurnoFormNocturnoPesado = new EventEmitter<boolean>();
+  @Output() cambiarTurnoFormProrrateaMeta = new EventEmitter<boolean>();
+  @Output() cambiarTurnoFormEsAusencia = new EventEmitter<boolean>();
+  @Output() cambiarTurnoFormBloqueaPermutas = new EventEmitter<boolean>();
   @Output() cambiarTurnoFormDescuentaBanco = new EventEmitter<boolean>();
+  @Output() cambiarTurnoFormModoAmortizacion = new EventEmitter<ModoAmortizacionBanco>();
   @Output() cambiarTurnoFormHorasAmortizacion = new EventEmitter<number>();
   @Output() guardarTurnoEnCatalogo = new EventEmitter<void>();
   @Output() alternarVisibilidadTurnoPaleta = new EventEmitter<string>();
   @Output() cargarTurnoParaEdicion = new EventEmitter<TipoTurnoConfig>();
+  @Output() archivarTipoTurno = new EventEmitter<string>();
+  @Output() eliminarTipoTurno = new EventEmitter<TipoTurnoConfig>();
+
+  get esTurnoSistemaObligatorioForm(): boolean {
+    const cod = (this.turnoEditandoCodigo || this.turnoFormCodigo || '').trim().toUpperCase();
+    if (CODIGOS_TURNOS_SISTEMA_OBLIGATORIOS.has(cod)) return true;
+    const item = this.listaTurnosCatalogo.find((t) => t.codigo.toUpperCase() === cod);
+    return Boolean(item?.esSistemaObligatorio);
+  }
 
   horasAmortizacionTurno(t: TipoTurnoConfig): number {
     return obtenerHorasAmortizacionTurno(t);

@@ -11,14 +11,20 @@ import {
 import { FormsModule } from '@angular/forms';
 import {
   CeldaAsignacion,
+  CoberturaTurnoDia,
   DiaColumna,
   EmpleadoHospital,
+  EmpresaContratante,
   InfraccionNormativa,
   MacroprocesoInfo,
   ReglaCargoServicio,
   ServicioHospitalario,
   TipoTurnoConfig,
 } from '../../models';
+import {
+  FilaCoberturaTurno,
+  ResumenCoberturaTurnosServicio,
+} from '../../stores/cuadrante.store';
 
 @Component({
   selector: 'app-planificador-cuadrante',
@@ -368,6 +374,34 @@ import {
       </div>
     </section>
 
+    <!-- ALERTA DE EMPRESAS CONTRATANTES PENDIENTES DE CONFIRMAR REGLAS -->
+    @if (empresasPendientes.length > 0) {
+      <div class="empresas-pendientes-cuadrante-banner" role="alert">
+        <div class="epc-left">
+          <span aria-hidden="true">⚠️</span>
+          <div>
+            <strong>
+              {{ empresasPendientes.length }} empresa(s) contratante(s) con reglas normativas pendientes de confirmar:
+            </strong>
+            <span>
+              @for (ep of empresasPendientes; track ep.id; let last = $last) {
+                {{ ep.nombre }} ({{ ep.codigo }})@if (!last) {, }
+              }
+            </span>
+            <small>— El cierre de nómina (<code>CERRADO_NOMINA</code>) permanecerá bloqueado hasta confirmar sus reglas.</small>
+          </div>
+        </div>
+        @if (!esCoordinador) {
+          <button
+            type="button"
+            class="btn-configurar-empresas"
+            (click)="irAConfigurarEmpresas.emit()">
+            ⚙️ Configurar Empresas
+          </button>
+        }
+      </div>
+    }
+
     <!-- MATRIZ DEL CUADRANTE MENSUAL -->
     @if (clonandoConCtrl) {
       <div class="floating-clone-badge">
@@ -407,11 +441,11 @@ import {
                 }
               </th>
             }
-            <th class="col-summary" [title]="'Horas Reales Programadas vs Contrato Mes (Jornada máxima legal vigente: ' + normativa.jornadaSemanalHoras + 'h/sem — Ley 2101/2021)'">Horas<br>Mes</th>
-            <th class="col-summary col-recargo" [title]="'Horas Ordinarias Diurnas hábiles ('+normativa.franjas.diurna+' Lun–Sáb no festivo)'">HOD</th>
-            <th class="col-summary col-recargo" [title]="'Horas Ordinarias Nocturnas hábiles ('+normativa.franjas.nocturna+') Recargo '+pct(normativa.recargos.nocturno)">HON<br>{{ pct(normativa.recargos.nocturno) }}</th>
-            <th class="col-summary col-recargo" [title]="'Horas Dominicales/Festivas Diurnas ('+normativa.franjas.diurna+') Recargo '+pct(normativa.recargos.dominical)">HDFD<br>{{ pct(normativa.recargos.dominical) }}</th>
-            <th class="col-summary col-recargo" [title]="'Horas Dominicales/Festivas Nocturnas ('+normativa.franjas.nocturna+') Recargo '+pct(normativa.recargos.nocturnoDominical)+' (dominical '+pct(normativa.recargos.dominical)+' + nocturno '+pct(normativa.recargos.nocturno)+')'">HDFN<br>{{ pct(normativa.recargos.nocturnoDominical) }}</th>
+            <th class="col-summary" [title]="'Horas Reales Programadas vs Meta Mensual por Días Hábiles (' + resumenRegimenesCuadrante + ')'">Horas<br>Mes</th>
+            <th class="col-summary col-recargo" title="Horas Ordinarias Diurnas en días hábiles (Lun–Sáb no festivo)">HOD</th>
+            <th class="col-summary col-recargo" title="Horas Ordinarias Nocturnas en días hábiles según ventana nocturna y recargo de cada empresa">HON<br>{{ pct(normativa.recargos.nocturno) }}</th>
+            <th class="col-summary col-recargo" title="Horas Dominicales/Festivas Diurnas según recargo de cada empresa (100% Dec. 1042 o gradual Ley 2466)">HDFD<br>Dom/Fest</th>
+            <th class="col-summary col-recargo" title="Horas Dominicales/Festivas Nocturnas acumuladas según recargo de cada empresa">HDFN<br>Noct.D/F</th>
             <th class="col-summary" title="Saldo Arrastrado del Mes Anterior">Banco<br>Ant.</th>
             <th class="col-summary" title="Diferencia del Mes (Trabajadas - Contrato - Amortizadas COMP)">Mov.<br>Mes</th>
             <th class="col-summary col-banco-final" title="Nuevo Saldo Acumulado Continuo (Pasa al siguiente mes)">Nuevo<br>Banco</th>
@@ -435,12 +469,18 @@ import {
               [class.row-rotacion]="fila.esPersonalRotado"
               [class.row-hovered]="celdaGuiaLaser?.empId === fila.empleado.id">
               <!-- Info del Empleado (una sola línea) -->
-              <td class="col-sticky-emp" [title]="fila.empleado.nombre + ' • ' + fila.empleado.categoria">
+              <td class="col-sticky-emp" [title]="fila.empleado.nombre + ' • ' + fila.empleado.categoria + ' • ' + (fila.empresaNombre || '') + ' (' + (fila.horasSemanalesAplicadas ?? 42) + 'h/sem)'">
                 <div class="emp-cell">
                   <div class="emp-avatar" [attr.data-cat]="fila.empleado.categoria">
                     {{ obtenerIniciales(fila.empleado.nombre) }}
                   </div>
                   <span class="emp-name">{{ fila.empleado.nombre }}</span>
+                  <span
+                    class="emp-empresa-chip"
+                    [class.is-pendiente]="fila.empresaEstadoConfiguracion === 'PENDIENTE_REGLAS'"
+                    [title]="(fila.empresaNombre || 'Empresa') + ' · Régimen ' + (fila.horasSemanalesAplicadas ?? 42) + 'h/sem'">
+                    {{ fila.empresaCodigo || 'CST' }}·{{ fila.horasSemanalesAplicadas ?? 42 }}h
+                  </span>
                   @if (fila.esPersonalRotado) {
                     <span
                       class="badge-rotado"
@@ -533,19 +573,19 @@ import {
                 }
               </td>
 
-              <td class="col-summary col-recargo font-mono" [title]="'Horas Ordinarias Diurnas hábiles ('+normativa.franjas.diurna+')'">
+              <td class="col-summary col-recargo font-mono" [title]="'Horas Ordinarias Diurnas en días hábiles (' + (fila.empresaNombre || 'Empresa') + ')'">
                 {{ fila.hod }}h
               </td>
 
-              <td class="col-summary col-recargo font-mono" [title]="'Horas Ordinarias Nocturnas hábiles ('+normativa.franjas.nocturna+') Recargo '+pct(normativa.recargos.nocturno)">
+              <td class="col-summary col-recargo font-mono" [title]="'Horas Ordinarias Nocturnas (' + (fila.empresaNombre || 'Empresa') + ': Recargo ' + pct(fila.recargos?.nocturno ?? normativa.recargos.nocturno) + ')'">
                 {{ fila.hon }}h
               </td>
 
-              <td class="col-summary col-recargo font-mono" [title]="'Horas Dominicales/Festivas Diurnas ('+normativa.franjas.diurna+') Recargo '+pct(normativa.recargos.dominical)">
+              <td class="col-summary col-recargo font-mono" [title]="'Horas Dominicales/Festivas Diurnas (' + (fila.empresaNombre || 'Empresa') + ': Recargo ' + pct(fila.recargos?.dominical ?? normativa.recargos.dominical) + ')'">
                 {{ fila.hdfd }}h
               </td>
 
-              <td class="col-summary col-recargo font-mono" [title]="'Horas Dominicales/Festivas Nocturnas ('+normativa.franjas.nocturna+') Recargo '+pct(normativa.recargos.nocturnoDominical)">
+              <td class="col-summary col-recargo font-mono" [title]="'Horas Dominicales/Festivas Nocturnas (' + (fila.empresaNombre || 'Empresa') + ': Recargo ' + pct(fila.recargos?.nocturnoDominical ?? normativa.recargos.nocturnoDominical) + ')'">
                 {{ fila.hdfn }}h
               </td>
 
@@ -589,73 +629,148 @@ import {
           }
         </tbody>
 
-        <!-- FOOTER REACTIVO DE COBERTURAS MÍNIMAS POR TURNO (DÍA / NOCHE) -->
+        <!-- FOOTER CUADRANTE DE COBERTURAS POR TURNO OPERATIVO (ESQUEMA B) + RESUMEN DÍA/NOCHE COLAPSABLE -->
         <tfoot>
-          @let reglaFiltroFoot = reglaCargoActivaEnCuadrante;
-          <tr class="coverage-row">
-            <td class="col-sticky-emp coverage-label">
-              ☀️ Cobertura Día • <strong>Mín: {{ reglaFiltroFoot ? reglaFiltroFoot.reqDia : servicioActual.reqDia }}</strong>
-              @if (servicioActual.modalidadDias === 'TODOS_GUARDIA_FDS') {
-                <span class="coverage-fds-note">
-                  (Dom/Fest: {{ reglaFiltroFoot ? (reglaFiltroFoot.reqDiaDomFest ?? reglaFiltroFoot.reqDia) : (servicioActual.reqDiaDomFest ?? servicioActual.reqDia) }})
-                </span>
-              }
+          <tr class="coverage-quad-header-row">
+            <td class="col-sticky-emp coverage-quad-title-cell">
+              <span>🎯 Cobertura por Turno</span>
               @if (filtroCategoriaActiva !== 'TODAS') {
                 <span class="coverage-cargo-tag">({{ filtroCategoriaActiva }})</span>
               }
             </td>
-            <td class="col-empalme coverage-off">—</td>
-            @for (d of diasDelMes; track d.dia) {
-              @let cob = coberturaPorDia[d.dia];
-              @let metas = obtenerMetasDiaServicio(servicioActual, d);
-              @if (metas.cerrado || metas.reqDia === 0) {
-                <td class="coverage-cell coverage-off" [class.cell-week-end]="d.esDomingo" title="Servicio sin requerimiento en esta franja / día">
-                  —
-                </td>
-              } @else {
-                <td class="coverage-cell" [class.cell-week-end]="d.esDomingo" [class.cov-ok]="cob.dia >= metas.reqDia" [class.cov-deficit]="cob.dia < metas.reqDia">
-                  {{ cob.dia }}/{{ metas.reqDia }}
-                </td>
-              }
-            }
-            <td colspan="9" class="coverage-summary-note">
-              Programados / Mínimo requerido ({{ etiquetaModalidadDias(servicioActual.modalidadDias) }})
+            <td [attr.colspan]="diasDelMes.length + 10" class="coverage-quad-meta-cell">
+              <div class="cov-quad-bar">
+                <div class="cov-kpi-group">
+                  <span class="cov-kpi-pill kpi-rojo" title="Celdas por debajo del mínimo requerido">
+                    🔴 Déficit: {{ resumenCoberturaTurnos?.rojos ?? 0 }}
+                  </span>
+                  <span class="cov-kpi-pill kpi-amarillo" title="Celdas que alcanzan el mínimo pero por debajo de lo esperado">
+                    🟡 Bajo esp.: {{ resumenCoberturaTurnos?.amarillos ?? 0 }}
+                  </span>
+                  <span class="cov-kpi-pill kpi-verde" title="Celdas que cumplen o superan lo esperado">
+                    🟢 Óptimos: {{ resumenCoberturaTurnos?.verdes ?? 0 }}
+                  </span>
+                  @if ((resumenCoberturaTurnos?.excedentes ?? 0) > 0) {
+                    <span class="cov-kpi-pill kpi-exceso" title="Personal adicional programado por encima de la meta esperada">
+                      +{{ resumenCoberturaTurnos?.excedentes }} excedentes
+                    </span>
+                  }
+                </div>
+                <button
+                  type="button"
+                  class="btn-toggle-legacy-cov"
+                  (click)="mostrarFranjasLegacy = !mostrarFranjasLegacy">
+                  {{ mostrarFranjasLegacy ? '▲ Ocultar franjas Día/Noche' : '▼ Ver franjas Día/Noche' }}
+                </button>
+              </div>
             </td>
           </tr>
 
-          <tr class="coverage-row">
-            <td class="col-sticky-emp coverage-label">
-              🌙 Cobertura Noche • <strong>Mín: {{ reglaFiltroFoot ? reglaFiltroFoot.reqNoche : servicioActual.reqNoche }}</strong>
-              @if (servicioActual.modalidadDias === 'TODOS_GUARDIA_FDS') {
-                <span class="coverage-fds-note">
-                  (Dom/Fest: {{ reglaFiltroFoot ? (reglaFiltroFoot.reqNocheDomFest ?? reglaFiltroFoot.reqNoche) : (servicioActual.reqNocheDomFest ?? servicioActual.reqNoche) }})
+          @for (filaCob of (resumenCoberturaTurnos?.filasTurnos || []); track filaCob.codigoTurno) {
+            <tr class="coverage-row coverage-turno-row">
+              <td class="col-sticky-emp coverage-label coverage-turno-label">
+                <span
+                  class="mini-shift cov-turno-chip"
+                  [style.background-color]="filaCob.colorHex"
+                  [style.color]="filaCob.textHex"
+                  [style.border-color]="filaCob.borderHex">
+                  {{ filaCob.codigoTurno }}
                 </span>
+                <span class="cov-meta-text">
+                  Mín <strong>{{ filaCob.minimoBase }}</strong> · Esp <strong>{{ filaCob.esperadoBase }}</strong>
+                </span>
+                @if (servicioActual.modalidadDias === 'TODOS_GUARDIA_FDS') {
+                  <span class="coverage-fds-note" title="Meta en Domingos y Festivos: Mínimo / Esperado">
+                    (DF: {{ filaCob.minimoDomFest }}/{{ filaCob.esperadoDomFest }})
+                  </span>
+                }
+              </td>
+              <td class="col-empalme coverage-off">—</td>
+              @for (d of diasDelMes; track d.dia) {
+                @let cell = filaCob.dias[d.dia];
+                @if (!cell || cell.cerrado) {
+                  <td
+                    class="coverage-cell coverage-off"
+                    [class.cell-week-end]="d.esDomingo"
+                    title="Día no operativo / cerrado según modalidad del servicio">
+                    —
+                  </td>
+                } @else {
+                  <td
+                    class="coverage-cell"
+                    [class.cell-week-end]="d.esDomingo"
+                    [class.cov-rojo]="cell.estado === 'ROJO'"
+                    [class.cov-amarillo]="cell.estado === 'AMARILLO'"
+                    [class.cov-verde]="cell.estado === 'VERDE'"
+                    [title]="construirTooltipCoberturaTurno(filaCob, d, cell)">
+                    <span class="cov-ratio">{{ cell.programados }}/{{ cell.esperado }}</span>@if (cell.exceso > 0) {<span class="cov-exceso-tag">+{{ cell.exceso }}</span>}
+                  </td>
+                }
               }
-              @if (filtroCategoriaActiva !== 'TODAS') {
-                <span class="coverage-cargo-tag">({{ filtroCategoriaActiva }})</span>
+              <td colspan="9" class="coverage-summary-note">
+                <strong>{{ filaCob.nombreTurno }}</strong> ({{ filaCob.horario }}) • 🟢 ≥{{ filaCob.esperadoBase }} · 🟡 {{ filaCob.minimoBase }}–{{ filaCob.esperadoBase - 1 }} · 🔴 &lt;{{ filaCob.minimoBase }}
+              </td>
+            </tr>
+          }
+
+          @if (mostrarFranjasLegacy) {
+            @let reglaFiltroFoot = reglaCargoActivaEnCuadrante;
+            <tr class="coverage-row coverage-legacy-row">
+              <td class="col-sticky-emp coverage-label">
+                ☀️ Resumen Día • <strong>Mín: {{ reglaFiltroFoot ? reglaFiltroFoot.reqDia : servicioActual.reqDia }}</strong>
+                @if (servicioActual.modalidadDias === 'TODOS_GUARDIA_FDS') {
+                  <span class="coverage-fds-note">
+                    (Dom/Fest: {{ reglaFiltroFoot ? (reglaFiltroFoot.reqDiaDomFest ?? reglaFiltroFoot.reqDia) : (servicioActual.reqDiaDomFest ?? servicioActual.reqDia) }})
+                  </span>
+                }
+              </td>
+              <td class="col-empalme coverage-off">—</td>
+              @for (d of diasDelMes; track d.dia) {
+                @let cob = coberturaPorDia[d.dia];
+                @let metas = obtenerMetasDiaServicio(servicioActual, d);
+                @if (metas.cerrado || metas.reqDia === 0) {
+                  <td class="coverage-cell coverage-off" [class.cell-week-end]="d.esDomingo" title="Servicio sin requerimiento en esta franja / día">
+                    —
+                  </td>
+                } @else {
+                  <td class="coverage-cell" [class.cell-week-end]="d.esDomingo" [class.cov-ok]="cob.dia >= metas.reqDia" [class.cov-deficit]="cob.dia < metas.reqDia">
+                    {{ cob.dia }}/{{ metas.reqDia }}
+                  </td>
+                }
               }
-            </td>
-            <td class="col-empalme coverage-off">—</td>
-            @for (d of diasDelMes; track d.dia) {
-              @let cob = coberturaPorDia[d.dia];
-              @let metas = obtenerMetasDiaServicio(servicioActual, d);
-              @if (metas.cerrado || metas.reqNoche === 0) {
-                <td class="coverage-cell coverage-off" [class.cell-week-end]="d.esDomingo" title="Servicio sin requerimiento en esta franja / día">
-                  —
-                </td>
-              } @else {
-                <td class="coverage-cell" [class.cell-week-end]="d.esDomingo" [class.cov-ok]="cob.noche >= metas.reqNoche" [class.cov-deficit]="cob.noche < metas.reqNoche">
-                  {{ cob.noche }}/{{ metas.reqNoche }}
-                </td>
+              <td colspan="9" class="coverage-summary-note">
+                Vista general Día ({{ etiquetaModalidadDias(servicioActual.modalidadDias) }})
+              </td>
+            </tr>
+
+            <tr class="coverage-row coverage-legacy-row">
+              <td class="col-sticky-emp coverage-label">
+                🌙 Resumen Noche • <strong>Mín: {{ reglaFiltroFoot ? reglaFiltroFoot.reqNoche : servicioActual.reqNoche }}</strong>
+                @if (servicioActual.modalidadDias === 'TODOS_GUARDIA_FDS') {
+                  <span class="coverage-fds-note">
+                    (Dom/Fest: {{ reglaFiltroFoot ? (reglaFiltroFoot.reqNocheDomFest ?? reglaFiltroFoot.reqNoche) : (servicioActual.reqNocheDomFest ?? servicioActual.reqNoche) }})
+                  </span>
+                }
+              </td>
+              <td class="col-empalme coverage-off">—</td>
+              @for (d of diasDelMes; track d.dia) {
+                @let cob = coberturaPorDia[d.dia];
+                @let metas = obtenerMetasDiaServicio(servicioActual, d);
+                @if (metas.cerrado || metas.reqNoche === 0) {
+                  <td class="coverage-cell coverage-off" [class.cell-week-end]="d.esDomingo" title="Servicio sin requerimiento en esta franja / día">
+                    —
+                  </td>
+                } @else {
+                  <td class="coverage-cell" [class.cell-week-end]="d.esDomingo" [class.cov-ok]="cob.noche >= metas.reqNoche" [class.cov-deficit]="cob.noche < metas.reqNoche">
+                    {{ cob.noche }}/{{ metas.reqNoche }}
+                  </td>
+                }
               }
-            }
-            <td colspan="9" class="coverage-summary-note">
-              Verde = Cobertura completa • Rojo = Déficit • (—) = Franja/día no operativo • ⚖️ {{ normativa.jornadaSemanalHoras }}h/sem
-              @if (normativa.franjaCambiaEnElMes || normativa.recargoDominicalCambiaEnElMes || normativa.jornadaSemanalCambiaEnElMes) {
-                <span class="normativa-trans-note"> • ⚠️ Transición normativa en el mes</span>
-              }
-            </td>
-          </tr>
+              <td colspan="9" class="coverage-summary-note">
+                Vista general Noche • ⚖️ {{ resumenRegimenesCuadrante }}
+              </td>
+            </tr>
+          }
         </tfoot>
       </table>
     </div>
@@ -701,7 +816,10 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
   @Input() reglaCargoActivaEnCuadrante: ReglaCargoServicio | null | undefined = null;
   @Input({ required: true }) servicioActual!: ServicioHospitalario;
   @Input() coberturaPorDia: Record<number, { dia: number; noche: number }> = {};
+  @Input() resumenCoberturaTurnos?: ResumenCoberturaTurnosServicio;
+  @Input() empresasPendientes: EmpresaContratante[] = [];
 
+  @Output() irAConfigurarEmpresas = new EventEmitter<void>();
   @Output() cambiarServicio = new EventEmitter<string>();
   @Output() cambiarMes = new EventEmitter<number>();
   @Output() cambiarAnio = new EventEmitter<number>();
@@ -730,6 +848,33 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
   @Output() keyDownCelda = new EventEmitter<{ event: KeyboardEvent; empId: string; dia: number }>();
 
   celdaHovered: { empId: string; dia: number } | null = null;
+  mostrarFranjasLegacy = false;
+
+  get resumenRegimenesCuadrante(): string {
+    const regs = Array.from(
+      new Set(
+        (this.filasCuadrante || []).map(
+          (f) => `${f.empresaCodigo || 'CST'} ${f.horasSemanalesAplicadas ?? 42}h`
+        )
+      )
+    );
+    return regs.length > 0 ? regs.join(' / ') : 'Según empresa contratante';
+  }
+
+  construirTooltipCoberturaTurno(
+    filaCob: FilaCoberturaTurno,
+    d: DiaColumna,
+    cell: CoberturaTurnoDia
+  ): string {
+    const estadoTxt =
+      cell.estado === 'VERDE'
+        ? 'Óptimo (Cumple esperado)'
+        : cell.estado === 'AMARILLO'
+          ? 'Alerta (Alcanza mínimo, bajo esperado)'
+          : 'Déficit crítico (Bajo mínimo)';
+    const excesoTxt = cell.exceso > 0 ? ` · Exceso: +${cell.exceso}` : '';
+    return `${filaCob.codigoTurno} — ${filaCob.nombreTurno} | Día ${d.dia}\nProgramados: ${cell.programados} (Mín: ${cell.minimo}, Esp: ${cell.esperado})${excesoTxt}\nEstado: ${estadoTxt}`;
+  }
 
   private normativaCache?: { clave: string; valor: ReturnType<typeof resumenNormativoPeriodo> };
 
@@ -1014,11 +1159,16 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
   }
 
   construirTooltipHorasMes(fila: any): string {
-    const metaEf = fila.horasContratadasEfectivas ?? fila.empleado.horasContratoMes;
+    const nom = fila.horasContratadasNominales ?? fila.empleado.horasContratoMes;
+    const metaEf = fila.horasContratadasEfectivas ?? nom;
+    const hSem = fila.horasSemanalesAplicadas ?? fila.empleado.horasSemanalesAplicadas ?? 42;
+    const dhMes = fila.diasHabilesMes ?? '—';
+    const dhPror = fila.diasHabilesProrrateados ?? fila.diasExonerados ?? 0;
+    const regTxt = `${fila.empresaNombre || 'Régimen'} (${hSem}h/sem · ${dhMes} días hábiles mes)`;
     const base =
-      (fila.diasExonerados || 0) > 0
-        ? `Total Hospital: ${fila.horasTrabajadas}h programadas de ${metaEf}h efectivas (Nominal: ${fila.empleado.horasContratoMes}h menos ${fila.horasExoneradas || 0}h por ${fila.diasExonerados}d VAC/INC/LIC/FAM)`
-        : `Total Hospital: ${fila.horasTrabajadas}h programadas de ${fila.empleado.horasContratoMes}h de contrato`;
+      dhPror > 0
+        ? `${regTxt}\nTotal Hospital: ${fila.horasTrabajadas}h de ${metaEf}h efectivas (Nominal: ${nom}h menos ${fila.horasExoneradas || 0}h por ${dhPror} día(s) hábil(es) exonerado(s))`
+        : `${regTxt}\nTotal Hospital: ${fila.horasTrabajadas}h programadas de ${nom}h de contrato mensual`;
     if (!fila.desgloseServicios || fila.desgloseServicios.length <= 1) {
       if (fila.horasOtrosServicios > 0) {
         return `${base}\n• En este servicio: ${fila.horasLocales}h\n• En otros servicios (Apoyo): ${fila.horasOtrosServicios}h`;

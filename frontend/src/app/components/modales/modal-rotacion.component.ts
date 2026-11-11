@@ -65,13 +65,19 @@ import { EmpleadoHospital } from '../../models';
                       <div class="cand-title-line">
                         <strong>{{ cand.nombre }}</strong>
                         <span class="cand-cat-badge">{{ cand.categoria }}</span>
+                        <span
+                          class="cand-emp-badge"
+                          [class.is-pendiente]="cand.empresaEstadoConfiguracion === 'PENDIENTE_REGLAS'"
+                          [title]="(cand.empresaNombre || 'Empresa Contratante') + ' · ' + (cand.horasSemanalesAplicadas ?? 42) + 'h/sem'">
+                          {{ cand.empresaCodigo || cand.empresaContratante?.codigo || 'CST' }} · {{ cand.horasSemanalesAplicadas ?? 42 }}h
+                        </span>
                       </div>
                       <div class="cand-meta-line">
                         <span class="cand-origin-tag" title="Servicio base del colaborador">
                           📍 Base: <b>{{ cand.servicioBaseCodigo || 'SRV' }}</b> ({{ cand.servicioBaseNombre || 'Servicio Hermano' }})
                         </span>
-                        <span class="cand-hours-tag" title="Horas ya programadas en el mes actual (todos los servicios) vs contrato">
-                          ⏱️ Mes: <b>{{ cand.horasProgramadasMes || 0 }}h</b> / {{ cand.horasContratoMes || 168 }}h
+                        <span class="cand-hours-tag" title="Horas ya programadas en el mes actual (todos los servicios) vs meta nominal por días hábiles">
+                          ⏱️ Mes: <b>{{ cand.horasProgramadasMes || 0 }}h</b> / {{ cand.horasContratadasNominales ?? cand.horasContratoMes ?? 0 }}h
                         </span>
                         <span class="cand-bank-tag">
                           🏦 Banco: <b>{{ formatearSigno(cand.saldoBancoAnterior) }}h</b>
@@ -345,6 +351,21 @@ import { EmpleadoHospital } from '../../models';
       background: #f1f5f9;
       color: #475569;
       border: 1px solid #e2e8f0;
+    }
+    .cand-emp-badge {
+      font-size: 10.5px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: #eff6ff;
+      color: #1d4ed8;
+      border: 1px solid #bfdbfe;
+      white-space: nowrap;
+    }
+    .cand-emp-badge.is-pendiente {
+      background: #fffbeb;
+      color: #b45309;
+      border-color: #fde68a;
     }
     .cand-meta-line {
       display: flex;

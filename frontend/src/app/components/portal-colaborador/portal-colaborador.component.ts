@@ -20,8 +20,16 @@ export interface DatosEmpleadoPortal {
   conteoNoches: number;
   conteoDomFest: number;
   conteoDomingos?: number;
+  horasContratadasNominales?: number;
   horasContratadasEfectivas?: number;
+  horasExoneradas?: number;
+  diasHabilesMes?: number;
+  diasHabilesProrrateados?: number;
   diasExonerados?: number;
+  horasSemanalesAplicadas?: number;
+  empresaCodigo?: string;
+  empresaNombre?: string;
+  empresaEstadoConfiguracion?: string;
   nuevoSaldoBanco: number;
   diferenciaMes: number;
   [key: string]: any;
@@ -170,16 +178,31 @@ export interface DatosEmpleadoPortal {
             <div class="kpi-label">Servicio y Cargo</div>
             <div class="kpi-value kpi-value-srv">{{ portal.servicioBase?.nombre || 'Servicio Asistencial' }}</div>
             <div class="kpi-sub">{{ portal.empleado.categoria }} • C.C. {{ portal.empleado.documento }}</div>
+            @if (portal.empresaCodigo || portal.empleado.empresaContratante) {
+              <div class="portal-empresa-row">
+                <span
+                  class="portal-empresa-pill"
+                  [class.is-pendiente]="portal.empresaEstadoConfiguracion === 'PENDIENTE_REGLAS'"
+                  [title]="(portal.empresaNombre || portal.empleado.empresaContratante?.nombre || 'Empresa') + ' · Jornada ' + (portal.horasSemanalesAplicadas ?? portal.empleado.horasSemanalesAplicadas ?? 42) + 'h/sem'">
+                  🏢 {{ portal.empresaNombre || portal.empleado.empresaContratante?.nombre || portal.empresaCodigo }} · {{ portal.horasSemanalesAplicadas ?? portal.empleado.horasSemanalesAplicadas ?? 42 }}h/sem
+                </span>
+              </div>
+            }
           </div>
 
           <div class="kpi-card">
             <div class="kpi-label">Horas Programadas en {{ nombreMesSeleccionado }}</div>
             <div
               class="kpi-value"
-              [title]="(portal.diasExonerados || 0) > 0 ? 'Meta prorrateada por ' + portal.diasExonerados + ' día(s) de ausencia oficial (Nominal: ' + portal.empleado.horasContratoMes + 'h)' : 'Meta contractual del mes'">
-              {{ portal.horasTrabajadas }}h <span class="kpi-contract-sub">/ {{ portal.horasContratadasEfectivas ?? portal.empleado.horasContratoMes }}h</span>
+              [title]="construirTooltipMetaPortal()">
+              {{ portal.horasTrabajadas }}h <span class="kpi-contract-sub">/ {{ portal.horasContratadasEfectivas ?? portal.horasContratadasNominales ?? portal.empleado.horasContratoMes }}h</span>
             </div>
-            <div class="kpi-sub">🌙 {{ portal.conteoNoches }} Noches • ☀️ {{ portal.conteoDomFest }} Dom/Fest ({{ portal.conteoDomingos || 0 }} dom)</div>
+            <div class="kpi-sub">
+              🌙 {{ portal.conteoNoches }} Noches • ☀️ {{ portal.conteoDomFest }} Dom/Fest ({{ portal.conteoDomingos || 0 }} dom)
+              @if ((portal.diasHabilesProrrateados ?? portal.diasExonerados ?? 0) > 0) {
+                <span> • 📉 -{{ portal.horasExoneradas || 0 }}h ({{ portal.diasHabilesProrrateados ?? portal.diasExonerados }} d.h.)</span>
+              }
+            </div>
           </div>
 
           <div class="kpi-card kpi-card-banco">
@@ -375,6 +398,7 @@ export interface DatosEmpleadoPortal {
             @let celdaDiaPerm = obtenerCeldaDia(diaPermutaSeleccionado);
             @let cfgDiaPerm = obtenerConfigTurno(celdaDiaPerm?.codigo || '');
             @let esAusenciaDiaPerm = !!(cfgDiaPerm?.esAusencia || esAusenciaCodigo(celdaDiaPerm?.codigo));
+            @let turnoBloqueadoPerm = !!(cfgDiaPerm?.bloqueaPermutas && !esAusenciaDiaPerm);
             <p class="panel-desc portal-turno-dia-desc">
               <span>Tu turno el <strong>Día {{ diaPermutaSeleccionado }} de {{ nombreMesSeleccionado }}</strong>:</span>
               @if (celdaDiaPerm?.codigo) {
@@ -403,6 +427,10 @@ export interface DatosEmpleadoPortal {
                 <div class="portal-notice-danger">
                   🔒 <strong>Novedad Oficial Intranet ({{ celdaDiaPerm?.codigo }}):</strong> Los días con Vacaciones, Incapacidad, Licencia o Día de la Familia están bloqueados y no admiten permutas.
                 </div>
+              } @else if (turnoBloqueadoPerm) {
+                <div class="portal-notice-danger">
+                  🔒 <strong>Turno restringido para intercambio ({{ celdaDiaPerm?.codigo }}):</strong> Este tipo de turno está configurado en catálogo para bloquear permutas entre compañeros.
+                </div>
               } @else if (companerosPares.length > 0) {
                 <select
                   id="portal-companero-select"
@@ -412,7 +440,7 @@ export interface DatosEmpleadoPortal {
                   @for (par of companerosPares; track par.id) {
                     @let turnoPar = obtenerTurnoAsignadoEmpleado(par.id, diaPermutaSeleccionado);
                     <option [value]="par.id">
-                      {{ par.nombre }} — Turno {{ turnoPar ? '[' + turnoPar + ']' : '[Sin turno]' }} el Día {{ diaPermutaSeleccionado }}
+                      {{ par.nombre }} ({{ par.categoria }}) — Turno {{ turnoPar ? '[' + turnoPar + ']' : '[Sin turno]' }} el Día {{ diaPermutaSeleccionado }}
                     </option>
                   }
                 </select>
@@ -422,7 +450,7 @@ export interface DatosEmpleadoPortal {
                 </button>
               } @else {
                 <div class="text-muted portal-no-pares">
-                  No hay otros compañeros con el mismo cargo en este servicio para realizar permutas.
+                  No hay compañeros habilitados con cargo compatible en este servicio para realizar permutas.
                 </div>
               }
             </div>
@@ -587,6 +615,22 @@ export class PortalColaboradorComponent {
     if (idx >= 0 && idx < this.mesesDisponibles.length - 1) {
       this.cambiarMes.emit(this.mesesDisponibles[idx + 1].valor);
     }
+  }
+
+  construirTooltipMetaPortal(): string {
+    const p = this.portal as any;
+    const empNom = p?.empresaNombre || p?.empleado?.empresaContratante?.nombre || 'Régimen Contractual';
+    const hSem = p?.horasSemanalesAplicadas ?? p?.empleado?.horasSemanalesAplicadas ?? 42;
+    const dhMes = p?.diasHabilesMes ?? '—';
+    const nom = p?.horasContratadasNominales ?? p?.empleado?.horasContratoMes ?? 0;
+    const ef = p?.horasContratadasEfectivas ?? nom;
+    const dhPror = p?.diasHabilesProrrateados ?? p?.diasExonerados ?? 0;
+    const exoneradas = p?.horasExoneradas ?? 0;
+    const base = `${empNom} (${hSem}h/sem)\nDías hábiles mes: ${dhMes} d.h. → Meta nominal: ${nom}h`;
+    if (dhPror > 0) {
+      return `${base}\nProrrateo por días hábiles exonerados: -${dhPror} d.h. (-${exoneradas}h) → Meta efectiva: ${ef}h`;
+    }
+    return base;
   }
 
   formatearSigno(n?: number): string {

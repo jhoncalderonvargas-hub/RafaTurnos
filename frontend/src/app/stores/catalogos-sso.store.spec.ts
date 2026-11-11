@@ -18,11 +18,18 @@ describe('CatalogosSsoStore', () => {
       'enlazarServiciosHermanos',
       'desenlazarServiciosHermanos',
       'guardarTipoTurno',
+      'archivarTipoTurno',
+      'eliminarTipoTurno',
       'getServicios',
       'crearServicio',
       'actualizarServicio',
       'eliminarServicio',
+      'getEmpresas',
+      'confirmarReglasEmpresa',
+      'getEmpleados',
     ]);
+    apiSpy.getEmpresas.and.returnValue(of([]));
+    apiSpy.getEmpleados.and.returnValue(of([]));
 
     TestBed.configureTestingModule({
       providers: [{ provide: TurnosApiService, useValue: apiSpy }],
@@ -157,5 +164,85 @@ describe('CatalogosSsoStore', () => {
     expect(apiSpy.guardarTipoTurno).toHaveBeenCalled();
     expect(store.catalogoTurnosMap()['P10']).toBeUndefined();
     expect(store.nuevoServicioTurnosHabilitados()).not.toContain('P10');
+  });
+
+  it('permite crear turno DLR prorrateable en DESCANSO, protege turnos obligatorios de archivo y confirma empresa pendiente', () => {
+    // 1. DLR prorrateaMetaContrato y bloqueaPermutas
+    store.turnoFormCodigo.set('DLR');
+    store.turnoFormNombre.set('Día Libre Remunerado');
+    store.cambiarTurnoModoJornadaForm('DESCANSO');
+    store.cambiarTurnoProrrateaMetaForm(true);
+    store.turnoFormBloqueaPermutas.set(true);
+    apiSpy.guardarTipoTurno.and.returnValue(
+      of({
+        codigo: 'DLR',
+        nombre: 'Día Libre Remunerado',
+        horaInicio: '00:00',
+        horaFin: '00:00',
+        horasOrdinarias: 0,
+        horasDiurnas: 0,
+        horasNocturnas: 0,
+        prorrateaMetaContrato: true,
+        esAusencia: false,
+        bloqueaPermutas: true,
+        descuentaBancoHoras: false,
+        activo: true,
+      })
+    );
+
+    store.guardarTurnoEnCatalogo();
+    expect(apiSpy.guardarTipoTurno).toHaveBeenCalledWith(
+      jasmine.objectContaining({
+        codigo: 'DLR',
+        prorrateaMetaContrato: true,
+        esAusencia: false,
+        bloqueaPermutas: true,
+      })
+    );
+    expect(store.catalogoTurnosMap()['DLR']?.prorrateaMetaContrato).toBeTrue();
+
+    // 2. Sistema obligatorio (L) no permite archivar
+    store.archivarTipoTurno('L');
+    expect(apiSpy.archivarTipoTurno).not.toHaveBeenCalled();
+
+    // 3. Turno personalizado DLR sí permite archivar
+    apiSpy.archivarTipoTurno.and.returnValue(
+      of({ ...store.catalogoTurnosMap()['DLR'], codigo: 'DLR', activo: false })
+    );
+    store.archivarTipoTurno('DLR');
+    expect(apiSpy.archivarTipoTurno).toHaveBeenCalledWith('DLR', false);
+    expect(store.catalogoTurnosMap()['DLR']?.activo).toBeFalse();
+
+    // 4. Confirmar reglas de empresa pendiente actualiza señal y notifica empresasActualizadas$
+    let notifCount = 0;
+    store.empresasActualizadas$.subscribe(() => notifCount++);
+    store.aplicarEmpresasDesdeDb([
+      {
+        id: 'emp-x',
+        codigo: 'TEMP_X',
+        nombre: 'Temporal X',
+        estadoConfiguracion: 'PENDIENTE_REGLAS',
+        plantillaNormativa: 'CST_LEY_2466',
+        horasSemanalesContrato: 42,
+        diasBaseSemana: 6,
+        horaInicioNocturnoMin: 1140,
+        horaFinNocturnoMin: 360,
+        porcentajeRecargoNocturno: 0.35,
+        modoRecargoDominical: 'LEY_2466',
+        aplicaTopeHorasExtrasSemanal: true,
+        topeHorasExtrasSemanal: 12,
+        usaBancoHoras: true,
+        activa: true,
+      },
+    ]);
+    expect(store.empresasPendientes().length).toBe(1);
+
+    const empActualizada = { ...store.empresas()[0], estadoConfiguracion: 'CONFIRMADA' as const, horasSemanalesContrato: 44 };
+    apiSpy.getEmpresas.and.returnValue(of([empActualizada]));
+    apiSpy.confirmarReglasEmpresa.and.returnValue(of(empActualizada));
+    store.confirmarReglasEmpresa('emp-x', { horasSemanalesContrato: 44 });
+    expect(store.empresasPendientes().length).toBe(0);
+    expect(store.empresas()[0].horasSemanalesContrato).toBe(44);
+    expect(notifCount).toBeGreaterThanOrEqual(1);
   });
 });

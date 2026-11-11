@@ -103,9 +103,12 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
         END $$;
       `);
 
-      // Asegurar que los servicios tengan su macroproceso reclasificado correctamente
+      // Asegurar que servicios sin macroprocesoId reciban su macroproceso cuando falte (sin pisar servicios ya clasificados)
       const mapaReclasificacion: Record<string, string> = {
         'MED-INT': 'CUIDADOS_INTENSIVOS',
+        'MED-INT-ESP': 'CUIDADOS_INTENSIVOS',
+        'MED-INT-ENF': 'CUIDADOS_INTENSIVOS',
+        'MED-INT-AUX': 'CUIDADOS_INTENSIVOS',
         'MED-GRAL': 'CONSULTA_EXTERNA',
         'FACT-URG': 'ADMINISTRATIVO',
         'FACT-CEN': 'ADMINISTRATIVO',
@@ -118,7 +121,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
           UPDATE "servicios" s
           SET "macroprocesoId" = m."id"
           FROM "macroprocesos" m
-          WHERE s."codigo" = '${srvCod}' AND m."codigo" = '${mpCod}';
+          WHERE s."macroprocesoId" IS NULL AND s."codigo" = '${srvCod}' AND m."codigo" = '${mpCod}';
         `);
       }
 

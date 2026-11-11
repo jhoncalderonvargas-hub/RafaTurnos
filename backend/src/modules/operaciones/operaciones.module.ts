@@ -5,8 +5,19 @@ import { randomBytes } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { FestivosColombiaService } from '../festivos/festivos-colombia.service';
 import { FestivosModule } from '../festivos/festivos.module';
+import {
+  resolverEmpresaDesdeIntranet,
+  resolverServicioPorMacroprocesoYCargo,
+} from '../empresas/empresas-matching.util';
 import { LiquidacionModule, LiquidacionService, TipoTurnoLiquidableDb, toTurnoLiquidable } from '../liquidacion/liquidacion.module';
-import { calcularDescansoEntreTurnosMin, DESCANSO_MINIMO_ENTRE_TURNOS_MIN, r2, sumarDiasIso } from '../../shared/liquidacion-horas';
+import {
+  calcularDescansoEntreTurnosMin,
+  DESCANSO_MINIMO_ENTRE_TURNOS_MIN,
+  esCodigoExoneracionContrato,
+  r2,
+  sumarDiasIso,
+  turnoEsLaborado,
+} from '../../shared/liquidacion-horas';
 import { firmarJwtHmac, PayloadTokenSsoIntranet, RolUsuarioSso, verificarJwtHmac } from './jwt-sso.util';
 
 /** Marcador usado en tipos_turno para una celda explícitamente en blanco (ver CuadrantesController). */
@@ -102,6 +113,9 @@ export class PermutasController {
       }),
       db.servicio.findFirst({
         where: { OR: [{ id: params.servicioId }, { codigo: params.servicioId }] },
+        include: {
+          cargosPermitidos: { select: { categoriaId: true } },
+        },
       }),
     ]);
 
@@ -118,9 +132,22 @@ export class PermutasController {
       throw new BadRequestException('No es posible crear o aprobar una auto-permuta con el mismo colaborador.');
     }
 
-    if (solicitante.categoriaId !== receptor.categoriaId) {
+    const cargosPermIds = new Set<string>(
+      Array.isArray((servicio as any).cargosPermitidos)
+        ? (servicio as any).cargosPermitidos.map((cp: any) => cp.categoriaId)
+        : []
+    );
+    const permiteMultiCargo =
+      Boolean((servicio as any).permitePermutaEntreCargos) &&
+      cargosPermIds.has(solicitante.categoriaId) &&
+      cargosPermIds.has(receptor.categoriaId);
+
+    if (solicitante.categoriaId !== receptor.categoriaId && !permiteMultiCargo) {
+      const detalleMulti = (servicio as any).permitePermutaEntreCargos
+        ? ' Además, uno o ambos cargos no están habilitados conjuntamente en este servicio.'
+        : '';
       throw new ConflictException(
-        `RN-05 Bloqueante: Incompatibilidad de categoría asistencial (${solicitante.categoria?.nombre || solicitante.categoriaId} vs ${receptor.categoria?.nombre || receptor.categoriaId}).`
+        `RN-05 Bloqueante: Incompatibilidad de cargo profesional (${solicitante.categoria?.nombre || solicitante.categoriaId} vs ${receptor.categoria?.nombre || receptor.categoriaId}).${detalleMulti}`
       );
     }
 
@@ -145,12 +172,29 @@ export class PermutasController {
       );
     }
 
+    const tiposCatalogo = await db.tipoTurno.findMany();
+    const mapaTipos = new Map<string, TipoTurnoLiquidableDb>(
+      (Array.isArray(tiposCatalogo) ? tiposCatalogo : []).map((t: any) => [
+        String(t.codigo || '').toUpperCase(),
+        t,
+      ])
+    );
+
     const codOri = normalizarCodigo(params.turnoOrigen);
     const codDes = normalizarCodigo(params.turnoDestino);
-    const novedadesBloq = new Set(['VAC', 'INC', 'LIC', 'FAM']);
-    if (novedadesBloq.has(codOri) || novedadesBloq.has(codDes)) {
+    const esTurnoBloqueadoPermuta = (cod: string): boolean => {
+      const cfg = mapaTipos.get(cod.toUpperCase()) as any;
+      if (cfg && typeof cfg.bloqueaPermutas === 'boolean') {
+        return Boolean(cfg.bloqueaPermutas || cfg.esAusencia);
+      }
+      if (cfg && typeof cfg.esAusencia === 'boolean' && cfg.esAusencia) {
+        return true;
+      }
+      return esCodigoExoneracionContrato(cod);
+    };
+    if (esTurnoBloqueadoPermuta(codOri) || esTurnoBloqueadoPermuta(codDes)) {
       throw new ConflictException(
-        'RN-03 Bloqueante: No se permiten permutas sobre periodos con Novedades Oficiales de RRHH (VAC, INC, LIC o FAM).'
+        'RN-03 Bloqueante: El tipo de turno seleccionado bloquea permutas o corresponde a una novedad oficial de RRHH.'
       );
     }
 
@@ -182,12 +226,17 @@ export class PermutasController {
       );
     }
 
-    const esCeldaEspejoAjena = (asig: any) =>
-      asig &&
-      asig.servicioEjecutorId &&
-      asig.servicioEjecutorId !== servicio.id &&
-      asig.tipoTurno?.codigo &&
-      !['BLANCO', '', 'L', 'VAC', 'INC', 'LIC', 'FAM'].includes(asig.tipoTurno.codigo.toUpperCase());
+    const esCeldaEspejoAjena = (asig: any) => {
+      if (!asig || !asig.servicioEjecutorId || asig.servicioEjecutorId === servicio.id) {
+        return false;
+      }
+      const cod = String(asig.tipoTurno?.codigo || '').trim().toUpperCase();
+      if (!cod || cod === CODIGO_CELDA_VACIA_DB) return false;
+      if (typeof asig.tipoTurno?.horasOrdinarias === 'number') {
+        return turnoEsLaborado(toTurnoLiquidable(asig.tipoTurno, cod));
+      }
+      return !['L', 'S', CODIGO_CELDA_VACIA_DB, ''].includes(cod) && !esCodigoExoneracionContrato(cod);
+    };
 
     if (esCeldaEspejoAjena(asigOri) || esCeldaEspejoAjena(asigDes)) {
       const ajena = esCeldaEspejoAjena(asigOri) ? asigOri : asigDes;
@@ -213,20 +262,14 @@ export class PermutasController {
       new Date(`${sumarDiasIso(isoDes, 1)}T00:00:00.000Z`),
     ];
 
-    const [tiposCatalogo, vecinasDb] = await Promise.all([
-      db.tipoTurno.findMany(),
-      db.asignacionTurno.findMany({
-        where: {
-          empleadoId: { in: [solicitante.id, receptor.id] },
-          fecha: { in: fechasVecinas },
-        },
-        include: { tipoTurno: true },
-      }),
-    ]);
+    const vecinasDb = await db.asignacionTurno.findMany({
+      where: {
+        empleadoId: { in: [solicitante.id, receptor.id] },
+        fecha: { in: fechasVecinas },
+      },
+      include: { tipoTurno: true },
+    });
 
-    const mapaTipos = new Map<string, TipoTurnoLiquidableDb>(
-      tiposCatalogo.map((t) => [t.codigo.toUpperCase(), t])
-    );
     const mapaVecinas = new Map<string, TipoTurnoLiquidableDb>();
     for (const v of vecinasDb) {
       mapaVecinas.set(`${v.empleadoId}::${new Date(v.fecha).toISOString().substring(0, 10)}`, v.tipoTurno);
@@ -244,9 +287,10 @@ export class PermutasController {
       const codSig = normalizarCodigo(mapaVecinas.get(`${empId}::${sumarDiasIso(fechaIso, 1)}`)?.codigo);
       const cfgSig = mapaTipos.get(codSig.toUpperCase());
 
-      if (cfgPrev?.esNocturnoPesado && cfgNuevo && cfgNuevo.horasOrdinarias > 0 && !['S', 'L'].includes(nuevoCod.toUpperCase())) {
+      const nuevoLaborado = turnoEsLaborado(toTurnoLiquidable(cfgNuevo, nuevoCod));
+      if (cfgPrev?.esNocturnoPesado && cfgNuevo && nuevoLaborado) {
         throw new ConflictException(
-          `RN-01 Bloqueante (${empNombre}): El día previo fue ${codPrev} (post-guardia), exige S o L.`
+          `RN-01 Bloqueante (${empNombre}): El día previo fue ${codPrev} (post-guardia), exige descanso o saliente.`
         );
       }
       const descPrev = calcularDescansoEntreTurnosMin(
@@ -259,7 +303,8 @@ export class PermutasController {
         );
       }
 
-      if (cfgNuevo?.esNocturnoPesado && cfgSig && cfgSig.horasOrdinarias > 0 && !['S', 'L'].includes(codSig.toUpperCase())) {
+      const sigLaborado = turnoEsLaborado(toTurnoLiquidable(cfgSig, codSig));
+      if (cfgNuevo?.esNocturnoPesado && cfgSig && sigLaborado) {
         throw new ConflictException(
           `RN-01 Bloqueante (${empNombre}): Asignar ${nuevoCod} antes de ${codSig} incumple el saliente/libre obligatorio.`
         );
@@ -453,7 +498,10 @@ export class PermutasController {
 
         const permuta = await tx.solicitudPermuta.findUnique({
           where: { id },
-          include: { solicitante: true, receptor: true },
+          include: {
+            solicitante: { include: { empresaContratante: true } },
+            receptor: { include: { empresaContratante: true } },
+          },
         });
         if (!permuta) throw new NotFoundException('Solicitud de permuta no encontrada');
         if (!permuta.anio || !permuta.mes) {
@@ -499,9 +547,11 @@ export class PermutasController {
           resolverTipoObj(permuta.turnoOrigen),
         ]);
 
+        const reglasSol = this.liquidacionService.resolverReglasEmpleado?.(permuta.solicitante as any);
+        const reglasRec = this.liquidacionService.resolverReglasEmpleado?.(permuta.receptor as any);
         const [horasSol, horasRec] = await Promise.all([
-          this.liquidacionService.calcularHorasPorTipo(tipoObjSol, fechaOrigen),
-          this.liquidacionService.calcularHorasPorTipo(tipoObjRec, fechaDestino),
+          this.liquidacionService.calcularHorasPorTipo(tipoObjSol, fechaOrigen, reglasSol),
+          this.liquidacionService.calcularHorasPorTipo(tipoObjRec, fechaDestino, reglasRec),
         ]);
 
         const actualSolicitante = normalizarCodigo(permuta.turnoOrigen);
@@ -662,13 +712,6 @@ export class PermutasController {
 
   @Post('simular')
   async simularPermutaEntrePares(@Body() dto: SolicitudPermutaDto) {
-    if (dto.solicitanteCategoria && dto.receptorCategoria && dto.solicitanteCategoria !== dto.receptorCategoria) {
-      return {
-        permitida: false,
-        motivo: `RN-05 Bloqueante: Incompatibilidad de categoría asistencial (${dto.solicitanteCategoria} vs ${dto.receptorCategoria}).`,
-      };
-    }
-
     if (
       dto.solicitanteId &&
       dto.receptorId &&
@@ -696,13 +739,26 @@ export class PermutasController {
           motivo: e?.message || 'La permuta incumple reglas legales o de novedades.',
         };
       }
+      return {
+        permitida: true,
+        estadoInicial: 'PENDIENTE_PAR',
+        mensaje:
+          'Permuta válida: Cargo compatible, tipo de turno habilitado, sin novedades bloqueantes y descanso mínimo >= 12h verificado.',
+      };
+    }
+
+    if (dto.solicitanteCategoria && dto.receptorCategoria && dto.solicitanteCategoria !== dto.receptorCategoria) {
+      return {
+        permitida: false,
+        motivo: `RN-05 Bloqueante: Incompatibilidad de cargo profesional (${dto.solicitanteCategoria} vs ${dto.receptorCategoria}).`,
+      };
     }
 
     return {
       permitida: true,
       estadoInicial: 'PENDIENTE_PAR',
       mensaje:
-        'Permuta válida: Misma categoría profesional, sin novedades bloqueantes y descanso mínimo >= 12h verificado.',
+        'Permuta válida: Mismo cargo profesional, sin novedades bloqueantes y descanso mínimo >= 12h verificado.',
     };
   }
 }
@@ -757,6 +813,7 @@ export class IntranetIntegrationController {
       },
       include: {
         categoria: true,
+        empresaContratante: true,
         servicioBase: {
           include: {
             serviciosHermanosOrigen: {
@@ -768,7 +825,7 @@ export class IntranetIntegrationController {
     });
 
     if (!emp) {
-      // Auto-aprovisionamiento Just-In-Time (JIT) desde la Intranet Hospitalaria
+      // Auto-aprovisionamiento Just-In-Time (JIT) desde la Intranet Hospitalaria (empresa + macroproceso + cargo)
       const intranetUrl = this.obtenerIntranetApiUrl();
       try {
         const resp = await fetch(`${intranetUrl}/api/intranet/empleados`, {
@@ -780,50 +837,51 @@ export class IntranetIntegrationController {
             ? censo.find((x: any) => String(x.documento).trim() === documento.trim())
             : null;
           if (datosEmp) {
+            const cargoNom = String(datosEmp.cargoNombre || 'Auxiliar de Enfermería').trim();
             let cat = await this.prisma.categoriaProfesional.findFirst({
-              where: { nombre: datosEmp.cargoNombre || 'Auxiliar de Enfermería' },
+              where: { nombre: cargoNom },
             });
             if (!cat) {
               cat = await this.prisma.categoriaProfesional.create({
-                data: { nombre: datosEmp.cargoNombre || 'Auxiliar de Enfermería' },
+                data: { nombre: cargoNom },
               });
             }
-            let srv = await this.prisma.servicio.findFirst({
-              where: {
-                OR: [
-                  { codigo: datosEmp.servicioCodigo || 'URG' },
-                  { id: datosEmp.servicioCodigo || 'URG' },
-                ],
-              },
+            const { empresa } = await resolverEmpresaDesdeIntranet(this.prisma, datosEmp);
+            const srvId = await resolverServicioPorMacroprocesoYCargo(this.prisma, {
+              macroprocesoCodigo: datosEmp.macroprocesoCodigo,
+              categoriaId: cat.id,
+              servicioCodigoFallback: datosEmp.servicioCodigo,
             });
-            if (!srv) {
-              srv = (await this.prisma.servicio.findFirst())!;
-            }
-            await this.prisma.empleado.create({
-              data: {
-                documento,
-                nombre: datosEmp.nombre || `Colaborador ${documento}`,
-                correo: datosEmp.correo || `${documento}@hospital.gov.co`,
-                horasSemanalesLey: 42,
-                horasContratoMes: Number(datosEmp.horasContratoMes) || 168,
-                categoriaId: cat.id,
-                servicioBaseId: srv.id,
-              },
-            });
+            if (srvId) {
+              const horasSemEmp = Math.round(Number(empresa.horasSemanalesContrato) || 42);
+              await this.prisma.empleado.create({
+                data: {
+                  documento,
+                  nombre: datosEmp.nombre || `Colaborador ${documento}`,
+                  correo: datosEmp.correo || `${documento}@hospital.gov.co`,
+                  empresaContratanteId: empresa.id,
+                  horasSemanalesLey: horasSemEmp,
+                  horasContratoMes: Number(datosEmp.horasContratoMes) || Math.round(horasSemEmp * 4),
+                  categoriaId: cat.id,
+                  servicioBaseId: srvId,
+                },
+              });
 
-            emp = await this.prisma.empleado.findFirst({
-              where: { documento },
-              include: {
-                categoria: true,
-                servicioBase: {
-                  include: {
-                    serviciosHermanosOrigen: {
-                      include: { servicioHermano: true },
+              emp = await this.prisma.empleado.findFirst({
+                where: { documento },
+                include: {
+                  categoria: true,
+                  empresaContratante: true,
+                  servicioBase: {
+                    include: {
+                      serviciosHermanosOrigen: {
+                        include: { servicioHermano: true },
+                      },
                     },
                   },
                 },
-              },
-            });
+              });
+            }
           }
         }
       } catch {}
@@ -865,6 +923,16 @@ export class IntranetIntegrationController {
       servicioBaseId: emp.servicioBaseId,
       servicioBaseNombre: emp.servicioBase.nombre,
       serviciosPermitidosIds,
+      empresaContratanteId: emp.empresaContratanteId || (emp as any).empresaContratante?.id || undefined,
+      empresaCodigo: (emp as any).empresaContratante?.codigo || undefined,
+      empresaNombre: (emp as any).empresaContratante?.nombre || undefined,
+      empresaEstadoConfiguracion: (emp as any).empresaContratante?.estadoConfiguracion || undefined,
+      horasSemanalesAplicadas: Number(
+        (emp as any).horasSemanalesOverride ??
+          (emp as any).empresaContratante?.horasSemanalesContrato ??
+          emp.horasSemanalesLey ??
+          42
+      ),
       intranetReturnUrl: this.obtenerUrlRetornoIntranet(),
     };
   }
@@ -1125,11 +1193,17 @@ export class CalendarioIcalController {
         orderBy: { fecha: 'asc' },
       });
 
-      const codigosOmitidos = new Set(['L', 'S', 'BLANCO', '']);
-
       for (const a of asignaciones) {
-        const cod = a.tipoTurno?.codigo || '';
-        if (codigosOmitidos.has(cod)) continue;
+        const cod = String(a.tipoTurno?.codigo || '').trim().toUpperCase();
+        if (!cod || cod === CODIGO_CELDA_VACIA_DB) continue;
+        const tipo = a.tipoTurno as any;
+        const mostrarEnCalendario =
+          Number(tipo.horasOrdinarias) > 0 ||
+          Boolean(tipo.esAusencia) ||
+          Boolean(tipo.descuentaBancoHoras) ||
+          Boolean(tipo.prorrateaMetaContrato) ||
+          cod === 'DISP';
+        if (!mostrarEnCalendario) continue;
 
         const fechaInicioUtc = new Date(a.fecha);
         const ymdInicio = this.formatearFechaYmd(fechaInicioUtc);

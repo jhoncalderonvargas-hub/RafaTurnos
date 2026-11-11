@@ -634,9 +634,9 @@
   left: 0;
   background: #ffffff;
   z-index: 12;
-  min-width: 205px;
-  max-width: 205px;
-  width: 205px;
+  min-width: 230px;
+  max-width: 245px;
+  width: 235px;
   text-align: left !important;
   padding: 2px 8px !important;
   border-left: 1px solid var(--border-strong);
@@ -1205,4 +1205,206 @@ tr.row-hovered td.matrix-cell:not(.cell-focused)::after,
 .normativa-trans-note {
   color: #b45309;
   font-weight: 700;
+}
+
+/* BANNER EMPRESAS PENDIENTES EN CUADRANTE */
+.empresas-pendientes-cuadrante-banner {
+  background: #fffbeb;
+  border-bottom: 1.5px solid #f59e0b;
+  color: #78350f;
+  padding: 6px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.epc-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 240px;
+}
+
+.epc-left code {
+  background: #fef3c7;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-weight: 700;
+}
+
+.btn-configurar-empresas {
+  background: #d97706;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-configurar-empresas:hover {
+  background: #b45309;
+}
+
+/* CHIP DE EMPRESA EN FILA EMPLEADO */
+.emp-empresa-chip {
+  font-size: 9px;
+  font-weight: 700;
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+  padding: 0 4px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+
+.emp-empresa-chip.is-pendiente {
+  background: #fef3c7;
+  color: #b45309;
+  border-color: #f59e0b;
+}
+
+/* CUADRANTE DE COBERTURA POR TURNO OPERATIVO (ESQUEMA B) */
+.coverage-quad-header-row td {
+  background: #eff6ff !important;
+  border-top: 2px solid #93c5fd !important;
+  border-bottom: 1px solid #bfdbfe !important;
+  padding: 4px 8px !important;
+}
+
+.coverage-quad-title-cell {
+  font-size: 11.5px;
+  font-weight: 800;
+  color: #1e3a8a;
+  background: #e0f2fe !important;
+}
+
+.cov-quad-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cov-kpi-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.cov-kpi-pill {
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 99px;
+  border: 1px solid transparent;
+}
+
+.cov-kpi-pill.kpi-rojo {
+  background: #fee2e2;
+  color: #991b1b;
+  border-color: #fecaca;
+}
+
+.cov-kpi-pill.kpi-amarillo {
+  background: #fef9c3;
+  color: #854d0e;
+  border-color: #fde047;
+}
+
+.cov-kpi-pill.kpi-verde {
+  background: #dcfce7;
+  color: #166534;
+  border-color: #bbf7d0;
+}
+
+.cov-kpi-pill.kpi-exceso {
+  background: #e0f2fe;
+  color: #0369a1;
+  border-color: #bae6fd;
+}
+
+.btn-toggle-legacy-cov {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  color: #334155;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-toggle-legacy-cov:hover {
+  background: #f1f5f9;
+}
+
+.coverage-turno-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.cov-turno-chip {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 0 4px;
+  border-radius: 4px;
+  border: 1px solid;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+
+.cov-meta-text {
+  font-size: 10.5px;
+  color: #334155;
+  font-weight: 600;
+}
+
+.coverage-cell.cov-rojo {
+  background: #fee2e2;
+  color: #991b1b;
+  font-weight: 800;
+}
+
+.coverage-cell.cov-amarillo {
+  background: #fef9c3;
+  color: #854d0e;
+  font-weight: 800;
+}
+
+.coverage-cell.cov-verde {
+  background: #dcfce7;
+  color: #166534;
+  font-weight: 800;
+}
+
+.cov-ratio {
+  font-size: 10.5px;
+}
+
+.cov-exceso-tag {
+  font-size: 8.5px;
+  font-weight: 800;
+  color: #0369a1;
+  margin-left: 1px;
+  vertical-align: super;
+}
+
+.coverage-legacy-row td {
+  opacity: 0.92;
+  border-top: 1px dashed #cbd5e1;
 }

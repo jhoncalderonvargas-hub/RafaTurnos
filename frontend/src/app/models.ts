@@ -1,3 +1,9 @@
+import {
+  ModoAmortizacionBanco,
+  ModoRecargoDominicalEmpresa,
+  PlantillaNormativaEmpresa,
+} from './shared/liquidacion-horas';
+
 export type TipoAsistencia =
   | 'CUIDADOS_INTENSIVOS'
   | 'URGENCIAS'
@@ -52,18 +58,111 @@ export interface ReglaCargoServicio {
   turnosHabilitados: string[];
 }
 
+export interface CategoriaProfesionalItem {
+  id: string;
+  nombre: string;
+}
+
+export interface CargoPermitidoRef {
+  categoriaId: string;
+  categoriaNombre: string;
+  empleadosCount?: number;
+}
+
+export interface MetaTurnoServicio {
+  id?: string;
+  tipoTurnoId?: string;
+  codigoTurno: string;
+  nombreTurno?: string;
+  colorHex?: string;
+  horaInicio?: string;
+  horaFin?: string;
+  horasOrdinarias?: number;
+  horasNocturnas?: number;
+  esNocturnoPesado?: boolean;
+  habilitado: boolean;
+  minimoBase: number;
+  esperadoBase: number;
+  minimoDomFest: number;
+  esperadoDomFest: number;
+}
+
+export type EstadoCoberturaTurno = 'ROJO' | 'AMARILLO' | 'VERDE';
+
+export interface CoberturaTurnoDia {
+  programados: number;
+  minimo: number;
+  esperado: number;
+  estado: EstadoCoberturaTurno;
+  exceso: number;
+  cerrado: boolean;
+}
+
+export interface EmpresaContratante {
+  id: string;
+  codigo: string;
+  nombre: string;
+  nit?: string | null;
+  aliasesCodigo?: string[];
+  estadoConfiguracion: 'CONFIRMADA' | 'PENDIENTE_REGLAS' | string;
+  plantillaNormativa: PlantillaNormativaEmpresa | string;
+  horasSemanalesContrato: number;
+  diasBaseSemana: number;
+  horaInicioNocturnoMin: number;
+  horaFinNocturnoMin: number;
+  porcentajeRecargoNocturno: number;
+  modoRecargoDominical: ModoRecargoDominicalEmpresa | string;
+  porcentajeRecargoDominicalFijo?: number | null;
+  aplicaTopeHorasExtrasSemanal: boolean;
+  topeHorasExtrasSemanal: number;
+  usaBancoHoras: boolean;
+  activa: boolean;
+  observaciones?: string | null;
+  empleadosCount?: number;
+}
+
+export interface PlantillaEmpresaOption {
+  codigo: PlantillaNormativaEmpresa | string;
+  nombre: string;
+  descripcion: string;
+  parametros: {
+    plantillaNormativa: string;
+    horasSemanalesContrato: number;
+    diasBaseSemana: number;
+    horaInicioNocturnoMin: number;
+    horaFinNocturnoMin: number;
+    porcentajeRecargoNocturno: number;
+    modoRecargoDominical: string;
+    porcentajeRecargoDominicalFijo?: number | null;
+    aplicaTopeHorasExtrasSemanal: boolean;
+    topeHorasExtrasSemanal: number;
+    usaBancoHoras: boolean;
+  };
+}
+
+export interface PendienteReglasEmpresaInfo {
+  id: string;
+  codigo: string;
+  nombre: string;
+  empleadosCount?: number;
+}
+
 export interface ServicioHospitalario {
   id: string;
   codigo: string;
   nombre: string;
   tipoAsistencia: TipoAsistencia;
   intranetId?: string;
+  permitePermutaEntreCargos?: boolean;
   reqDia: number;
   reqNoche: number;
   modalidadDias?: ModalidadDiasServicio;
   reqDiaDomFest?: number;
   reqNocheDomFest?: number;
   turnosHabilitados?: string[];
+  cargosPermitidos?: CargoPermitidoRef[];
+  cargosPermitidosIds?: string[];
+  metasPorTurno?: MetaTurnoServicio[];
   reglasPorCargo?: ReglaCargoServicio[];
   empleadosCount?: number;
   hermanos?: ServicioHermanoRef[];
@@ -85,9 +184,14 @@ export interface TipoTurnoConfig {
   textHex: string;
   borderHex: string;
   esAusencia: boolean;
+  prorrateaMetaContrato?: boolean;
+  bloqueaPermutas?: boolean;
   esNocturnoPesado: boolean;
   descuentaBancoHoras: boolean;
+  modoAmortizacionBanco?: ModoAmortizacionBanco | string;
   horasAmortizacionBanco?: number | null;
+  esSistemaObligatorio?: boolean;
+  activo?: boolean;
   modoJornada?: 'HORARIO' | 'GUARDIA_24H' | 'DESCANSO';
   visibleEnPaleta?: boolean;
 }
@@ -97,7 +201,13 @@ export interface EmpleadoHospital {
   documento: string;
   nombre: string;
   categoria: string;
+  categoriaId?: string;
   servicioBaseId: string;
+  empresaContratanteId?: string;
+  empresaContratante?: Partial<EmpresaContratante> | null;
+  horasSemanalesOverride?: number | null;
+  horasSemanalesLey?: number;
+  horasSemanalesAplicadas?: number;
   horasContratoMes: number;
   saldoBancoAnterior: number;
   saldoBancoOrigen?: { anio: number; mes: number; saldo: number };
@@ -206,16 +316,16 @@ export const CATALOGO_TURNOS: Record<string, TipoTurnoConfig> = {
 
   ADM: { codigo: 'ADM', nombre: 'Administrativo 8h', horario: '08:00 - 17:00', horaInicio: '08:00', horaFin: '17:00', horasOrdinarias: 8, horasDiurnas: 8, horasNocturnas: 0, minutosAlmuerzo: 60, bgHex: '#F3F4F6', textHex: '#374151', borderHex: '#D1D5DB', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
   MD: { codigo: 'MD', nombre: 'Madrugada / Aseo', horario: '06:00 - 14:00', horaInicio: '06:00', horaFin: '14:00', horasOrdinarias: 8, horasDiurnas: 8, horasNocturnas: 0, bgHex: '#E2E8F0', textHex: '#1E293B', borderHex: '#94A3B8', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
-  AP: { codigo: 'AP', nombre: 'Refuerzo Horas Pico', horario: '10:00 - 18:00', horaInicio: '10:00', horaFin: '18:00', horasOrdinarias: 8, horasDiurnas: 8, horasNocturnas: 0, bgHex: '#CFFAFE', textHex: '#0891B2', borderHex: '#67E8F9', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
-  DISP: { codigo: 'DISP', nombre: 'Disponibilidad / Retén', horario: 'Al llamado', horaInicio: '00:00', horaFin: '00:00', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, bgHex: '#FEF9C3', textHex: '#713F12', borderHex: '#FDE047', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
+  AP: { codigo: 'AP', nombre: 'Refuerzo Horas Pico', horario: '10:00 - 18:00', horaInicio: '10:00', horaFin: '18:00', horasOrdinarias: 8, horasDiurnas: 8, horasNocturnas: 0, bgHex: '#CFFAFE', textHex: '#0891B2', borderHex: '#67E8F9', esAusencia: false, prorrateaMetaContrato: false, bloqueaPermutas: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
+  DISP: { codigo: 'DISP', nombre: 'Disponibilidad / Retén', horario: 'Al llamado', horaInicio: '00:00', horaFin: '00:00', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, bgHex: '#FEF9C3', textHex: '#713F12', borderHex: '#FDE047', esAusencia: false, prorrateaMetaContrato: false, bloqueaPermutas: true, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
 
-  S: { codigo: 'S', nombre: 'Saliente Guardia', horario: 'Descanso Post-Noche', horaInicio: '00:00', horaFin: '00:00', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, bgHex: '#ECFEFF', textHex: '#0E7490', borderHex: '#67E8F9', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
-  L: { codigo: 'L', nombre: 'Libre Programado', horario: 'Descanso Legal', horaInicio: '00:00', horaFin: '00:00', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, bgHex: '#FFFFFF', textHex: '#64748B', borderHex: '#E2E8F0', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
-  COMP: { codigo: 'COMP', nombre: 'Compensatorio Banco', horario: 'Amortiza 8h Banco', horaInicio: '00:00', horaFin: '00:00', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, bgHex: '#CCFBF1', textHex: '#0F766E', borderHex: '#5EEAD4', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: true, horasAmortizacionBanco: 8, visibleEnPaleta: true },
-  VAC: { codigo: 'VAC', nombre: 'Vacaciones RRHH', horario: 'Bloqueo Intranet', horaInicio: '00:00', horaFin: '00:00', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, bgHex: '#D1FAE5', textHex: '#047857', borderHex: '#6EE7B7', esAusencia: true, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
-  INC: { codigo: 'INC', nombre: 'Incapacidad Médica', horario: 'Habeas Data', horaInicio: '00:00', horaFin: '00:00', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, bgHex: '#FCE7F3', textHex: '#BE185D', borderHex: '#F9A8D4', esAusencia: true, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
-  LIC: { codigo: 'LIC', nombre: 'Licencia Remunerada / Calamidad / Luto', horario: 'Bloqueo Intranet', horaInicio: '00:00', horaFin: '23:59', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, bgHex: '#E0E7FF', textHex: '#3730A3', borderHex: '#C7D2FE', esAusencia: true, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
-  FAM: { codigo: 'FAM', nombre: 'Día de la Familia', horario: 'Ley 1857 / Exonerado', horaInicio: '00:00', horaFin: '23:59', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, bgHex: '#FCE7F3', textHex: '#BE185D', borderHex: '#F9A8D4', esAusencia: true, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
+  S: { codigo: 'S', nombre: 'Saliente Guardia', horario: 'Descanso Post-Noche', horaInicio: '00:00', horaFin: '00:00', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, bgHex: '#ECFEFF', textHex: '#0E7490', borderHex: '#67E8F9', esAusencia: false, prorrateaMetaContrato: false, bloqueaPermutas: false, esNocturnoPesado: false, descuentaBancoHoras: false, esSistemaObligatorio: true, activo: true, visibleEnPaleta: true },
+  L: { codigo: 'L', nombre: 'Libre Programado', horario: 'Descanso Legal', horaInicio: '00:00', horaFin: '00:00', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, bgHex: '#FFFFFF', textHex: '#64748B', borderHex: '#E2E8F0', esAusencia: false, prorrateaMetaContrato: false, bloqueaPermutas: false, esNocturnoPesado: false, descuentaBancoHoras: false, esSistemaObligatorio: true, activo: true, visibleEnPaleta: true },
+  COMP: { codigo: 'COMP', nombre: 'Compensatorio Banco', horario: 'Amortiza 1 día hábil contrato', horaInicio: '00:00', horaFin: '00:00', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, bgHex: '#CCFBF1', textHex: '#0F766E', borderHex: '#5EEAD4', esAusencia: false, prorrateaMetaContrato: false, bloqueaPermutas: false, esNocturnoPesado: false, descuentaBancoHoras: true, modoAmortizacionBanco: 'DIA_HABIL_EMPRESA', horasAmortizacionBanco: 8, esSistemaObligatorio: true, activo: true, visibleEnPaleta: true },
+  VAC: { codigo: 'VAC', nombre: 'Vacaciones RRHH', horario: 'Bloqueo Intranet', horaInicio: '00:00', horaFin: '00:00', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, bgHex: '#D1FAE5', textHex: '#047857', borderHex: '#6EE7B7', esAusencia: true, prorrateaMetaContrato: true, bloqueaPermutas: true, esNocturnoPesado: false, descuentaBancoHoras: false, esSistemaObligatorio: true, activo: true, visibleEnPaleta: true },
+  INC: { codigo: 'INC', nombre: 'Incapacidad Médica', horario: 'Habeas Data', horaInicio: '00:00', horaFin: '00:00', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, bgHex: '#FCE7F3', textHex: '#BE185D', borderHex: '#F9A8D4', esAusencia: true, prorrateaMetaContrato: true, bloqueaPermutas: true, esNocturnoPesado: false, descuentaBancoHoras: false, esSistemaObligatorio: true, activo: true, visibleEnPaleta: true },
+  LIC: { codigo: 'LIC', nombre: 'Licencia Remunerada / Calamidad / Luto', horario: 'Bloqueo Intranet', horaInicio: '00:00', horaFin: '23:59', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, bgHex: '#E0E7FF', textHex: '#3730A3', borderHex: '#C7D2FE', esAusencia: true, prorrateaMetaContrato: true, bloqueaPermutas: true, esNocturnoPesado: false, descuentaBancoHoras: false, esSistemaObligatorio: true, activo: true, visibleEnPaleta: true },
+  FAM: { codigo: 'FAM', nombre: 'Día de la Familia', horario: 'Ley 1857 / Exonerado', horaInicio: '00:00', horaFin: '23:59', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, bgHex: '#FCE7F3', textHex: '#BE185D', borderHex: '#F9A8D4', esAusencia: true, prorrateaMetaContrato: true, bloqueaPermutas: true, esNocturnoPesado: false, descuentaBancoHoras: false, esSistemaObligatorio: true, activo: true, visibleEnPaleta: true },
 };
 
 export interface ModalConfirmacionConfig {
@@ -238,6 +348,11 @@ export interface SesionUsuarioSso {
   servicioBaseId: string;
   servicioBaseNombre: string;
   serviciosPermitidosIds: string[];
+  empresaContratanteId?: string | null;
+  empresaCodigo?: string | null;
+  empresaNombre?: string | null;
+  empresaEstadoConfiguracion?: string | null;
+  horasSemanalesAplicadas?: number;
   intranetReturnUrl?: string;
 }
 

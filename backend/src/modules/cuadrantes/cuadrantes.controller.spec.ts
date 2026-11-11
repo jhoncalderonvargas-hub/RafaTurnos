@@ -116,6 +116,7 @@ describe('CuadrantesController + CuadrantesReglasService', () => {
       id: 'emp-1',
       servicioBaseId: 'srv-urg',
     });
+    prismaMock.empleado.findMany.mockResolvedValue([]);
     prismaMock.servicio.findUnique.mockResolvedValue({
       id: 'srv-urg',
       nombre: 'Urgencias Generales',
@@ -142,7 +143,7 @@ describe('CuadrantesController + CuadrantesReglasService', () => {
       asignacionTurno: { findUnique: jest.fn(), findMany: jest.fn(), upsert: jest.fn() },
       tipoTurno: { findUnique: jest.fn(), findMany: jest.fn(), upsert: jest.fn() },
       auditoriaCambio: { create: jest.fn() },
-      empleado: { findUnique: jest.fn() },
+      empleado: { findUnique: jest.fn(), findMany: jest.fn() },
       servicio: { findUnique: jest.fn() },
       festivoColombia: { findMany: jest.fn() },
       $executeRaw: jest.fn(),
@@ -484,5 +485,30 @@ describe('CuadrantesController + CuadrantesReglasService', () => {
       11,
       prismaMock
     );
+  });
+
+  it('bloquea el cierre CERRADO_NOMINA (409) si hay colaboradores con empresa PENDIENTE_REGLAS', async () => {
+    prismaMock.empleado.findMany.mockResolvedValueOnce([
+      {
+        id: 'emp-pend',
+        nombre: 'Nuevo Intranet',
+        empresaContratante: { codigo: 'EMP_NUEVA', nombre: 'Temporal Nueva S.A.S.' },
+      },
+    ]);
+
+    const res = await request(app.getHttpServer())
+      .put('/api/v1/cuadrantes/estado')
+      .send({ servicioId: 'srv-urg', anio: 2026, mes: 11, estado: 'CERRADO_NOMINA' })
+      .expect(409);
+
+    expect(res.body.message).toContain('PENDIENTE_REGLAS');
+    expect(prismaMock.cuadrante.upsert).not.toHaveBeenCalled();
+
+    // Si todas las empresas están confirmadas -> 200
+    prismaMock.empleado.findMany.mockResolvedValueOnce([]);
+    await request(app.getHttpServer())
+      .put('/api/v1/cuadrantes/estado')
+      .send({ servicioId: 'srv-urg', anio: 2026, mes: 11, estado: 'CERRADO_NOMINA' })
+      .expect(200);
   });
 });

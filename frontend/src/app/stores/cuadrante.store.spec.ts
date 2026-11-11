@@ -56,6 +56,9 @@ describe('CuadranteStore', () => {
     apiSpy.actualizarEstadoCuadrante.and.returnValue(of({ ok: true }));
     apiSpy.guardarCeldaCuadrante.and.returnValue(of({ ok: true }));
     apiSpy.guardarLoteCuadrante.and.returnValue(of({ ok: true }));
+    apiSpy.getEstadoGlobalCuadrantes.and.returnValue(
+      of({ anio: 2026, estados: {}, asignacionesPorPeriodo: {}, saldosConsolidados: {} })
+    );
 
     TestBed.configureTestingModule({
       providers: [{ provide: TurnosApiService, useValue: apiSpy }],
@@ -217,12 +220,12 @@ describe('CuadranteStore', () => {
     expect(alertas.some((a) => a.mensaje.includes('Excede tope legal de 54h/sem'))).toBeTrue();
   });
 
-  it('propaga saldos continuos entre meses publicados y recalcula HDFD reactivamente con versionCacheFestivos', () => {
+  it('propaga saldos continuos por días hábiles entre meses publicados y recalcula HDFD y meta con festivos', () => {
     store.estadosPorCuadrante.set({
       'srv-urg::2026-11': 'PUBLICADO',
       'srv-urg::2026-12': 'BORRADOR',
     });
-    // Nov: 22 x M8 = 176h vs 168h contrato => diferencia +8h => saldoFinal nov = +8h
+    // Nov 2026: 23 días hábiles * 42h / 6 = 161h meta nominal. 22 x M8 = 176h => diferencia +15h
     const celdasNov: Record<number, any> = {};
     for (let d = 1; d <= 22; d++) {
       celdasNov[d] = { codigo: 'M8', servicioEjecutorId: 'srv-urg' };
@@ -233,19 +236,95 @@ describe('CuadranteStore', () => {
     });
 
     const mapa = store.mapaSaldosContinuos();
-    expect(mapa['e1::2026-11'].saldoFinal).toBe(8);
-    expect(mapa['e1::2026-12'].saldoInicial).toBe(8);
+    expect(mapa['e1::2026-11'].saldoFinal).toBe(15);
+    expect(mapa['e1::2026-12'].saldoInicial).toBe(15);
 
     // En nov-2026 hay 6 dom/fest entre 1..22 (1,2,8,15,16,22 => 48h) y 18-nov no es festivo
     catalogos.mesSeleccionado.set(11);
-    const hdfdAntes = store.filasServicioCompletas()[0].hdfd;
+    const filaAntes = store.filasServicioCompletas()[0];
+    const hdfdAntes = filaAntes.hdfd;
     expect(hdfdAntes).toBe(48);
+    expect(filaAntes.diasHabilesMes).toBe(23);
 
     FestivosColombiaHelper.agregarFestivoManual('2026-11-18', 'Aniversario Hospital');
     catalogos.versionCacheFestivos.update((v) => v + 1);
 
+    const filaDespues = store.filasServicioCompletas()[0];
     expect(store.diasDelMes()[17].festivo?.nombre).toBe('Aniversario Hospital');
-    expect(store.filasServicioCompletas()[0].hdfd).toBe(hdfdAntes + 8);
+    expect(filaDespues.hdfd).toBe(hdfdAntes + 8);
+    expect(filaDespues.diasHabilesMes).toBe(22);
+    expect(filaDespues.horasContratadasNominales).toBe(154);
+  });
+
+  it('calcula Esquema B de cobertura por turno (ROJO, AMARILLO, VERDE y exceso) y detecta empresas PENDIENTE_REGLAS', () => {
+    catalogos.aplicarServiciosDesdeDb([
+      {
+        ...srvUrg,
+        metasPorTurno: [
+          {
+            codigoTurno: 'M8',
+            nombreTurno: 'Mañana 8h',
+            habilitado: true,
+            minimoBase: 2,
+            esperadoBase: 3,
+            minimoDomFest: 1,
+            esperadoDomFest: 2,
+          },
+        ],
+      },
+      srvMat,
+    ]);
+    catalogos.aplicarEmpresasDesdeDb([
+      {
+        id: 'emp-pend',
+        codigo: 'NUEVA_SAS',
+        nombre: 'Operador Pendiente',
+        estadoConfiguracion: 'PENDIENTE_REGLAS',
+        plantillaNormativa: 'CST_LEY_2466',
+        horasSemanalesContrato: 42,
+        diasBaseSemana: 6,
+        horaInicioNocturnoMin: 1140,
+        horaFinNocturnoMin: 360,
+        porcentajeRecargoNocturno: 0.35,
+        modoRecargoDominical: 'LEY_2466',
+        aplicaTopeHorasExtrasSemanal: true,
+        topeHorasExtrasSemanal: 12,
+        usaBancoHoras: true,
+        activa: true,
+      },
+    ]);
+    catalogos.aplicarEmpleadosDesdeDb([
+      {
+        id: 'e1',
+        documento: '101',
+        nombre: 'Ana',
+        categoria: { nombre: 'Enfermero(a) Jefe' },
+        servicioBaseId: 'srv-urg',
+        empresaContratanteId: 'emp-pend',
+        horasContratoMes: 161,
+      },
+      { id: 'e2', documento: '102', nombre: 'Luis', categoria: { nombre: 'Enfermero(a) Jefe' }, servicioBaseId: 'srv-urg', horasContratoMes: 161 },
+      { id: 'e3', documento: '103', nombre: 'Rosa', categoria: { nombre: 'Enfermero(a) Jefe' }, servicioBaseId: 'srv-urg', horasContratoMes: 161 },
+      { id: 'e4', documento: '104', nombre: 'Juan', categoria: { nombre: 'Enfermero(a) Jefe' }, servicioBaseId: 'srv-urg', horasContratoMes: 161 },
+    ]);
+
+    store.asignacionesPorPeriodo.set({
+      '2026-11': {
+        e1: { 3: { codigo: 'M8', servicioEjecutorId: 'srv-urg' }, 4: { codigo: 'M8', servicioEjecutorId: 'srv-urg' }, 5: { codigo: 'M8', servicioEjecutorId: 'srv-urg' } },
+        e2: { 4: { codigo: 'M8', servicioEjecutorId: 'srv-urg' }, 5: { codigo: 'M8', servicioEjecutorId: 'srv-urg' } },
+        e3: { 5: { codigo: 'M8', servicioEjecutorId: 'srv-urg' } },
+        e4: { 5: { codigo: 'M8', servicioEjecutorId: 'srv-urg' } },
+      },
+    });
+
+    const resCob = store.resumenCoberturaPorTurnoYDia();
+    const filaM8 = resCob.filasTurnos.find((f) => f.codigoTurno === 'M8')!;
+    expect(filaM8.dias[3].estado).toBe('ROJO');     // 1 < min 2
+    expect(filaM8.dias[4].estado).toBe('AMARILLO'); // min 2 <= 2 < esp 3
+    expect(filaM8.dias[5].estado).toBe('VERDE');    // 4 >= esp 3
+    expect(filaM8.dias[5].exceso).toBe(1);          // +1 adicional
+
+    expect(store.empresasPendientesEnCuadrante().map((e) => e.codigo)).toEqual(['NUEVA_SAS']);
   });
 
   it('revierte estado y saldos consolidados si cambiarEstadoCuadrante falla al persistir', () => {

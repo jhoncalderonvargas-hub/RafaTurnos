@@ -107,14 +107,15 @@ export class SsoRoleGuard implements CanActivate {
     }
 
     if (rol === 'COORDINADOR') {
-      // Coordinador no puede modificar configuración global (servicios-admin, catálogo de turnos, festivos ni recálculo global)
+      // Coordinador no puede modificar configuración global (empresas, servicios-admin, catálogo de turnos, festivos ni recálculo global)
       if (
+        url.includes('/api/v1/empresas') ||
         url.includes('/api/v1/servicios-admin') ||
         url.includes('/api/v1/festivos') ||
         url.includes('/api/v1/liquidacion')
       ) {
         throw new ForbiddenException(
-          'Acceso denegado: la administración global de servicios, turnos, festivos y recálculo normativo está reservada a Talento Humano (ADMIN_TH).'
+          'Acceso denegado: la administración global de empresas, servicios, turnos, festivos y recálculo normativo está reservada a Talento Humano (ADMIN_TH).'
         );
       }
 
