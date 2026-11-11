@@ -1,7 +1,12 @@
-import { Component, EventEmitter, Input, Output, ViewEncapsulation } from '@angular/core';
+import { Component, EventEmitter, Input, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TipoTurnoConfig } from '../../models';
+import {
+  hoyColombiaIso,
+  obtenerHorasAmortizacionTurno,
+  textoFranjasVigentes,
+} from '../../shared/liquidacion-horas';
 
 export interface CalculoAutomaticoHorasTurno {
   ordinarias: number;
@@ -23,7 +28,7 @@ export interface TemaColorTurno {
   selector: 'app-configuracion-catalogo-turnos',
   standalone: true,
   imports: [CommonModule, FormsModule],
-  encapsulation: ViewEncapsulation.None,
+  styleUrl: './configuracion-catalogo-turnos.component.css',
   template: `
     <div class="catalogo-turnos-grid">
       <!-- Formulario de Creación / Edición de Turno -->
@@ -37,25 +42,29 @@ export interface TemaColorTurno {
             }
           </h3>
           @if (turnoEditandoCodigo) {
-            <button class="btn-clear-grid" (click)="limpiarFormularioTurno.emit()">Cancelar</button>
+            <button type="button" class="btn-clear-grid" (click)="limpiarFormularioTurno.emit()">Cancelar</button>
           }
         </div>
 
         <div class="form-vertical">
           <div class="two-col-inputs">
             <div class="form-row">
-              <label>Código (ej. M8, N12, T10):</label>
+              <label for="turno-form-codigo">Código (ej. M8, N12, T10):</label>
               <input
+                id="turno-form-codigo"
                 type="text"
                 maxlength="6"
                 placeholder="Ej: M10"
+                [disabled]="!!turnoEditandoCodigo"
+                [title]="turnoEditandoCodigo ? 'El código del turno no se puede modificar en modo edición' : 'Código identificador único'"
                 [ngModel]="turnoFormCodigo"
                 (ngModelChange)="cambiarTurnoFormCodigo.emit($event)"
               />
             </div>
             <div class="form-row">
-              <label>Nombre del Turno:</label>
+              <label for="turno-form-nombre">Nombre del Turno:</label>
               <input
+                id="turno-form-nombre"
                 type="text"
                 placeholder="Ej: Mañana Extendida 10h"
                 [ngModel]="turnoFormNombre"
@@ -65,22 +74,24 @@ export interface TemaColorTurno {
           </div>
 
           <div class="form-row">
-            <label>Tipo de Jornada:</label>
+            <label for="turno-form-modo">Tipo de Jornada:</label>
             <select
+              id="turno-form-modo"
               [ngModel]="turnoFormModoJornada"
               (ngModelChange)="cambiarTurnoFormModoJornada.emit($event)"
             >
               <option value="HORARIO">Turno con Horario (Calcula horas automáticamente)</option>
-              <option value="GUARDIA_24H">Guardia 24 Horas (15h Diurnas / 9h Nocturnas)</option>
+              <option value="GUARDIA_24H">Guardia 24 Horas (desglose Diurnas/Nocturnas automático según hora de inicio)</option>
               <option value="DESCANSO">Descanso / Novedad (0 horas laboradas)</option>
             </select>
           </div>
 
           @if (turnoFormModoJornada !== 'DESCANSO') {
-            <div class="two-col-inputs">
+            <div class="two-col-inputs two-col-equal">
               <div class="form-row">
-                <label>Hora de Inicio:</label>
+                <label for="turno-form-inicio">Hora de Inicio:</label>
                 <input
+                  id="turno-form-inicio"
                   type="time"
                   [ngModel]="turnoFormHoraInicio"
                   (ngModelChange)="cambiarTurnoFormHoraInicio.emit($event)"
@@ -88,8 +99,9 @@ export interface TemaColorTurno {
               </div>
               @if (turnoFormModoJornada === 'HORARIO') {
                 <div class="form-row">
-                  <label>Hora de Fin:</label>
+                  <label for="turno-form-fin">Hora de Fin:</label>
                   <input
+                    id="turno-form-fin"
                     type="time"
                     [ngModel]="turnoFormHoraFin"
                     (ngModelChange)="cambiarTurnoFormHoraFin.emit($event)"
@@ -100,8 +112,9 @@ export interface TemaColorTurno {
 
             @if (turnoFormModoJornada === 'HORARIO') {
               <div class="form-row">
-                <label>🍽️ Tiempo de Almuerzo / Descanso Intermedio (No computable - Art. 167 CST):</label>
+                <label for="turno-form-almuerzo">🍽️ Tiempo de Almuerzo / Descanso Intermedio (No computable - Art. 167 CST):</label>
                 <select
+                  id="turno-form-almuerzo"
                   [ngModel]="turnoFormMinutosAlmuerzo"
                   (ngModelChange)="cambiarTurnoFormMinutosAlmuerzo.emit(+$event)"
                 >
@@ -122,8 +135,8 @@ export interface TemaColorTurno {
               <span class="calc-sub">({{ calc.horarioTexto }}@if (calc.minutosAlmuerzo > 0) { • 🍽️ -{{ calc.minutosAlmuerzo }} min almuerzo })</span>
             </div>
             <div class="calc-pills">
-              <span class="calc-pill-day">☀️ Diurnas (06:00-19:00): <strong>{{ calc.diurnas }}h</strong></span>
-              <span class="calc-pill-night">🌙 Nocturnas (19:00-06:00): <strong>{{ calc.nocturnas }}h</strong></span>
+              <span class="calc-pill-day">☀️ Diurnas ({{ franjasHoy.diurna }}): <strong>{{ calc.diurnas }}h</strong></span>
+              <span class="calc-pill-night">🌙 Nocturnas ({{ franjasHoy.nocturna }}): <strong>{{ calc.nocturnas }}h</strong></span>
             </div>
           </div>
 
@@ -135,6 +148,8 @@ export interface TemaColorTurno {
                   type="button"
                   class="color-theme-swatch"
                   [class.selected]="turnoFormColorKey === tm.key"
+                  [attr.aria-pressed]="turnoFormColorKey === tm.key"
+                  [attr.aria-label]="'Color ' + tm.nombre"
                   [style.background-color]="tm.bgHex"
                   [style.color]="tm.textHex"
                   [style.border-color]="tm.borderHex"
@@ -162,12 +177,27 @@ export interface TemaColorTurno {
                 [ngModel]="turnoFormDescuentaBanco"
                 (ngModelChange)="cambiarTurnoFormDescuentaBanco.emit($event)"
               />
-              <span>🏦 Descuenta 8 horas del Banco de Horas (Compensatorio)</span>
+              <span>🏦 Descuenta {{ turnoFormDescuentaBanco ? turnoFormHorasAmortizacion : 8 }} horas del Banco de Horas (Compensatorio)</span>
             </label>
+
+            @if (turnoFormDescuentaBanco) {
+              <div class="form-row amortizacion-banco-box">
+                <label for="turno-form-amortizacion" class="amortizacion-banco-label">Horas que amortiza en Banco de Horas (por defecto 8h; ej. 7h bajo 42h/sem):</label>
+                <input
+                  id="turno-form-amortizacion"
+                  type="number"
+                  min="0.5"
+                  max="24"
+                  step="0.5"
+                  [ngModel]="turnoFormHorasAmortizacion"
+                  (ngModelChange)="cambiarTurnoFormHorasAmortizacion.emit(+$event)"
+                />
+              </div>
+            }
           </div>
 
           <div class="form-actions">
-            <button class="btn-primary" (click)="guardarTurnoEnCatalogo.emit()">
+            <button type="button" class="btn-primary" (click)="guardarTurnoEnCatalogo.emit()">
               💾 Guardar Turno en Catálogo
             </button>
           </div>
@@ -213,14 +243,15 @@ export interface TemaColorTurno {
               🛌 Descansos
             </button>
           </div>
-          <div class="search-input-wrap" style="min-width: 140px; max-width: 180px;">
+          <div class="search-input-wrap catalogo-search-wrap">
             <input
               type="text"
               [(ngModel)]="busquedaTurno"
               placeholder="🔍 Buscar turno..."
+              aria-label="Buscar turno en el catálogo"
               class="filter-search-input" />
             @if (busquedaTurno) {
-              <button class="btn-clear-search" (click)="busquedaTurno = ''">✕</button>
+              <button type="button" class="btn-clear-search" aria-label="Limpiar búsqueda" (click)="busquedaTurno = ''">✕</button>
             }
           </div>
         </div>
@@ -242,10 +273,10 @@ export interface TemaColorTurno {
                   <td class="col-turno">
                     <div class="turno-cell-cluster">
                       <span
-                        class="mini-shift"
+                        class="mini-shift catalogo-mini-shift"
                         [style.background-color]="t.bgHex"
                         [style.color]="t.textHex"
-                        [style.border]="'1px solid ' + t.borderHex">
+                        [style.border-color]="t.borderHex">
                         {{ t.codigo }}
                       </span>
                       <div class="turno-info-block">
@@ -281,7 +312,8 @@ export interface TemaColorTurno {
                         <span class="badge-nuevo" title="Exige descanso Saliente o Libre al día siguiente">🌙 Post-Turno</span>
                       }
                       @if (t.descuentaBancoHoras) {
-                        <span class="badge-banco-mini" title="Amortiza 8h del Banco de Horas">🏦 -8h Banco</span>
+                        @let horasAmort = horasAmortizacionTurno(t);
+                        <span class="badge-banco-mini" [title]="'Amortiza ' + horasAmort + 'h del Banco de Horas'">🏦 -{{ horasAmort }}h Banco</span>
                       }
                       @if (!t.esNocturnoPesado && !t.descuentaBancoHoras && !t.esAusencia && (!t.minutosAlmuerzo || t.minutosAlmuerzo === 0)) {
                         <span class="text-muted-sm">Continuo</span>
@@ -291,13 +323,16 @@ export interface TemaColorTurno {
                   <td class="col-gestion">
                     <div class="gestion-cluster">
                       <button
+                        type="button"
                         class="btn-palette-toggle"
                         [class.active]="t.visibleEnPaleta !== false"
+                        [attr.aria-pressed]="t.visibleEnPaleta !== false"
                         (click)="alternarVisibilidadTurnoPaleta.emit(t.codigo)"
                         [title]="t.visibleEnPaleta !== false ? 'Visible en paleta rápida del cuadrante' : 'Oculto en paleta'">
                         {{ t.visibleEnPaleta !== false ? '✅ Paleta' : '👁️ Oculto' }}
                       </button>
                       <button
+                        type="button"
                         class="btn-sm-primary"
                         (click)="cargarTurnoParaEdicion.emit(t)"
                         title="Editar este turno en el formulario">
@@ -308,7 +343,7 @@ export interface TemaColorTurno {
                 </tr>
               } @empty {
                 <tr>
-                  <td colspan="5" class="text-muted empty-state-box" style="text-align: center; padding: 22px;">
+                  <td colspan="5" class="text-muted empty-state-box catalogo-empty-cell">
                     🔍 No se encontraron turnos que coincidan con la búsqueda "{{ busquedaTurno }}".
                   </td>
                 </tr>
@@ -321,6 +356,7 @@ export interface TemaColorTurno {
   `,
 })
 export class ConfiguracionCatalogoTurnosComponent {
+  readonly franjasHoy = textoFranjasVigentes(hoyColombiaIso());
   busquedaTurno = '';
   filtroFamiliaTurno: 'TODOS' | 'ORDINARIOS' | 'GUARDIAS' | 'DESCANSOS' = 'TODOS';
 
@@ -358,6 +394,7 @@ export class ConfiguracionCatalogoTurnosComponent {
   @Input() turnoFormColorKey = 'AZUL_CIELO';
   @Input() turnoFormNocturnoPesado = false;
   @Input() turnoFormDescuentaBanco = false;
+  @Input() turnoFormHorasAmortizacion = 8;
   @Input() listaTurnosCatalogo: TipoTurnoConfig[] = [];
 
   @Output() limpiarFormularioTurno = new EventEmitter<void>();
@@ -370,7 +407,12 @@ export class ConfiguracionCatalogoTurnosComponent {
   @Output() cambiarTurnoFormColorKey = new EventEmitter<string>();
   @Output() cambiarTurnoFormNocturnoPesado = new EventEmitter<boolean>();
   @Output() cambiarTurnoFormDescuentaBanco = new EventEmitter<boolean>();
+  @Output() cambiarTurnoFormHorasAmortizacion = new EventEmitter<number>();
   @Output() guardarTurnoEnCatalogo = new EventEmitter<void>();
   @Output() alternarVisibilidadTurnoPaleta = new EventEmitter<string>();
   @Output() cargarTurnoParaEdicion = new EventEmitter<TipoTurnoConfig>();
+
+  horasAmortizacionTurno(t: TipoTurnoConfig): number {
+    return obtenerHorasAmortizacionTurno(t);
+  }
 }

@@ -1,5 +1,4 @@
-import { Component, EventEmitter, Input, Output, ViewEncapsulation } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, EventEmitter, Input, Output } from '@angular/core';
 import { RolUsuarioSso, SesionUsuarioSso } from '../../models';
 
 export type VistaApp = 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'AUDITORIA' | 'PORTAL_EMPLEADO' | 'CONFIGURACION';
@@ -7,8 +6,8 @@ export type VistaApp = 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'AUDITORIA' |
 @Component({
   selector: 'app-sidebar-navegacion',
   standalone: true,
-  imports: [CommonModule],
-  encapsulation: ViewEncapsulation.None,
+  imports: [],
+  styleUrl: './sidebar-navegacion.component.css',
   template: `
     <div class="side-nav-rail" [class.is-pinned]="sidebarFijo">
       <aside
@@ -19,9 +18,14 @@ export type VistaApp = 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'AUDITORIA' |
         (mouseenter)="sidebarMouseEnter.emit()"
         (mouseleave)="sidebarMouseLeave.emit()">
         <div class="side-brand">
-          <div class="logo-badge" (click)="alternarFijarSidebar.emit()" title="ESE Hospital San Rafael Yolombó">
+          <button
+            type="button"
+            class="logo-badge"
+            aria-label="Fijar o desanclar menú lateral"
+            (click)="alternarFijarSidebar.emit()"
+            title="ESE Hospital San Rafael Yolombó">
             <img src="assets/logo-hospital-yolombo.jpg" alt="Logo Hospital San Rafael Yolombó" class="logo-yolombo-img" />
-          </div>
+          </button>
           @if (!sidebarContraido) {
             <div class="brand-text">
               <div class="app-title">HOSPITAL SAN RAFAEL</div>
@@ -29,20 +33,23 @@ export type VistaApp = 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'AUDITORIA' |
             </div>
           }
           <button
+            type="button"
             class="btn-collapse-side"
             [class.pinned]="sidebarFijo"
+            [attr.aria-label]="sidebarFijo ? 'Desanclar menú lateral' : 'Fijar menú lateral abierto'"
             (click)="alternarFijarSidebar.emit()"
             [title]="sidebarFijo ? 'Desanclar menú (Modo flotante automático)' : 'Fijar menú lateral abierto'">
             {{ sidebarFijo ? '📌' : (sidebarContraido ? '»' : '📌') }}
           </button>
         </div>
 
-        <nav class="side-menu">
+        <nav class="side-menu" aria-label="Menú principal">
           @if (!esColaborador) {
             @if (!sidebarContraido) {
               <div class="side-section-label">OPERACIÓN</div>
             }
             <button
+              type="button"
               class="side-item"
               [class.active]="vistaActual === 'PLANIFICADOR'"
               (click)="itemNavegacionClick.emit('PLANIFICADOR')"
@@ -55,6 +62,7 @@ export type VistaApp = 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'AUDITORIA' |
           }
 
           <button
+            type="button"
             class="side-item"
             [class.active]="vistaActual === 'DASHBOARD'"
             (click)="itemNavegacionClick.emit('DASHBOARD')"
@@ -70,6 +78,7 @@ export type VistaApp = 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'AUDITORIA' |
 
           @if (!esColaborador) {
             <button
+              type="button"
               class="side-item"
               [class.active]="vistaActual === 'REPORTES'"
               (click)="itemNavegacionClick.emit('REPORTES')"
@@ -81,6 +90,7 @@ export type VistaApp = 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'AUDITORIA' |
             </button>
 
             <button
+              type="button"
               class="side-item"
               [class.active]="vistaActual === 'AUDITORIA'"
               (click)="itemNavegacionClick.emit('AUDITORIA')"
@@ -99,6 +109,7 @@ export type VistaApp = 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'AUDITORIA' |
           }
 
           <button
+            type="button"
             class="side-item"
             [class.active]="vistaActual === 'PORTAL_EMPLEADO'"
             (click)="itemNavegacionClick.emit('PORTAL_EMPLEADO')"
@@ -120,6 +131,7 @@ export type VistaApp = 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'AUDITORIA' |
             }
 
             <button
+              type="button"
               class="side-item"
               [class.active]="vistaActual === 'CONFIGURACION'"
               (click)="itemNavegacionClick.emit('CONFIGURACION')"
@@ -135,19 +147,19 @@ export type VistaApp = 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'AUDITORIA' |
         <div class="side-footer">
           @if (sesionActual; as sesion) {
             <div
-              class="side-footer-btn"
-              style="cursor: default; background: rgba(14, 165, 233, 0.12); border: 1px solid rgba(14, 165, 233, 0.3);"
+              class="side-footer-btn side-session-box"
               [title]="sesion.nombre + ' • ' + etiquetaRol(sesion.rol) + ' • C.C. ' + sesion.documento">
               <span class="side-icon">🔐</span>
               @if (!sidebarContraido) {
-                <div style="display: flex; flex-direction: column; line-height: 1.2; overflow: hidden;">
-                  <strong style="font-size: 11px; white-space: nowrap; text-overflow: ellipsis; overflow: hidden;">{{ sesion.nombre }}</strong>
-                  <span style="font-size: 10px; opacity: 0.85;">{{ etiquetaRol(sesion.rol) }}</span>
+                <div class="side-session-meta">
+                  <strong class="side-session-name">{{ sesion.nombre }}</strong>
+                  <span class="side-session-role">{{ etiquetaRol(sesion.rol) }}</span>
                 </div>
               }
             </div>
           }
           <button
+            type="button"
             class="side-footer-btn"
             (click)="abrirModalIcal.emit()"
             title="Vincular calendario con el teléfono">
@@ -157,16 +169,16 @@ export type VistaApp = 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'AUDITORIA' |
             }
           </button>
 
-          <a
+          <button
+            type="button"
             class="side-footer-btn intranet-link"
-            href="javascript:void(0)"
             (click)="notificarIntranet.emit()"
             title="Volver a la Intranet">
             <span class="side-icon">⬅</span>
             @if (!sidebarContraido) {
               <span>Volver a la Intranet</span>
             }
-          </a>
+          </button>
         </div>
       </aside>
     </div>

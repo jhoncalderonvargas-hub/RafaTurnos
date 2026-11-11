@@ -1,14 +1,37 @@
-import { BadRequestException, Body, ConflictException, Controller, Get, Header, Headers, Injectable, Module, NotFoundException, Param, Patch, Post, Query, Req, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Get, Header, Headers, Injectable, Module, NotFoundException, Optional, Param, Patch, Post, Query, Req, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
+import { FestivosColombiaService } from '../festivos/festivos-colombia.service';
+import { FestivosModule } from '../festivos/festivos.module';
+import { LiquidacionModule, LiquidacionService, TipoTurnoLiquidableDb, toTurnoLiquidable } from '../liquidacion/liquidacion.module';
+import { calcularDescansoEntreTurnosMin, DESCANSO_MINIMO_ENTRE_TURNOS_MIN, r2, sumarDiasIso } from '../../shared/liquidacion-horas';
 import { firmarJwtHmac, PayloadTokenSsoIntranet, RolUsuarioSso, verificarJwtHmac } from './jwt-sso.util';
 
 /** Marcador usado en tipos_turno para una celda explícitamente en blanco (ver CuadrantesController). */
 const CODIGO_CELDA_VACIA_DB = 'BLANCO';
 
 /** Normaliza un código de turno para comparar: vacío / BLANCO / null se tratan como Libre (L), igual que el frontend. */
-const normalizarCodigo = (cod?: string | null): string =>
-  !cod || cod === CODIGO_CELDA_VACIA_DB ? 'L' : cod;
+const normalizarCodigo = (cod?: string | null): string => {
+  const u = (cod || '').trim().toUpperCase();
+  return !u || u === CODIGO_CELDA_VACIA_DB ? 'L' : u;
+};
+
+const formatearFechaHoraBogota = (fecha?: Date | string | null): string => {
+  if (!fecha) return 'Reciente';
+  const d = new Date(fecha);
+  return (
+    d.toLocaleDateString('es-CO', { timeZone: 'America/Bogota' }) +
+    ' ' +
+    d.toLocaleTimeString('es-CO', {
+      timeZone: 'America/Bogota',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    })
+  );
+};
 
 export interface SolicitudPermutaDto {
   solicitanteId: string;
@@ -30,7 +53,233 @@ export interface SolicitudPermutaDto {
 
 @Controller('api/v1/permutas')
 export class PermutasController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly liquidacionService: LiquidacionService,
+    private readonly festivosService: FestivosColombiaService
+  ) {}
+
+  private async validarPermutaEnServidor(
+    params: {
+      solicitanteId: string;
+      receptorId: string;
+      servicioId: string;
+      anio: number;
+      mes: number;
+      diaOrigen: number;
+      turnoOrigen: string;
+      diaDestino: number;
+      turnoDestino: string;
+    },
+    tx?: Prisma.TransactionClient
+  ) {
+    const db = tx || this.prisma;
+    if (!Number.isInteger(params.anio) || !Number.isInteger(params.mes) || params.mes < 1 || params.mes > 12) {
+      throw new BadRequestException(`Periodo de permuta inválido (${params.anio}-${params.mes}).`);
+    }
+    const ultimoDiaMes = new Date(Date.UTC(params.anio, params.mes, 0)).getUTCDate();
+    if (
+      !Number.isInteger(params.diaOrigen) ||
+      params.diaOrigen < 1 ||
+      params.diaOrigen > ultimoDiaMes ||
+      !Number.isInteger(params.diaDestino) ||
+      params.diaDestino < 1 ||
+      params.diaDestino > ultimoDiaMes
+    ) {
+      throw new BadRequestException(
+        `Los días de permuta (${params.diaOrigen}, ${params.diaDestino}) están fuera del periodo ${params.anio}-${params.mes}.`
+      );
+    }
+
+    const [solicitante, receptor, servicio] = await Promise.all([
+      db.empleado.findFirst({
+        where: { OR: [{ id: params.solicitanteId }, { intranetId: params.solicitanteId }] },
+        include: { categoria: true },
+      }),
+      db.empleado.findFirst({
+        where: { OR: [{ id: params.receptorId }, { intranetId: params.receptorId }] },
+        include: { categoria: true },
+      }),
+      db.servicio.findFirst({
+        where: { OR: [{ id: params.servicioId }, { codigo: params.servicioId }] },
+      }),
+    ]);
+
+    if (!solicitante) {
+      throw new BadRequestException(`Empleado solicitante "${params.solicitanteId}" no encontrado.`);
+    }
+    if (!receptor) {
+      throw new BadRequestException(`Empleado receptor "${params.receptorId}" no encontrado.`);
+    }
+    if (!servicio) {
+      throw new BadRequestException(`Servicio hospitalario "${params.servicioId}" no encontrado.`);
+    }
+    if (solicitante.id === receptor.id) {
+      throw new BadRequestException('No es posible crear o aprobar una auto-permuta con el mismo colaborador.');
+    }
+
+    if (solicitante.categoriaId !== receptor.categoriaId) {
+      throw new ConflictException(
+        `RN-05 Bloqueante: Incompatibilidad de categoría asistencial (${solicitante.categoria?.nombre || solicitante.categoriaId} vs ${receptor.categoria?.nombre || receptor.categoriaId}).`
+      );
+    }
+
+    const cuadrante = await db.cuadrante.findUnique({
+      where: {
+        anio_mes_servicioId: {
+          anio: params.anio,
+          mes: params.mes,
+          servicioId: servicio.id,
+        },
+      },
+      select: { id: true, estado: true },
+    });
+    if (!cuadrante || cuadrante.estado === 'BORRADOR') {
+      throw new ConflictException(
+        'Solo se permiten permutas sobre cuadrantes en estado PUBLICADO.'
+      );
+    }
+    if (cuadrante.estado === 'CERRADO_NOMINA') {
+      throw new ConflictException(
+        'El cuadrante de este periodo se encuentra CERRADO para nómina. Reábrelo para tramitar permutas.'
+      );
+    }
+
+    const codOri = normalizarCodigo(params.turnoOrigen);
+    const codDes = normalizarCodigo(params.turnoDestino);
+    const novedadesBloq = new Set(['VAC', 'INC', 'LIC', 'FAM']);
+    if (novedadesBloq.has(codOri) || novedadesBloq.has(codDes)) {
+      throw new ConflictException(
+        'RN-03 Bloqueante: No se permiten permutas sobre periodos con Novedades Oficiales de RRHH (VAC, INC, LIC o FAM).'
+      );
+    }
+
+    const isoOri = `${params.anio}-${String(params.mes).padStart(2, '0')}-${String(params.diaOrigen).padStart(2, '0')}`;
+    const isoDes = `${params.anio}-${String(params.mes).padStart(2, '0')}-${String(params.diaDestino).padStart(2, '0')}`;
+    const fechaOriUtc = new Date(`${isoOri}T00:00:00.000Z`);
+    const fechaDesUtc = new Date(`${isoDes}T00:00:00.000Z`);
+
+    const [novSol, novRec, asigOri, asigDes] = await Promise.all([
+      db.novedadAusencia.findFirst({
+        where: { empleadoId: solicitante.id, fechaInicio: { lte: fechaOriUtc }, fechaFin: { gte: fechaOriUtc } },
+      }),
+      db.novedadAusencia.findFirst({
+        where: { empleadoId: receptor.id, fechaInicio: { lte: fechaDesUtc }, fechaFin: { gte: fechaDesUtc } },
+      }),
+      db.asignacionTurno.findUnique({
+        where: { empleadoId_fecha: { empleadoId: solicitante.id, fecha: fechaOriUtc } },
+        include: { tipoTurno: true, servicioEjecutor: { select: { nombre: true } } },
+      }),
+      db.asignacionTurno.findUnique({
+        where: { empleadoId_fecha: { empleadoId: receptor.id, fecha: fechaDesUtc } },
+        include: { tipoTurno: true, servicioEjecutor: { select: { nombre: true } } },
+      }),
+    ]);
+
+    if (novSol || novRec) {
+      throw new ConflictException(
+        `RN-03 Bloqueante: Novedad oficial activa (${(novSol || novRec)?.tipo}) bloquea el intercambio en esa fecha.`
+      );
+    }
+
+    const esCeldaEspejoAjena = (asig: any) =>
+      asig &&
+      asig.servicioEjecutorId &&
+      asig.servicioEjecutorId !== servicio.id &&
+      asig.tipoTurno?.codigo &&
+      !['BLANCO', '', 'L', 'VAC', 'INC', 'LIC', 'FAM'].includes(asig.tipoTurno.codigo.toUpperCase());
+
+    if (esCeldaEspejoAjena(asigOri) || esCeldaEspejoAjena(asigDes)) {
+      const ajena = esCeldaEspejoAjena(asigOri) ? asigOri : asigDes;
+      throw new ConflictException(
+        `Celda Espejo bloqueada: El turno "${ajena?.tipoTurno?.codigo}" pertenece a "${ajena?.servicioEjecutor?.nombre || ajena?.servicioEjecutorId}".`
+      );
+    }
+
+    // Verificar que los turnos enviados coincidan con la foto actual en PostgreSQL
+    const actualOriDb = normalizarCodigo(asigOri?.tipoTurno?.codigo);
+    const actualDesDb = normalizarCodigo(asigDes?.tipoTurno?.codigo);
+    if (actualOriDb !== codOri || actualDesDb !== codDes) {
+      throw new ConflictException(
+        `Los turnos solicitados no coinciden con el cuadrante actual en PostgreSQL (${solicitante.nombre} día ${params.diaOrigen}: actual ${actualOriDb} vs ${codOri}; ${receptor.nombre} día ${params.diaDestino}: actual ${actualDesDb} vs ${codDes}).`
+      );
+    }
+
+    // Validar descanso mínimo (>= 12h) y regla Post-Guardia Pesada contra día anterior y día siguiente (incluye cruce de mes)
+    const fechasVecinas = [
+      new Date(`${sumarDiasIso(isoOri, -1)}T00:00:00.000Z`),
+      new Date(`${sumarDiasIso(isoOri, 1)}T00:00:00.000Z`),
+      new Date(`${sumarDiasIso(isoDes, -1)}T00:00:00.000Z`),
+      new Date(`${sumarDiasIso(isoDes, 1)}T00:00:00.000Z`),
+    ];
+
+    const [tiposCatalogo, vecinasDb] = await Promise.all([
+      db.tipoTurno.findMany(),
+      db.asignacionTurno.findMany({
+        where: {
+          empleadoId: { in: [solicitante.id, receptor.id] },
+          fecha: { in: fechasVecinas },
+        },
+        include: { tipoTurno: true },
+      }),
+    ]);
+
+    const mapaTipos = new Map<string, TipoTurnoLiquidableDb>(
+      tiposCatalogo.map((t) => [t.codigo.toUpperCase(), t])
+    );
+    const mapaVecinas = new Map<string, TipoTurnoLiquidableDb>();
+    for (const v of vecinasDb) {
+      mapaVecinas.set(`${v.empleadoId}::${new Date(v.fecha).toISOString().substring(0, 10)}`, v.tipoTurno);
+    }
+
+    const validarEmpEnDia = (
+      empNombre: string,
+      empId: string,
+      fechaIso: string,
+      nuevoCod: string
+    ) => {
+      const cfgNuevo = mapaTipos.get(nuevoCod.toUpperCase());
+      const codPrev = normalizarCodigo(mapaVecinas.get(`${empId}::${sumarDiasIso(fechaIso, -1)}`)?.codigo);
+      const cfgPrev = mapaTipos.get(codPrev.toUpperCase());
+      const codSig = normalizarCodigo(mapaVecinas.get(`${empId}::${sumarDiasIso(fechaIso, 1)}`)?.codigo);
+      const cfgSig = mapaTipos.get(codSig.toUpperCase());
+
+      if (cfgPrev?.esNocturnoPesado && cfgNuevo && cfgNuevo.horasOrdinarias > 0 && !['S', 'L'].includes(nuevoCod.toUpperCase())) {
+        throw new ConflictException(
+          `RN-01 Bloqueante (${empNombre}): El día previo fue ${codPrev} (post-guardia), exige S o L.`
+        );
+      }
+      const descPrev = calcularDescansoEntreTurnosMin(
+        toTurnoLiquidable(cfgPrev, codPrev),
+        toTurnoLiquidable(cfgNuevo, nuevoCod)
+      );
+      if (descPrev !== null && descPrev < DESCANSO_MINIMO_ENTRE_TURNOS_MIN) {
+        throw new ConflictException(
+          `RN-02 Bloqueante (${empNombre}): Solo ${r2(descPrev / 60)}h de descanso entre ${codPrev} (día previo) y ${nuevoCod} (< 12h legales).`
+        );
+      }
+
+      if (cfgNuevo?.esNocturnoPesado && cfgSig && cfgSig.horasOrdinarias > 0 && !['S', 'L'].includes(codSig.toUpperCase())) {
+        throw new ConflictException(
+          `RN-01 Bloqueante (${empNombre}): Asignar ${nuevoCod} antes de ${codSig} incumple el saliente/libre obligatorio.`
+        );
+      }
+      const descSig = calcularDescansoEntreTurnosMin(
+        toTurnoLiquidable(cfgNuevo, nuevoCod),
+        toTurnoLiquidable(cfgSig, codSig)
+      );
+      if (descSig !== null && descSig < DESCANSO_MINIMO_ENTRE_TURNOS_MIN) {
+        throw new ConflictException(
+          `RN-02 Bloqueante (${empNombre}): Solo ${r2(descSig / 60)}h de descanso entre ${nuevoCod} y ${codSig} del día siguiente (< 12h legales).`
+        );
+      }
+    };
+
+    validarEmpEnDia(solicitante.nombre, solicitante.id, isoOri, codDes);
+    validarEmpEnDia(receptor.nombre, receptor.id, isoDes, codOri);
+
+    return { solicitante, receptor, servicio, cuadrante, codOri, codDes };
+  }
 
   @Get()
   async listarPermutas() {
@@ -49,11 +298,7 @@ export class PermutasController {
 
     return permutas.map((p) => ({
       id: p.id,
-      fechaSolicitud: p.fechaSolicitud
-        ? new Date(p.fechaSolicitud).toLocaleDateString('es-CO') +
-          ' ' +
-          new Date(p.fechaSolicitud).toTimeString().substring(0, 5)
-        : 'Reciente',
+      fechaSolicitud: formatearFechaHoraBogota(p.fechaSolicitud),
       solicitanteId: p.solicitanteId,
       solicitanteNombre: p.solicitante?.nombre || 'Solicitante',
       receptorId: p.receptorId,
@@ -74,42 +319,24 @@ export class PermutasController {
 
   @Post()
   async crearSolicitudPermuta(@Body() dto: SolicitudPermutaDto) {
-    // Resolver solicitante por id o intranetId
-    const solicitante = await this.prisma.empleado.findFirst({
-      where: {
-        OR: [{ id: dto.solicitanteId }, { intranetId: dto.solicitanteId }],
-      },
-    });
-    if (!solicitante) {
-      throw new BadRequestException(`Empleado solicitante "${dto.solicitanteId}" no encontrado.`);
-    }
-
-    // Resolver receptor por id o intranetId
-    const receptor = await this.prisma.empleado.findFirst({
-      where: {
-        OR: [{ id: dto.receptorId }, { intranetId: dto.receptorId }],
-      },
-    });
-    if (!receptor) {
-      throw new BadRequestException(`Empleado receptor "${dto.receptorId}" no encontrado.`);
-    }
-
-    // Resolver servicio por id o código
-    const servicio = await this.prisma.servicio.findFirst({
-      where: {
-        OR: [{ id: dto.servicioId }, { codigo: dto.servicioId }],
-      },
-    });
-    if (!servicio) {
-      throw new BadRequestException(`Servicio hospitalario "${dto.servicioId}" no encontrado.`);
-    }
-
-    // El periodo es obligatorio: sin él no es posible ubicar las celdas a intercambiar al aprobar.
+    // El periodo es obligatorio: sin él no es posible ubicar ni validar las celdas.
     const anio = Number(dto.anio);
     const mes = Number(dto.mes);
     if (!Number.isInteger(anio) || !Number.isInteger(mes) || mes < 1 || mes > 12) {
       throw new BadRequestException('La solicitud de permuta debe indicar el periodo (anio y mes) del cuadrante.');
     }
+
+    const { solicitante, receptor, servicio, codOri, codDes } = await this.validarPermutaEnServidor({
+      solicitanteId: dto.solicitanteId,
+      receptorId: dto.receptorId,
+      servicioId: dto.servicioId,
+      anio,
+      mes,
+      diaOrigen: Number(dto.diaOrigen),
+      turnoOrigen: dto.turnoOrigen,
+      diaDestino: Number(dto.diaDestino),
+      turnoDestino: dto.turnoDestino,
+    });
 
     const permuta = await this.prisma.solicitudPermuta.create({
       data: {
@@ -118,12 +345,12 @@ export class PermutasController {
         servicioId: servicio.id,
         anio,
         mes,
-        diaOrigen: dto.diaOrigen,
-        turnoOrigen: dto.turnoOrigen,
-        diaDestino: dto.diaDestino,
-        turnoDestino: dto.turnoDestino,
+        diaOrigen: Number(dto.diaOrigen),
+        turnoOrigen: codOri,
+        diaDestino: Number(dto.diaDestino),
+        turnoDestino: codDes,
         estado: 'PENDIENTE_PAR',
-        validacionReglas: dto.validacionReglas || 'Misma categoría y descanso mínimo validado.',
+        validacionReglas: dto.validacionReglas || 'Misma categoría y descanso mínimo de 12h verificado en servidor.',
       },
       include: {
         solicitante: { include: { categoria: true } },
@@ -133,7 +360,7 @@ export class PermutasController {
 
     return {
       id: permuta.id,
-      fechaSolicitud: 'Hoy ' + new Date(permuta.fechaSolicitud).toTimeString().substring(0, 5),
+      fechaSolicitud: formatearFechaHoraBogota(permuta.fechaSolicitud),
       solicitanteId: permuta.solicitanteId,
       solicitanteNombre: permuta.solicitante?.nombre || 'Solicitante',
       receptorId: permuta.receptorId,
@@ -153,198 +380,288 @@ export class PermutasController {
 
   /**
    * Paso 2 del Flujo: El compañero receptor (Colaborador 2) acepta la propuesta.
-   * La solicitud pasa de PENDIENTE_PAR a PENDIENTE_SUPERVISOR.
+   * Transición atómica: PENDIENTE_PAR -> PENDIENTE_SUPERVISOR.
    */
   @Patch(':id/aceptar-par')
   async aceptarPermutaPar(@Param('id') id: string) {
-    const permuta = await this.prisma.solicitudPermuta.findUnique({ where: { id } });
-    if (!permuta) throw new NotFoundException('Solicitud de permuta no encontrada');
-    if (permuta.estado !== 'PENDIENTE_PAR') {
-      throw new BadRequestException('La solicitud no se encuentra en estado PENDIENTE_PAR');
-    }
-
-    return this.prisma.solicitudPermuta.update({
-      where: { id },
-      data: { estado: 'PENDIENTE_SUPERVISOR' },
+    return this.prisma.$transaction(async (tx) => {
+      const claim = await tx.solicitudPermuta.updateMany({
+        where: { id, estado: 'PENDIENTE_PAR' },
+        data: { estado: 'PENDIENTE_SUPERVISOR' },
+      });
+      if (claim.count === 0) {
+        const existe = await tx.solicitudPermuta.findUnique({ where: { id } });
+        if (!existe) throw new NotFoundException('Solicitud de permuta no encontrada');
+        throw new ConflictException(
+          `La solicitud no se encuentra en estado PENDIENTE_PAR (estado actual: ${existe.estado}).`
+        );
+      }
+      return tx.solicitudPermuta.findUnique({ where: { id } });
     });
   }
 
   /**
    * Paso 2 del Flujo: El compañero receptor (Colaborador 2) declina la propuesta.
-   * La solicitud se cierra como RECHAZADA por el par sin llegar a la supervisora.
+   * Transición atómica estricta: PENDIENTE_PAR -> RECHAZADA.
    */
   @Patch(':id/rechazar-par')
   async rechazarPermutaPar(@Param('id') id: string, @Body() body?: { motivo?: string }) {
-    const permuta = await this.prisma.solicitudPermuta.findUnique({ where: { id } });
-    if (!permuta) throw new NotFoundException('Solicitud de permuta no encontrada');
-
-    return this.prisma.solicitudPermuta.update({
-      where: { id },
-      data: {
-        estado: 'RECHAZADA',
-        motivoRechazo: body?.motivo || 'Declinada por el compañero receptor.',
-      },
+    const motivo = body?.motivo || 'Declinada por el compañero receptor.';
+    return this.prisma.$transaction(async (tx) => {
+      const claim = await tx.solicitudPermuta.updateMany({
+        where: { id, estado: 'PENDIENTE_PAR' },
+        data: {
+          estado: 'RECHAZADA',
+          motivoRechazo: motivo,
+        },
+      });
+      if (claim.count === 0) {
+        const existe = await tx.solicitudPermuta.findUnique({ where: { id } });
+        if (!existe) throw new NotFoundException('Solicitud de permuta no encontrada');
+        throw new ConflictException(
+          `Solo un par con solicitud PENDIENTE_PAR puede declinarla (estado actual: ${existe.estado}).`
+        );
+      }
+      return tx.solicitudPermuta.findUnique({ where: { id } });
     });
   }
 
   /**
    * Paso 3 del Flujo: La supervisora aprueba la permuta ya concertada por ambos colaboradores.
-   *
-   * En una única transacción:
-   *  1. Verifica que el cuadrante del periodo no esté cerrado para nómina.
-   *  2. Verifica que los turnos actuales en BD sigan siendo los acordados (evita aprobar sobre datos obsoletos).
-   *  3. Intercambia los turnos en `asignaciones_turno` dentro del servicio de la permuta (no el que esté viendo la supervisora).
-   *  4. Registra la auditoría de ambos cambios y marca la solicitud como APROBADA.
+   * Toda la secuencia (bloqueo optimista atómico de estado + validaciones + intercambio + recálculo de Banco + auditoría)
+   * ocurre dentro de la misma transacción ACID para impedir doble ejecución por concurrencia (TOCTOU).
    */
   @Patch(':id/aprobar')
   async aprobarPermuta(@Param('id') id: string, @Req() req?: any) {
-    const permuta = await this.prisma.solicitudPermuta.findUnique({
-      where: { id },
-      include: { solicitante: true, receptor: true },
-    });
-    if (!permuta) throw new NotFoundException('Solicitud de permuta no encontrada');
-    if (permuta.estado !== 'PENDIENTE_SUPERVISOR') {
-      throw new BadRequestException('Solo se pueden aprobar solicitudes en estado PENDIENTE_SUPERVISOR.');
-    }
-    if (!permuta.anio || !permuta.mes) {
-      throw new BadRequestException(
-        'La solicitud no tiene periodo (año/mes) registrado. Recházala y pide al colaborador que la vuelva a enviar.'
-      );
-    }
+    const resultado = await this.prisma.$transaction(
+      async (tx) => {
+        // 1. Lock optimista atómico dentro de la transacción: solo una llamada concurrente gana PENDIENTE_SUPERVISOR
+        const claim = await tx.solicitudPermuta.updateMany({
+          where: { id, estado: 'PENDIENTE_SUPERVISOR' },
+          data: { estado: 'APROBADA' },
+        });
+        if (claim.count === 0) {
+          const existe = await tx.solicitudPermuta.findUnique({
+            where: { id },
+            select: { id: true, estado: true },
+          });
+          if (!existe) throw new NotFoundException('Solicitud de permuta no encontrada');
+          throw new ConflictException(
+            `Solo se pueden aprobar solicitudes en estado PENDIENTE_SUPERVISOR (estado actual: ${existe.estado}).`
+          );
+        }
 
-    const anio = permuta.anio;
-    const mes = permuta.mes;
-    const fechaOrigen = new Date(Date.UTC(anio, mes - 1, permuta.diaOrigen));
-    const fechaDestino = new Date(Date.UTC(anio, mes - 1, permuta.diaDestino));
+        const permuta = await tx.solicitudPermuta.findUnique({
+          where: { id },
+          include: { solicitante: true, receptor: true },
+        });
+        if (!permuta) throw new NotFoundException('Solicitud de permuta no encontrada');
+        if (!permuta.anio || !permuta.mes) {
+          throw new BadRequestException(
+            'La solicitud no tiene periodo (año/mes) registrado. Recházala y pide al colaborador que la vuelva a enviar.'
+          );
+        }
 
-    const resultado = await this.prisma.$transaction(async (tx) => {
-      // 1. Cuadrante del servicio de la permuta y bloqueo por cierre de nómina
-      const cuadrante = await tx.cuadrante.upsert({
-        where: { anio_mes_servicioId: { anio, mes, servicioId: permuta.servicioId } },
-        update: {},
-        create: { anio, mes, servicioId: permuta.servicioId, estado: 'BORRADOR' },
-      });
-      if (cuadrante.estado === 'CERRADO_NOMINA') {
-        throw new ConflictException('El cuadrante de este periodo está CERRADO para nómina. Reábrelo para aprobar la permuta.');
-      }
+        const anio = permuta.anio;
+        const mes = permuta.mes;
 
-      // 2. Estado actual de ambas celdas
-      const [asigSolicitante, asigReceptor] = await Promise.all([
-        tx.asignacionTurno.findUnique({
-          where: { empleadoId_fecha: { empleadoId: permuta.solicitanteId, fecha: fechaOrigen } },
-          include: { tipoTurno: true },
-        }),
-        tx.asignacionTurno.findUnique({
-          where: { empleadoId_fecha: { empleadoId: permuta.receptorId, fecha: fechaDestino } },
-          include: { tipoTurno: true },
-        }),
-      ]);
+        await this.festivosService.asegurarAnios([anio - 1, anio, anio + 1]);
 
-      const actualSolicitante = normalizarCodigo(asigSolicitante?.tipoTurno.codigo);
-      const actualReceptor = normalizarCodigo(asigReceptor?.tipoTurno.codigo);
-      if (
-        actualSolicitante !== normalizarCodigo(permuta.turnoOrigen) ||
-        actualReceptor !== normalizarCodigo(permuta.turnoDestino)
-      ) {
-        throw new ConflictException(
-          `El cuadrante cambió desde que se solicitó la permuta (actual: ${permuta.solicitante.nombre} ${actualSolicitante}, ` +
-            `${permuta.receptor.nombre} ${actualReceptor}). Recházala y solicítala de nuevo.`
-        );
-      }
-
-      // 3. Resolver tipos de turno a intercambiar
-      const resolverTipo = async (cod: string) => {
-        const codigoDb = normalizarCodigo(cod);
-        const tipo = await tx.tipoTurno.findUnique({ where: { codigo: codigoDb } });
-        if (!tipo) throw new BadRequestException(`El código de turno "${codigoDb}" no existe en el catálogo.`);
-        return tipo.id;
-      };
-      const tipoParaSolicitante = await resolverTipo(permuta.turnoDestino);
-      const tipoParaReceptor = await resolverTipo(permuta.turnoOrigen);
-
-      const aplicar = (empleadoId: string, fecha: Date, tipoTurnoId: string, anterior: string) =>
-        tx.asignacionTurno.upsert({
-          where: { empleadoId_fecha: { empleadoId, fecha } },
-          // Se conserva codigoPrevisto (lo planeado) para que el comparador Previsto vs Real refleje la permuta
-          update: { tipoTurnoId, cuadranteId: cuadrante.id, servicioEjecutorId: permuta.servicioId },
-          create: {
-            cuadranteId: cuadrante.id,
-            empleadoId,
-            tipoTurnoId,
-            servicioEjecutorId: permuta.servicioId,
-            fecha,
-            esRotacion: false,
-            codigoPrevisto: anterior,
+        const { cuadrante } = await this.validarPermutaEnServidor(
+          {
+            solicitanteId: permuta.solicitanteId,
+            receptorId: permuta.receptorId,
+            servicioId: permuta.servicioId,
+            anio,
+            mes,
+            diaOrigen: permuta.diaOrigen,
+            turnoOrigen: permuta.turnoOrigen,
+            diaDestino: permuta.diaDestino,
+            turnoDestino: permuta.turnoDestino,
           },
+          tx
+        );
+
+        const fechaOrigen = new Date(Date.UTC(anio, mes - 1, permuta.diaOrigen));
+        const fechaDestino = new Date(Date.UTC(anio, mes - 1, permuta.diaDestino));
+
+        const resolverTipoObj = async (cod: string) => {
+          const codigoDb = normalizarCodigo(cod);
+          const tipo = await tx.tipoTurno.findUnique({ where: { codigo: codigoDb } });
+          if (!tipo) {
+            throw new BadRequestException(`El código de turno "${codigoDb}" no existe en el catálogo.`);
+          }
+          return tipo;
+        };
+
+        const [tipoObjSol, tipoObjRec] = await Promise.all([
+          resolverTipoObj(permuta.turnoDestino),
+          resolverTipoObj(permuta.turnoOrigen),
+        ]);
+
+        const [horasSol, horasRec] = await Promise.all([
+          this.liquidacionService.calcularHorasPorTipo(tipoObjSol, fechaOrigen),
+          this.liquidacionService.calcularHorasPorTipo(tipoObjRec, fechaDestino),
+        ]);
+
+        const actualSolicitante = normalizarCodigo(permuta.turnoOrigen);
+        const actualReceptor = normalizarCodigo(permuta.turnoDestino);
+
+        const aplicar = (
+          empleadoId: string,
+          fecha: Date,
+          tipoTurnoId: string,
+          anterior: string,
+          horas: { hod: number; hon: number; hdfd: number; hdfn: number; hed: number; hen: number }
+        ) =>
+          tx.asignacionTurno.upsert({
+            where: { empleadoId_fecha: { empleadoId, fecha } },
+            // Se conserva codigoPrevisto (lo planeado) para que el comparador Previsto vs Real refleje la permuta
+            update: {
+              tipoTurnoId,
+              cuadranteId: cuadrante.id,
+              servicioEjecutorId: permuta.servicioId,
+              ...horas,
+            },
+            create: {
+              cuadranteId: cuadrante.id,
+              empleadoId,
+              tipoTurnoId,
+              servicioEjecutorId: permuta.servicioId,
+              fecha,
+              esRotacion: false,
+              codigoPrevisto: anterior,
+              ...horas,
+            },
+          });
+
+        const nuevaSolicitante = await aplicar(
+          permuta.solicitanteId,
+          fechaOrigen,
+          tipoObjSol.id,
+          actualSolicitante,
+          horasSol
+        );
+        const nuevaReceptor = await aplicar(
+          permuta.receptorId,
+          fechaDestino,
+          tipoObjRec.id,
+          actualReceptor,
+          horasRec
+        );
+
+        const actorNombre = req?.usuarioSso?.nombre
+          ? `${req.usuarioSso.nombre} (${req.usuarioSso.rol === 'ADMIN_TH' ? 'Talento Humano' : 'Coordinador'})`
+          : 'Coordinación Asistencial';
+
+        await tx.auditoriaCambio.createMany({
+          data: [
+            {
+              asignacionTurnoId: nuevaSolicitante.id,
+              servicioId: permuta.servicioId,
+              empleadoId: permuta.solicitanteId,
+              actorId: actorNombre,
+              tipoAccion: 'PERMUTA',
+              turnoAnterior: actualSolicitante,
+              turnoNuevo: normalizarCodigo(permuta.turnoDestino),
+              justificacion: `Permuta aprobada con ${permuta.receptor.nombre} (Día ${permuta.diaOrigen}: [${permuta.turnoOrigen}] ⇄ Día ${permuta.diaDestino}: [${permuta.turnoDestino}])`,
+            },
+            {
+              asignacionTurnoId: nuevaReceptor.id,
+              servicioId: permuta.servicioId,
+              empleadoId: permuta.receptorId,
+              actorId: actorNombre,
+              tipoAccion: 'PERMUTA',
+              turnoAnterior: actualReceptor,
+              turnoNuevo: normalizarCodigo(permuta.turnoOrigen),
+              justificacion: `Permuta aprobada con ${permuta.solicitante.nombre} (Día ${permuta.diaDestino}: [${permuta.turnoDestino}] ⇄ Día ${permuta.diaOrigen}: [${permuta.turnoOrigen}])`,
+            },
+          ],
         });
 
-      const nuevaSolicitante = await aplicar(permuta.solicitanteId, fechaOrigen, tipoParaSolicitante, actualSolicitante);
-      const nuevaReceptor = await aplicar(permuta.receptorId, fechaDestino, tipoParaReceptor, actualReceptor);
+        // Recalcular banco de horas en el servicio ejecutado y servicios base afectados si ya consolidaron
+        const serviciosImpactados = new Set<string>([permuta.servicioId]);
+        if (permuta.solicitante.servicioBaseId !== permuta.servicioId) {
+          serviciosImpactados.add(permuta.solicitante.servicioBaseId);
+        }
+        if (permuta.receptor.servicioBaseId !== permuta.servicioId) {
+          serviciosImpactados.add(permuta.receptor.servicioBaseId);
+        }
+        for (const srvIdImp of serviciosImpactados) {
+          const cuadImp =
+            srvIdImp === permuta.servicioId
+              ? cuadrante
+              : await tx.cuadrante.findUnique({
+                  where: { anio_mes_servicioId: { anio, mes, servicioId: srvIdImp } },
+                  select: { estado: true },
+                });
+          if (cuadImp && cuadImp.estado !== 'BORRADOR') {
+            await this.liquidacionService.consolidarSaldosBancoServicio(
+              srvIdImp,
+              anio,
+              mes,
+              new Map(),
+              true,
+              tx
+            );
+          }
+        }
 
-      const actorNombre = req?.usuarioSso?.nombre
-        ? `${req.usuarioSso.nombre} (${req.usuarioSso.rol === 'ADMIN_TH' ? 'Talento Humano' : 'Coordinador'})`
-        : 'Coordinación Asistencial';
-
-      // 4. Auditoría y cierre de la solicitud (Registro limpio sin UUIDs ilegibles)
-      await tx.auditoriaCambio.createMany({
-        data: [
-          {
-            asignacionTurnoId: nuevaSolicitante.id,
-            servicioId: permuta.servicioId,
-            empleadoId: permuta.solicitanteId,
-            actorId: actorNombre,
-            tipoAccion: 'PERMUTA',
-            turnoAnterior: actualSolicitante,
-            turnoNuevo: normalizarCodigo(permuta.turnoDestino),
-            justificacion: `Permuta aprobada con ${permuta.receptor.nombre} (Día ${permuta.diaOrigen}: [${permuta.turnoOrigen}] ⇄ Día ${permuta.diaDestino}: [${permuta.turnoDestino}])`,
-          },
-          {
-            asignacionTurnoId: nuevaReceptor.id,
-            servicioId: permuta.servicioId,
-            empleadoId: permuta.receptorId,
-            actorId: actorNombre,
-            tipoAccion: 'PERMUTA',
-            turnoAnterior: actualReceptor,
-            turnoNuevo: normalizarCodigo(permuta.turnoOrigen),
-            justificacion: `Permuta aprobada con ${permuta.solicitante.nombre} (Día ${permuta.diaDestino}: [${permuta.turnoDestino}] ⇄ Día ${permuta.diaOrigen}: [${permuta.turnoOrigen}])`,
-          },
-        ],
-      });
-
-      return tx.solicitudPermuta.update({
-        where: { id },
-        data: { estado: 'APROBADA' },
-      });
-    });
+        const permutaFinal = await tx.solicitudPermuta.findUnique({ where: { id } });
+        return { permutaFinal, permuta, anio, mes };
+      },
+      { timeout: 20000 }
+    );
 
     return {
-      ...resultado,
+      ...resultado.permutaFinal,
       cambiosAplicados: [
-        { empleadoId: permuta.solicitanteId, anio, mes, dia: permuta.diaOrigen, codigo: permuta.turnoDestino },
-        { empleadoId: permuta.receptorId, anio, mes, dia: permuta.diaDestino, codigo: permuta.turnoOrigen },
+        {
+          empleadoId: resultado.permuta.solicitanteId,
+          anio: resultado.anio,
+          mes: resultado.mes,
+          dia: resultado.permuta.diaOrigen,
+          codigo: resultado.permuta.turnoDestino,
+        },
+        {
+          empleadoId: resultado.permuta.receptorId,
+          anio: resultado.anio,
+          mes: resultado.mes,
+          dia: resultado.permuta.diaDestino,
+          codigo: resultado.permuta.turnoOrigen,
+        },
       ],
     };
   }
 
   /**
    * Paso 3 del Flujo: La supervisora rechaza la permuta con justificación clínica/operativa.
+   * Transición atómica estricta: solo desde PENDIENTE_PAR o PENDIENTE_SUPERVISOR.
    */
   @Patch(':id/rechazar')
   async rechazarPermuta(@Param('id') id: string, @Body() body?: { motivo?: string }) {
-    const permuta = await this.prisma.solicitudPermuta.findUnique({ where: { id } });
-    if (!permuta) throw new NotFoundException('Solicitud de permuta no encontrada');
-
-    return this.prisma.solicitudPermuta.update({
-      where: { id },
-      data: {
-        estado: 'RECHAZADA',
-        motivoRechazo: body?.motivo || 'Rechazada por la supervisora asistencial.',
-      },
+    const motivo = body?.motivo || 'Rechazada por la supervisora asistencial.';
+    return this.prisma.$transaction(async (tx) => {
+      const claim = await tx.solicitudPermuta.updateMany({
+        where: { id, estado: { in: ['PENDIENTE_PAR', 'PENDIENTE_SUPERVISOR'] } },
+        data: {
+          estado: 'RECHAZADA',
+          motivoRechazo: motivo,
+        },
+      });
+      if (claim.count === 0) {
+        const existe = await tx.solicitudPermuta.findUnique({ where: { id } });
+        if (!existe) throw new NotFoundException('Solicitud de permuta no encontrada');
+        throw new ConflictException(
+          `No es posible rechazar una permuta cuyo estado actual es ${existe.estado}.`
+        );
+      }
+      return tx.solicitudPermuta.findUnique({ where: { id } });
     });
   }
 
   @Post('simular')
-  simularPermutaEntrePares(@Body() dto: SolicitudPermutaDto) {
+  async simularPermutaEntrePares(@Body() dto: SolicitudPermutaDto) {
     if (dto.solicitanteCategoria && dto.receptorCategoria && dto.solicitanteCategoria !== dto.receptorCategoria) {
       return {
         permitida: false,
@@ -352,28 +669,81 @@ export class PermutasController {
       };
     }
 
+    if (
+      dto.solicitanteId &&
+      dto.receptorId &&
+      dto.servicioId &&
+      dto.anio &&
+      dto.mes &&
+      dto.diaOrigen &&
+      dto.diaDestino
+    ) {
+      try {
+        await this.validarPermutaEnServidor({
+          solicitanteId: dto.solicitanteId,
+          receptorId: dto.receptorId,
+          servicioId: dto.servicioId,
+          anio: Number(dto.anio),
+          mes: Number(dto.mes),
+          diaOrigen: Number(dto.diaOrigen),
+          turnoOrigen: dto.turnoOrigen,
+          diaDestino: Number(dto.diaDestino),
+          turnoDestino: dto.turnoDestino,
+        });
+      } catch (e: any) {
+        return {
+          permitida: false,
+          motivo: e?.message || 'La permuta incumple reglas legales o de novedades.',
+        };
+      }
+    }
+
     return {
       permitida: true,
       estadoInicial: 'PENDIENTE_PAR',
       mensaje:
-        'Permuta válida: Misma categoría profesional y se preserva el ratio mínimo del servicio.',
+        'Permuta válida: Misma categoría profesional, sin novedades bloqueantes y descanso mínimo >= 12h verificado.',
     };
   }
 }
 
 @Controller('api/v1/intranet')
 export class IntranetIntegrationController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly configService?: ConfigService
+  ) {}
 
   private obtenerSecretSso(): string {
     return (
+      this.configService?.get<string>('INTRANET_JWT_SECRET') ||
       process.env.INTRANET_JWT_SECRET ||
       'clave_secreta_compartida_con_intranet_hospitalaria'
     );
   }
 
   private obtenerUrlRetornoIntranet(): string {
-    return process.env.INTRANET_RETURN_URL || 'http://localhost:4300';
+    return (
+      this.configService?.get<string>('INTRANET_RETURN_URL') ||
+      process.env.INTRANET_RETURN_URL ||
+      'http://localhost:4300'
+    );
+  }
+
+  private obtenerIntranetApiUrl(): string {
+    return (
+      this.configService?.get<string>('INTRANET_API_URL') ||
+      process.env.INTRANET_API_URL ||
+      'http://localhost:4300'
+    );
+  }
+
+  private obtenerIntranetHeaders(): Record<string, string> {
+    const apiKey =
+      this.configService?.get<string>('INTRANET_API_KEY') ||
+      process.env.INTRANET_API_KEY ||
+      '';
+    return apiKey ? { 'x-api-key': apiKey } : {};
   }
 
   private async construirPerfilUsuarioSso(
@@ -399,9 +769,11 @@ export class IntranetIntegrationController {
 
     if (!emp) {
       // Auto-aprovisionamiento Just-In-Time (JIT) desde la Intranet Hospitalaria
-      const intranetUrl = process.env.INTRANET_API_URL || 'http://localhost:4300';
+      const intranetUrl = this.obtenerIntranetApiUrl();
       try {
-        const resp = await fetch(`${intranetUrl}/api/intranet/empleados`);
+        const resp = await fetch(`${intranetUrl}/api/intranet/empleados`, {
+          headers: this.obtenerIntranetHeaders(),
+        });
         if (resp.ok) {
           const censo = await resp.json();
           const datosEmp = Array.isArray(censo)
@@ -660,8 +1032,13 @@ export class CalendarioIcalController {
       });
     }
 
-    const host = req?.headers?.host || 'localhost:3000';
-    const httpUrl = `http://${host}/api/v1/calendario/feed/${tokenRecord.tokenHash}.ics`;
+    const rawProto = req?.headers?.['x-forwarded-proto'] ?? req?.protocol ?? 'http';
+    const protoStr = Array.isArray(rawProto) ? rawProto[0] : String(rawProto);
+    const proto = protoStr.split(',')[0].trim().toLowerCase() === 'https' ? 'https' : 'http';
+    const rawHost = req?.headers?.['x-forwarded-host'] ?? req?.headers?.host ?? 'localhost:3000';
+    const hostStr = Array.isArray(rawHost) ? rawHost[0] : String(rawHost);
+    const host = hostStr.split(',')[0].trim() || 'localhost:3000';
+    const httpUrl = `${proto}://${host}/api/v1/calendario/feed/${tokenRecord.tokenHash}.ics`;
     const webcalUrl = `webcal://${host}/api/v1/calendario/feed/${tokenRecord.tokenHash}.ics`;
 
     return {
@@ -886,11 +1263,19 @@ export class AuditoriasController {
       andConditions.push({ tipoAccion });
     }
 
-    // 4. Filtro por rango de fechas
+    // 4. Filtro por rango de fechas (zona horaria Colombia UTC-5, alineado con el frontend)
     if (fechaInicio || fechaFin) {
       const tsFilter: any = {};
-      if (fechaInicio) tsFilter.gte = new Date(`${fechaInicio}T00:00:00.000Z`);
-      if (fechaFin) tsFilter.lte = new Date(`${fechaFin}T23:59:59.999Z`);
+      if (fechaInicio) {
+        tsFilter.gte = fechaInicio.includes('T')
+          ? new Date(fechaInicio)
+          : new Date(`${fechaInicio}T00:00:00-05:00`);
+      }
+      if (fechaFin) {
+        tsFilter.lte = fechaFin.includes('T')
+          ? new Date(fechaFin)
+          : new Date(`${fechaFin}T23:59:59.999-05:00`);
+      }
       andConditions.push({ timestamp: tsFilter });
     }
 
@@ -993,6 +1378,7 @@ export class AuditoriasController {
 }
 
 @Module({
+  imports: [FestivosModule, LiquidacionModule],
   controllers: [
     PermutasController,
     IntranetIntegrationController,

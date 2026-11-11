@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { Component, EventEmitter, HostListener, Input, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { EmpleadoHospital } from '../../models';
 
@@ -9,18 +9,23 @@ import { EmpleadoHospital } from '../../models';
   template: `
     @if (abierto) {
       <div class="modal-backdrop" (click)="cerrar.emit()">
-        <div class="modal-box" (click)="$event.stopPropagation()">
+        <div
+          class="modal-box"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="modal-rotacion-title"
+          (click)="$event.stopPropagation()">
           <div class="modal-header">
-            <div style="display: flex; align-items: center; gap: 10px;">
-              <span style="font-size: 20px;">🔄</span>
+            <div class="rot-header-cluster">
+              <span class="rot-header-icon" aria-hidden="true">🔄</span>
               <div>
-                <h3>Rotación y Personal de Apoyo — {{ servicioNombre }}</h3>
-                <div style="font-size: 11.5px; color: #94a3b8; font-weight: 500; margin-top: 2px;">
+                <h3 id="modal-rotacion-title">Rotación y Personal de Apoyo — {{ servicioNombre }}</h3>
+                <div class="rot-header-sub">
                   Modelo de Propiedad por Día y Celda Espejo Inter-Servicio
                 </div>
               </div>
             </div>
-            <button (click)="cerrar.emit()" title="Cerrar ventana">✕</button>
+            <button type="button" aria-label="Cerrar ventana" (click)="cerrar.emit()" title="Cerrar ventana">✕</button>
           </div>
 
           <div class="modal-body">
@@ -47,7 +52,7 @@ import { EmpleadoHospital } from '../../models';
                   <span>Puedes traer a un colaborador específico o vincular a todo el equipo hermano con un clic para alternar sus días libremente.</span>
                 </div>
                 @if (candidatos.length > 1) {
-                  <button class="btn-bulk-link" (click)="vincularTodos.emit()">
+                  <button type="button" class="btn-bulk-link" (click)="vincularTodos.emit()">
                     ➕ Vincular Todo el Equipo ({{ candidatos.length }})
                   </button>
                 }
@@ -73,7 +78,7 @@ import { EmpleadoHospital } from '../../models';
                         </span>
                       </div>
                     </div>
-                    <button class="btn-primary" (click)="vincular.emit(cand)">
+                    <button type="button" class="btn-primary" (click)="vincular.emit(cand)">
                       ➕ Vincular al Cuadro
                     </button>
                   </div>
@@ -82,23 +87,23 @@ import { EmpleadoHospital } from '../../models';
             } @else {
               <div class="empty-msg">
                 @if (hermanos && hermanos.length > 0) {
-                  <div style="font-size: 28px; margin-bottom: 8px;">✅</div>
-                  <strong style="color: #1e293b; display: block; margin-bottom: 4px; font-style: normal;">
+                  <div class="rot-empty-icon" aria-hidden="true">✅</div>
+                  <strong class="rot-empty-title">
                     Todo el personal de los servicios conectados ya está en este cuadrante
                   </strong>
                   <span>
                     Ya puedes asignarles turnos en sus días disponibles. Los días que laboren en su servicio base se verán como <b>Celdas Espejo (📍)</b> protegidas.
                   </span>
                 } @else {
-                  <div style="font-size: 28px; margin-bottom: 8px;">🔗</div>
-                  <strong style="color: #1e293b; display: block; margin-bottom: 6px; font-style: normal;">
+                  <div class="rot-empty-icon" aria-hidden="true">🔗</div>
+                  <strong class="rot-empty-title-spaced">
                     Este servicio aún no tiene servicios hermanos vinculados
                   </strong>
-                  <span style="display: block; margin-bottom: 14px;">
+                  <span class="rot-empty-desc">
                     Para rotar personal entre dos áreas (ej. <i>Facturación Central</i> y <i>Facturación Urgencias</i>), primero conéctalas como Servicios de Apoyo en Configuración.
                   </span>
                   @if (esAdminTh) {
-                    <button class="btn-primary" (click)="configurarApoyo.emit()">
+                    <button type="button" class="btn-primary" (click)="configurarApoyo.emit()">
                       ⚙️ Ir a Vincular Servicios de Apoyo
                     </button>
                   }
@@ -111,6 +116,43 @@ import { EmpleadoHospital } from '../../models';
     }
   `,
   styles: [`
+    :host {
+      display: contents;
+    }
+    .rot-header-cluster {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .rot-header-icon {
+      font-size: 20px;
+    }
+    .rot-header-sub {
+      font-size: 11.5px;
+      color: #94a3b8;
+      font-weight: 500;
+      margin-top: 2px;
+    }
+    .rot-empty-icon {
+      font-size: 28px;
+      margin-bottom: 8px;
+    }
+    .rot-empty-title {
+      color: #1e293b;
+      display: block;
+      margin-bottom: 4px;
+      font-style: normal;
+    }
+    .rot-empty-title-spaced {
+      color: #1e293b;
+      display: block;
+      margin-bottom: 6px;
+      font-style: normal;
+    }
+    .rot-empty-desc {
+      display: block;
+      margin-bottom: 14px;
+    }
     .modal-backdrop {
       position: fixed;
       top: 0;
@@ -369,6 +411,13 @@ export class ModalRotacionComponent {
   @Output() vincular = new EventEmitter<EmpleadoHospital>();
   @Output() vincularTodos = new EventEmitter<void>();
   @Output() configurarApoyo = new EventEmitter<void>();
+
+  @HostListener('document:keydown.escape')
+  onEscapeKey(): void {
+    if (this.abierto) {
+      this.cerrar.emit();
+    }
+  }
 
   formatearSigno(n?: number): string {
     const val = Number(n) || 0;

@@ -1,8 +1,9 @@
-import { Component, EventEmitter, Input, Output, ViewEncapsulation, signal } from '@angular/core';
+import { Component, EventEmitter, Input, Output, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
   EmpleadoHospital,
+  MacroprocesoInfo,
   ModalidadDiasServicio,
   ReglaCargoServicio,
   ServicioHospitalario,
@@ -14,7 +15,7 @@ import {
   selector: 'app-configuracion-servicios',
   standalone: true,
   imports: [CommonModule, FormsModule],
-  encapsulation: ViewEncapsulation.None,
+  styleUrl: './configuracion-servicios.component.css',
   template: `
     <!-- Métricas Resumen de Servicios -->
     <div class="kpi-grid">
@@ -54,7 +55,7 @@ import {
         </div>
         <div class="form-vertical">
           <div class="form-row">
-            <label>Código (3-6 letras):</label>
+            <label for="input-codigo-servicio">Código (3-6 letras):</label>
             <input
               id="input-codigo-servicio"
               type="text"
@@ -65,8 +66,9 @@ import {
             />
           </div>
           <div class="form-row">
-            <label>Nombre del Servicio:</label>
+            <label for="input-nombre-servicio">Nombre del Servicio:</label>
             <input
+              id="input-nombre-servicio"
               type="text"
               placeholder="Ej: Hemodiálisis Ambulatoria"
               [ngModel]="nuevoServicioNombre"
@@ -74,264 +76,242 @@ import {
             />
           </div>
           <div class="form-row">
-            <label>Área Asistencial:</label>
+            <label for="select-macroproceso-servicio">Macroproceso (Mapa de Procesos Intranet):</label>
             <select
+              id="select-macroproceso-servicio"
               [ngModel]="nuevoServicioTipoAsistencia"
-              (ngModelChange)="cambiarNuevoServicioTipoAsistencia.emit($event)"
+              (ngModelChange)="onSeleccionarMacroprocesoForm($event)"
             >
-              <option value="URGENCIAS">URGENCIAS (Turnos 24/7)</option>
-              <option value="HOSPITALIZACION">HOSPITALIZACIÓN (Pisos y Salas)</option>
-              <option value="CUIDADOS_INTENSIVOS">UCI (Cuidados Intensivos / Intermedios)</option>
-              <option value="QUIRURGICO">QUIRÚRGICO (Quirófanos y Recuperación)</option>
-              <option value="APOYO_DIAGNOSTICO">APOYO DIAGNÓSTICO (Laboratorio / Imágenes / Farmacia)</option>
-              <option value="CONSULTA_EXTERNA">CONSULTA EXTERNA / AMBULATORIO</option>
+              @for (m of catalogoMacroprocesos; track m.codigo) {
+                <option [value]="m.codigo">{{ m.icono }} {{ m.nombre }}</option>
+              }
             </select>
           </div>
           <div class="form-row">
-            <label>Modalidad de Días Operativos del Servicio:</label>
+            <label for="select-modalidad-dias-servicio">Modalidad de Días Operativos del Servicio:</label>
             <select
+              id="select-modalidad-dias-servicio"
               [ngModel]="nuevoServicioModalidadDias"
               (ngModelChange)="cambiarNuevoServicioModalidadDias.emit($event)"
             >
               <option value="TODOS_24_7">🕒 Todos los días 24/7 — Mismas metas de Lunes a Domingo y Festivos</option>
-              <option value="TODOS_GUARDIA_FDS">🏥 Todos los días 24/7 — Con metas reducidas en Sábados, Domingos y Festivos</option>
-              <option value="LUN_SAB_SIN_FESTIVOS">📅 Lunes a Sábado — Cierra Domingos y Festivos (permite meta distinta el Sábado)</option>
+              <option value="TODOS_GUARDIA_FDS">🏥 24/7 Diferenciado — Lunes a Sábado base / Domingos y Festivos diferenciado</option>
+              <option value="LUN_SAB_SIN_FESTIVOS">📅 Lunes a Sábado — Cierra Domingos y Festivos (0 / 0)</option>
               <option value="LUN_VIE_HABILES">🏢 Lunes a Viernes Hábiles — Cierra Sábados, Domingos y Festivos</option>
             </select>
           </div>
           <div class="form-row">
-            <label>
+            <span class="meta-input-label">
               @if (nuevoServicioModalidadDias === 'TODOS_24_7') {
                 Metas de Cobertura Mínima Diaria (Lunes a Domingo y Festivos):
-              } @else {
+              } @else if (nuevoServicioModalidadDias === 'LUN_VIE_HABILES') {
                 Metas de Cobertura Mínima — Lunes a Viernes (Días Hábiles):
+              } @else {
+                📅 Metas de Cobertura Mínima — Lunes a Sábado:
               }
-            </label>
-            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
+            </span>
+            <div class="metas-two-col-grid">
               <div>
-                <small class="text-muted">☀️ Mañana</small>
+                <label for="input-req-dia-servicio" class="meta-input-label">☀️ Día</label>
                 <input
+                  id="input-req-dia-servicio"
                   type="number"
                   min="0"
                   max="50"
-                  [ngModel]="nuevoServicioReqManana"
-                  (ngModelChange)="cambiarNuevoServicioReqManana.emit(+$event)"
+                  [disabled]="nuevoServicioReglasPorCargo.length > 0"
+                  [title]="nuevoServicioReglasPorCargo.length > 0 ? 'Calculado automáticamente desde el desglose por cargo' : ''"
+                  [ngModel]="nuevoServicioReqDia"
+                  (ngModelChange)="cambiarNuevoServicioReqDia.emit(+$event)"
                 />
               </div>
               <div>
-                <small class="text-muted">🌤️ Tarde</small>
+                <label for="input-req-noche-servicio" class="meta-input-label">🌙 Noche</label>
                 <input
+                  id="input-req-noche-servicio"
                   type="number"
                   min="0"
                   max="50"
-                  [ngModel]="nuevoServicioReqTarde"
-                  (ngModelChange)="cambiarNuevoServicioReqTarde.emit(+$event)"
-                />
-              </div>
-              <div>
-                <small class="text-muted">🌙 Noche</small>
-                <input
-                  type="number"
-                  min="0"
-                  max="50"
+                  [disabled]="nuevoServicioReglasPorCargo.length > 0"
+                  [title]="nuevoServicioReglasPorCargo.length > 0 ? 'Calculado automáticamente desde el desglose por cargo' : ''"
                   [ngModel]="nuevoServicioReqNoche"
                   (ngModelChange)="cambiarNuevoServicioReqNoche.emit(+$event)"
                 />
               </div>
             </div>
           </div>
-          @if (nuevoServicioModalidadDias === 'TODOS_GUARDIA_FDS' || nuevoServicioModalidadDias === 'LUN_SAB_SIN_FESTIVOS') {
-            <div class="form-row" style="padding: 10px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;">
-              <label style="color: #92400e;">
-                @if (nuevoServicioModalidadDias === 'TODOS_GUARDIA_FDS') {
-                  🌤️ Metas de Cobertura en Sábados, Domingos y Festivos (Guardia Fin de Semana):
-                } @else {
-                  🌤️ Metas de Cobertura el Día Sábado (Domingos y Festivos cierra en 0):
-                }
-              </label>
-              <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
+          @if (nuevoServicioModalidadDias === 'TODOS_GUARDIA_FDS') {
+            <div class="form-row dom-fest-box">
+              <span class="meta-input-label dom-fest-label">
+                🗓️ Metas Diferenciadas — Domingos y Festivos:
+              </span>
+              <div class="metas-two-col-grid">
                 <div>
-                  <small class="text-muted">☀️ Mañana FDS</small>
+                  <label for="input-req-dia-df-servicio" class="meta-input-label">☀️ Día (Dom/Fest)</label>
                   <input
+                    id="input-req-dia-df-servicio"
                     type="number"
                     min="0"
                     max="50"
-                    [ngModel]="nuevoServicioReqMananaFds"
-                    (ngModelChange)="cambiarNuevoServicioReqMananaFds.emit(+$event)"
+                    [disabled]="nuevoServicioReglasPorCargo.length > 0"
+                    [title]="nuevoServicioReglasPorCargo.length > 0 ? 'Calculado automáticamente desde el desglose por cargo' : ''"
+                    [ngModel]="nuevoServicioReqDiaDomFest"
+                    (ngModelChange)="cambiarNuevoServicioReqDiaDomFest.emit(+$event)"
                   />
                 </div>
                 <div>
-                  <small class="text-muted">🌤️ Tarde FDS</small>
+                  <label for="input-req-noche-df-servicio" class="meta-input-label">🌙 Noche (Dom/Fest)</label>
                   <input
+                    id="input-req-noche-df-servicio"
                     type="number"
                     min="0"
                     max="50"
-                    [ngModel]="nuevoServicioReqTardeFds"
-                    (ngModelChange)="cambiarNuevoServicioReqTardeFds.emit(+$event)"
-                  />
-                </div>
-                <div>
-                  <small class="text-muted">🌙 Noche FDS</small>
-                  <input
-                    type="number"
-                    min="0"
-                    max="50"
-                    [ngModel]="nuevoServicioReqNocheFds"
-                    (ngModelChange)="cambiarNuevoServicioReqNocheFds.emit(+$event)"
+                    [disabled]="nuevoServicioReglasPorCargo.length > 0"
+                    [title]="nuevoServicioReglasPorCargo.length > 0 ? 'Calculado automáticamente desde el desglose por cargo' : ''"
+                    [ngModel]="nuevoServicioReqNocheDomFest"
+                    (ngModelChange)="cambiarNuevoServicioReqNocheDomFest.emit(+$event)"
                   />
                 </div>
               </div>
             </div>
           }
+          @if (nuevoServicioModalidadDias === 'LUN_SAB_SIN_FESTIVOS') {
+            <div class="modalidad-info-banner">
+              ✅ De Lunes a Sábado aplica la meta <strong>Día / Noche</strong>; en Domingos y Festivos la meta será <strong>0 / 0</strong> y el Autocompletado asignará <strong>Libre (L)</strong>.
+            </div>
+          }
           @if (nuevoServicioModalidadDias === 'LUN_VIE_HABILES') {
-            <div style="padding: 8px 10px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; font-size: 12px; color: #166534;">
-              ✅ En Sábados, Domingos y Festivos la meta requerida será <strong>0 / 0 / 0</strong> y el Autocompletado asignará automáticamente <strong>Libre (L)</strong>.
+            <div class="modalidad-info-banner">
+              ✅ En Sábados, Domingos y Festivos la meta requerida será <strong>0 / 0</strong> y el Autocompletado asignará automáticamente <strong>Libre (L)</strong>.
             </div>
           }
           <div class="form-row">
-            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 4px;">
-              <label style="margin: 0;">Turnos Habilitados en este Servicio (Paleta y Autocompletar):</label>
-              <div style="display: flex; gap: 4px; flex-wrap: wrap;">
-                <button type="button" class="btn-outline" style="padding: 2px 7px; font-size: 11px;" (click)="aplicarPlantillaTurnosServicio.emit('ROTATIVO_8H')">
+            <div class="turnos-servicio-header">
+              <label class="turnos-servicio-title">Turnos Habilitados en este Servicio (Paleta y Autocompletar):</label>
+              <div class="turnos-plantillas-row">
+                <button type="button" class="btn-outline btn-plantilla-sm" (click)="aplicarPlantillaTurnosServicio.emit('ROTATIVO_8H')">
                   Rotativo 8h
                 </button>
-                <button type="button" class="btn-outline" style="padding: 2px 7px; font-size: 11px;" (click)="aplicarPlantillaTurnosServicio.emit('GUARDIAS_12_24')">
+                <button type="button" class="btn-outline btn-plantilla-sm" (click)="aplicarPlantillaTurnosServicio.emit('GUARDIAS_12_24')">
                   Guardias 12h/24h
                 </button>
-                <button type="button" class="btn-outline" style="padding: 2px 7px; font-size: 11px;" (click)="aplicarPlantillaTurnosServicio.emit('ADMINISTRATIVO')">
+                <button type="button" class="btn-outline btn-plantilla-sm" (click)="aplicarPlantillaTurnosServicio.emit('ADMINISTRATIVO')">
                   Administrativo
                 </button>
-                <button type="button" class="btn-outline" style="padding: 2px 7px; font-size: 11px;" (click)="aplicarPlantillaTurnosServicio.emit('TODOS')">
+                <button type="button" class="btn-outline btn-plantilla-sm" (click)="aplicarPlantillaTurnosServicio.emit('TODOS')">
                   Todos
                 </button>
               </div>
             </div>
-            <div style="display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;">
+            <div class="turnos-chips-container">
               @for (t of listaTurnosCatalogo; track t.codigo) {
                 @let activo = esTurnoHabilitadoEnServicioForm(t.codigo);
                 <button
                   type="button"
+                  class="turno-chip-toggle"
+                  [class.is-inactive]="!activo"
+                  [attr.aria-pressed]="activo"
                   (click)="alternarTurnoEnServicioForm.emit(t.codigo)"
                   [title]="t.nombre + ' (' + t.horario + ')'"
                   [style.background-color]="activo ? t.bgHex : '#ffffff'"
                   [style.color]="activo ? t.textHex : '#94a3b8'"
-                  [style.border-color]="activo ? t.borderHex : '#cbd5e1'"
-                  [style.opacity]="activo ? '1' : '0.6'"
-                  style="display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 6px; border: 1.5px solid; font-size: 11.5px; font-weight: 700; cursor: pointer; transition: all 0.15s ease;">
+                  [style.border-color]="activo ? t.borderHex : '#cbd5e1'">
                   <span>{{ activo ? '✓' : '+' }}</span>
                   <span>{{ t.codigo }}</span>
-                  <span style="font-weight: 500; font-size: 10.5px;">{{ t.nombre }}</span>
+                  <span class="turno-chip-nombre">{{ t.nombre }}</span>
                 </button>
               }
             </div>
           </div>
 
           @if (nuevoServicioReglasPorCargo.length > 0) {
-            <div class="form-row" style="background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 10px;">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                <label style="margin: 0; color: #0369a1; font-weight: 700;">
+            <div class="form-row cargos-desglose-box">
+              <div class="cargos-desglose-header">
+                <label class="cargos-desglose-title">
                   👥 Desglose de Metas y Turnos por Cargo (Plantilla del Servicio):
                 </label>
-                <small style="color: #0284c7; font-size: 11px;">
+                <small class="cargos-desglose-hint">
                   La suma actualiza automáticamente el total del servicio
                 </small>
               </div>
-              <div style="display: flex; flex-direction: column; gap: 8px;">
+              <div class="cargos-list">
                 @for (regla of nuevoServicioReglasPorCargo; track regla.categoriaNombre) {
-                  <div style="background: #ffffff; border: 1px solid #e0f2fe; border-radius: 6px; padding: 8px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                      <strong style="font-size: 12px; color: #0f172a;">{{ regla.categoriaNombre }}</strong>
-                      <span style="font-size: 11px; color: #64748b; font-weight: 600;">
+                  <div class="cargo-card">
+                    <div class="cargo-card-header">
+                      <strong class="cargo-card-name">{{ regla.categoriaNombre }}</strong>
+                      <span class="cargo-card-count">
                         {{ regla.empleadosCount || 0 }} en plantilla
                       </span>
                     </div>
 
-                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 6px;">
-                      <div style="display: flex; align-items: center; gap: 4px;">
-                        <span style="font-size: 10.5px; color: #64748b; min-width: 48px;">☀️ M:</span>
+                    <div class="cargo-metas-grid">
+                      <div class="cargo-meta-field">
+                        <span class="cargo-meta-label">☀️ Día:</span>
                         <input
                           type="number"
                           min="0"
                           max="30"
-                          style="padding: 2px 6px; font-size: 11.5px; width: 100%;"
-                          [ngModel]="regla.reqManana"
-                          (ngModelChange)="actualizarMetaCargoForm.emit({ categoriaNombre: regla.categoriaNombre, campo: 'reqManana', valor: +$event })"
+                          class="cargo-meta-input"
+                          [attr.aria-label]="'Meta día ' + regla.categoriaNombre"
+                          [ngModel]="regla.reqDia"
+                          (ngModelChange)="actualizarMetaCargoForm.emit({ categoriaNombre: regla.categoriaNombre, campo: 'reqDia', valor: +$event })"
                         />
                       </div>
-                      <div style="display: flex; align-items: center; gap: 4px;">
-                        <span style="font-size: 10.5px; color: #64748b; min-width: 48px;">🌤️ T:</span>
+                      <div class="cargo-meta-field">
+                        <span class="cargo-meta-label">🌙 Noche:</span>
                         <input
                           type="number"
                           min="0"
                           max="30"
-                          style="padding: 2px 6px; font-size: 11.5px; width: 100%;"
-                          [ngModel]="regla.reqTarde"
-                          (ngModelChange)="actualizarMetaCargoForm.emit({ categoriaNombre: regla.categoriaNombre, campo: 'reqTarde', valor: +$event })"
-                        />
-                      </div>
-                      <div style="display: flex; align-items: center; gap: 4px;">
-                        <span style="font-size: 10.5px; color: #64748b; min-width: 48px;">🌙 N:</span>
-                        <input
-                          type="number"
-                          min="0"
-                          max="30"
-                          style="padding: 2px 6px; font-size: 11.5px; width: 100%;"
+                          class="cargo-meta-input"
+                          [attr.aria-label]="'Meta noche ' + regla.categoriaNombre"
                           [ngModel]="regla.reqNoche"
                           (ngModelChange)="actualizarMetaCargoForm.emit({ categoriaNombre: regla.categoriaNombre, campo: 'reqNoche', valor: +$event })"
                         />
                       </div>
                     </div>
 
-                    @if (nuevoServicioModalidadDias === 'TODOS_GUARDIA_FDS' || nuevoServicioModalidadDias === 'LUN_SAB_SIN_FESTIVOS') {
-                      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 6px; padding-top: 4px; border-top: 1px dashed #e2e8f0;">
-                        <div style="display: flex; align-items: center; gap: 4px;">
-                          <span style="font-size: 10.5px; color: #0369a1; min-width: 56px;">📅 M FDS:</span>
+                    @if (nuevoServicioModalidadDias === 'TODOS_GUARDIA_FDS') {
+                      <div class="cargo-metas-df-grid">
+                        <div class="cargo-meta-field">
+                          <span class="cargo-meta-label is-df">🗓️ Día Dom/Fest:</span>
                           <input
                             type="number"
                             min="0"
                             max="30"
-                            style="padding: 2px 6px; font-size: 11.5px; width: 100%;"
-                            [ngModel]="regla.reqMananaFds"
-                            (ngModelChange)="actualizarMetaCargoForm.emit({ categoriaNombre: regla.categoriaNombre, campo: 'reqMananaFds', valor: +$event })"
+                            class="cargo-meta-input"
+                            [attr.aria-label]="'Meta día dom/fest ' + regla.categoriaNombre"
+                            [ngModel]="regla.reqDiaDomFest"
+                            (ngModelChange)="actualizarMetaCargoForm.emit({ categoriaNombre: regla.categoriaNombre, campo: 'reqDiaDomFest', valor: +$event })"
                           />
                         </div>
-                        <div style="display: flex; align-items: center; gap: 4px;">
-                          <span style="font-size: 10.5px; color: #0369a1; min-width: 56px;">📅 T FDS:</span>
+                        <div class="cargo-meta-field">
+                          <span class="cargo-meta-label is-df">🗓️ Noche Dom/Fest:</span>
                           <input
                             type="number"
                             min="0"
                             max="30"
-                            style="padding: 2px 6px; font-size: 11.5px; width: 100%;"
-                            [ngModel]="regla.reqTardeFds"
-                            (ngModelChange)="actualizarMetaCargoForm.emit({ categoriaNombre: regla.categoriaNombre, campo: 'reqTardeFds', valor: +$event })"
-                          />
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 4px;">
-                          <span style="font-size: 10.5px; color: #0369a1; min-width: 56px;">📅 N FDS:</span>
-                          <input
-                            type="number"
-                            min="0"
-                            max="30"
-                            style="padding: 2px 6px; font-size: 11.5px; width: 100%;"
-                            [ngModel]="regla.reqNocheFds"
-                            (ngModelChange)="actualizarMetaCargoForm.emit({ categoriaNombre: regla.categoriaNombre, campo: 'reqNocheFds', valor: +$event })"
+                            class="cargo-meta-input"
+                            [attr.aria-label]="'Meta noche dom/fest ' + regla.categoriaNombre"
+                            [ngModel]="regla.reqNocheDomFest"
+                            (ngModelChange)="actualizarMetaCargoForm.emit({ categoriaNombre: regla.categoriaNombre, campo: 'reqNocheDomFest', valor: +$event })"
                           />
                         </div>
                       </div>
                     }
 
-                    <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding-top: 4px;">
-                      <span style="font-size: 10.5px; color: #64748b; margin-right: 4px;">Turnos del cargo:</span>
+                    <div class="cargo-turnos-row">
+                      <span class="cargo-turnos-label">Turnos del cargo:</span>
                       @for (tOp of turnosOperativosHabilitadosEnForm; track tOp.codigo) {
                         @let actCargo = esTurnoHabilitadoEnCargoForm(regla.categoriaNombre, tOp.codigo);
                         <button
                           type="button"
+                          class="cargo-turno-chip"
+                          [attr.aria-pressed]="actCargo"
                           (click)="alternarTurnoEnCargoForm.emit({ categoriaNombre: regla.categoriaNombre, codigoTurno: tOp.codigo })"
                           [title]="tOp.nombre + ' (' + tOp.horario + ')'"
                           [style.background-color]="actCargo ? tOp.bgHex : '#f8fafc'"
                           [style.color]="actCargo ? tOp.textHex : '#94a3b8'"
-                          [style.border-color]="actCargo ? tOp.borderHex : '#cbd5e1'"
-                          style="padding: 1px 6px; border-radius: 4px; border: 1px solid; font-size: 10.5px; font-weight: 700; cursor: pointer;">
+                          [style.border-color]="actCargo ? tOp.borderHex : '#cbd5e1'">
                           {{ actCargo ? '✓ ' : '' }}{{ tOp.codigo }}
                         </button>
                       }
@@ -341,12 +321,12 @@ import {
               </div>
             </div>
           }
-          <div class="form-actions" style="display: flex; gap: 8px;">
-            <button class="btn-primary" (click)="guardarServicioAutonomo.emit()">
+          <div class="form-actions form-actions-gap">
+            <button type="button" class="btn-primary" (click)="guardarServicioAutonomo.emit()">
               💾 {{ servicioEditandoId ? 'Guardar Cambios' : 'Crear Servicio' }}
             </button>
             @if (servicioEditandoId) {
-              <button class="btn-outline" (click)="cancelarEdicionServicio.emit()">
+              <button type="button" class="btn-outline" (click)="cancelarEdicionServicio.emit()">
                 ✕ Cancelar
               </button>
             }
@@ -361,8 +341,9 @@ import {
         </div>
         <div class="form-vertical">
           <div class="form-row">
-            <label>Servicio Principal:</label>
+            <label for="select-enlace-srv1">Servicio Principal:</label>
             <select
+              id="select-enlace-srv1"
               [ngModel]="enlaceHermanoSrv1"
               (ngModelChange)="cambiarEnlaceHermanoSrv1.emit($event)"
             >
@@ -372,18 +353,22 @@ import {
             </select>
           </div>
           <div class="form-row">
-            <label>Servicio de Apoyo:</label>
+            <label for="select-enlace-srv2">Servicio de Apoyo:</label>
             <select
+              id="select-enlace-srv2"
               [ngModel]="enlaceHermanoSrv2"
               (ngModelChange)="cambiarEnlaceHermanoSrv2.emit($event)"
             >
+              <option value="" disabled>-- Seleccionar Servicio de Apoyo --</option>
               @for (s of servicios; track s.id) {
-                <option [value]="s.id">{{ s.nombre }} ({{ s.codigo }})</option>
+                <option [value]="s.id" [disabled]="s.id === enlaceHermanoSrv1">
+                  {{ s.nombre }} ({{ s.codigo }})
+                </option>
               }
             </select>
           </div>
           <div class="form-actions">
-            <button class="btn-wizard" (click)="guardarEnlaceHermanos.emit()">
+            <button type="button" class="btn-wizard" (click)="guardarEnlaceHermanos.emit()">
               🔗 Vincular Servicios de Apoyo
             </button>
           </div>
@@ -393,19 +378,32 @@ import {
 
     <!-- Directorio de Servicios Configurados -->
     <div class="panel-card">
-      <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
-        <div style="display: flex; align-items: center; gap: 8px;">
+      <div class="panel-header directorio-panel-header">
+        <div class="directorio-title-cluster">
           <h3>📋 Directorio de Servicios</h3>
-          <span class="badge-count">{{ servicios.length }} Servicios</span>
+          <span class="badge-count">{{ serviciosFiltradosPorMacroproceso.length }} de {{ servicios.length }} Servicios</span>
         </div>
-        <button
-          type="button"
-          class="btn-sm-secondary"
-          (click)="expandirTodosLosServicios()"
-          style="font-size: 11px; padding: 4px 10px; cursor: pointer; border-radius: 6px; border: 1px solid #cbd5e1; background: #f8fafc; color: #334155; font-weight: 600;"
-        >
-          {{ serviciosExpandidos().size === servicios.length && servicios.length > 0 ? '▲ Colapsar Todo el Personal' : '👥 Desplegar Todo el Personal' }}
-        </button>
+        <div class="directorio-controls-cluster">
+          <select
+            class="directorio-macro-select"
+            aria-label="Filtrar directorio por Macroproceso"
+            [ngModel]="filtroMacroproceso()"
+            (ngModelChange)="filtroMacroproceso.set($event)"
+            title="Filtrar directorio por Macroproceso del Mapa de Procesos"
+          >
+            <option value="TODOS">🗺️ Todos los Macroprocesos ({{ servicios.length }})</option>
+            @for (m of catalogoMacroprocesos; track m.codigo) {
+              <option [value]="m.codigo">{{ m.icono }} {{ m.nombreCorto }} ({{ contarServiciosEnMacroproceso(m.codigo) }})</option>
+            }
+          </select>
+          <button
+            type="button"
+            class="btn-sm-secondary"
+            (click)="expandirTodosLosServicios()"
+          >
+            {{ serviciosExpandidos().size === servicios.length && servicios.length > 0 ? '▲ Colapsar Todo el Personal' : '👥 Desplegar Todo el Personal' }}
+          </button>
+        </div>
       </div>
       <div class="table-responsive">
         <table class="data-table">
@@ -413,8 +411,8 @@ import {
             <tr>
               <th>Código</th>
               <th>Nombre del Servicio</th>
-              <th>Área</th>
-              <th>Metas (M / T / N)</th>
+              <th>Macroproceso (Mapa de Procesos)</th>
+              <th>Metas (Día / Noche)</th>
               <th>Turnos Operativos</th>
               <th>Personal</th>
               <th>Servicios de Apoyo Vinculados</th>
@@ -422,31 +420,38 @@ import {
             </tr>
           </thead>
           <tbody>
-            @for (srv of servicios; track srv.id) {
+            @for (srv of serviciosFiltradosPorMacroproceso; track srv.id) {
               <tr>
                 <td><strong class="font-mono">{{ srv.codigo }}</strong></td>
                 <td>
                   <strong>{{ srv.nombre }}</strong>
                 </td>
                 <td>
-                  <span class="badge-tipo-asistencia">{{ srv.tipoAsistencia }}</span>
+                  @let macro = infoMacroproceso(srv.tipoAsistencia);
+                  <span class="badge-tipo-asistencia" [title]="macro.nombre">
+                    <span aria-hidden="true">{{ macro.icono }}</span>
+                    <span>{{ macro.nombreCorto }}</span>
+                  </span>
                 </td>
                 <td class="font-mono">
-                  <div style="display: flex; flex-direction: column; gap: 3px;">
-                    <span class="badge-personal" title="Mínimo requerido Lunes a Viernes: Mañana / Tarde / Noche">
-                      ☀️{{ srv.reqManana }} • 🌤️{{ srv.reqTarde }} • 🌙{{ srv.reqNoche }}
+                  <div class="metas-cell-stack">
+                    <span class="badge-personal" [title]="srv.modalidadDias === 'LUN_VIE_HABILES' ? 'Mínimo requerido Lunes a Viernes: Día / Noche' : 'Mínimo requerido Lunes a Sábado: Día / Noche'">
+                      ☀️{{ srv.reqDia }} • 🌙{{ srv.reqNoche }}
                     </span>
-                    <small style="font-size: 10.5px; color: #64748b; font-weight: 600;">
+                    <small class="modalidad-subtext">
                       {{ etiquetaModalidadDias(srv.modalidadDias) }}
-                      @if (srv.modalidadDias === 'TODOS_GUARDIA_FDS' || srv.modalidadDias === 'LUN_SAB_SIN_FESTIVOS') {
-                        ({{ srv.reqMananaFds ?? srv.reqManana }}/{{ srv.reqTardeFds ?? srv.reqTarde }}/{{ srv.reqNocheFds ?? srv.reqNoche }})
+                      @if (srv.modalidadDias === 'TODOS_GUARDIA_FDS') {
+                        (Dom/Fest: {{ srv.reqDiaDomFest ?? srv.reqDia }}/{{ srv.reqNocheDomFest ?? srv.reqNoche }})
                       }
                     </small>
                     @if (srv.reglasPorCargo && srv.reglasPorCargo.length > 0) {
-                      <div style="display: flex; flex-direction: column; gap: 2px; margin-top: 2px; border-top: 1px dashed #e2e8f0; padding-top: 2px;">
+                      <div class="reglas-cargo-mini-list">
                         @for (rc of srv.reglasPorCargo; track rc.categoriaNombre) {
-                          <small style="font-size: 10px; color: #475569;">
-                            <strong>{{ rc.categoriaNombre }}:</strong> {{ rc.reqManana }}/{{ rc.reqTarde }}/{{ rc.reqNoche }}
+                          <small class="regla-cargo-mini-item">
+                            <strong>{{ rc.categoriaNombre }}:</strong> ☀️{{ rc.reqDia }} / 🌙{{ rc.reqNoche }}
+                            @if (srv.modalidadDias === 'TODOS_GUARDIA_FDS') {
+                              <span> • Dom/Fest {{ rc.reqDiaDomFest ?? rc.reqDia }}/{{ rc.reqNocheDomFest ?? rc.reqNoche }}</span>
+                            }
                           </small>
                         }
                       </div>
@@ -454,14 +459,13 @@ import {
                   </div>
                 </td>
                 <td>
-                  <div style="display: flex; flex-wrap: wrap; gap: 4px; max-width: 240px;">
+                  <div class="turnos-operativos-wrap">
                     @for (tOp of obtenerTurnosOperativosServicio(srv); track tOp.codigo) {
                       <span
-                        class="mini-shift"
+                        class="mini-shift mini-shift-servicio"
                         [style.background-color]="tOp.bgHex"
                         [style.color]="tOp.textHex"
-                        [title]="tOp.nombre + ' (' + tOp.horario + ')'"
-                        style="padding: 1px 6px; font-size: 10.5px;">
+                        [title]="tOp.nombre + ' (' + tOp.horario + ')'">
                         {{ tOp.codigo }}
                       </span>
                     }
@@ -471,15 +475,13 @@ import {
                   <button
                     type="button"
                     (click)="alternarDesplieguePersonal(srv.id)"
-                    class="badge-personal"
-                    [style.background]="serviciosExpandidos().has(srv.id) ? '#dbeafe' : '#f1f5f9'"
-                    [style.borderColor]="serviciosExpandidos().has(srv.id) ? '#3b82f6' : '#cbd5e1'"
-                    [style.color]="serviciosExpandidos().has(srv.id) ? '#1d4ed8' : '#334155'"
-                    style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; font-size: 11.5px; font-weight: 600; cursor: pointer; transition: all 0.15s ease; border: 1px solid;"
+                    class="btn-personal-toggle"
+                    [class.is-expanded]="serviciosExpandidos().has(srv.id)"
+                    [attr.aria-expanded]="serviciosExpandidos().has(srv.id)"
                     [title]="serviciosExpandidos().has(srv.id) ? 'Clic para ocultar el personal' : 'Clic para desplegar el personal de ' + srv.nombre"
                   >
                     <span>👥 {{ srv.empleadosCount || obtenerEmpleadosDelServicio(srv.id).length }}</span>
-                    <span style="font-size: 9.5px; opacity: 0.85;">{{ serviciosExpandidos().has(srv.id) ? '▲ Ocultar' : '▼ Ver personal' }}</span>
+                    <span class="personal-toggle-arrow">{{ serviciosExpandidos().has(srv.id) ? '▲ Ocultar' : '▼ Ver personal' }}</span>
                   </button>
                 </td>
                 <td>
@@ -489,7 +491,9 @@ import {
                         <span class="tag-hermano">
                           🔗 {{ h.nombre }} ({{ h.codigo }})
                           <button
+                            type="button"
                             class="btn-tag-remove"
+                            [attr.aria-label]="'Quitar vínculo de apoyo ' + h.nombre"
                             (click)="desenlazarServicioHermano.emit({ srvId: srv.id, hermanoId: h.id })"
                             title="Quitar vínculo de apoyo"
                           >✕</button>
@@ -503,6 +507,7 @@ import {
                 <td>
                   <div class="table-actions-cluster">
                     <button
+                      type="button"
                       class="btn-sm-primary"
                       (click)="abrirCuadroServicio.emit(srv.id)"
                       title="Abrir este servicio en el cuadro de turnos"
@@ -510,14 +515,18 @@ import {
                       📅 Cuadro
                     </button>
                     <button
+                      type="button"
                       class="btn-action-icon"
+                      [attr.aria-label]="'Editar servicio ' + srv.nombre"
                       (click)="cargarServicioParaEdicion.emit(srv)"
                       title="Editar código, nombre o área asistencial"
                     >
                       ✏️
                     </button>
                     <button
+                      type="button"
                       class="btn-action-icon btn-action-danger"
+                      [attr.aria-label]="'Eliminar servicio ' + srv.nombre"
                       (click)="eliminarServicioAutonomo.emit(srv)"
                       [disabled]="(srv.empleadosCount || 0) > 0"
                       [title]="(srv.empleadosCount || 0) > 0 ? 'No se puede eliminar: tiene ' + srv.empleadosCount + ' colaboradores adscritos' : 'Eliminar este servicio'"
@@ -529,59 +538,59 @@ import {
               </tr>
               @if (serviciosExpandidos().has(srv.id)) {
                 <tr class="row-personal-desplegado">
-                  <td colspan="8" style="background: #f8fafc; padding: 12px 18px; border-bottom: 2px solid #cbd5e1;">
-                    <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-                      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px;">
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                          <span style="font-size: 15px;">👥</span>
-                          <strong style="font-size: 13px; color: #0f172a;">
+                  <td colspan="8" class="row-personal-cell">
+                    <div class="personal-drawer-card">
+                      <div class="personal-drawer-header">
+                        <div class="personal-drawer-title-group">
+                          <span class="personal-drawer-icon" aria-hidden="true">👥</span>
+                          <strong class="personal-drawer-title">
                             Personal Adscrito a {{ srv.nombre }} ({{ srv.codigo }})
                           </strong>
-                          <span style="background: #e0f2fe; color: #0369a1; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 12px;">
+                          <span class="personal-drawer-count-pill">
                             {{ obtenerEmpleadosDelServicio(srv.id).length }} colaboradores
                           </span>
                         </div>
-                        <small style="color: #64748b; font-size: 11px;">
+                        <small class="personal-drawer-subtitle">
                           Censo Oficial de Personal
                         </small>
                       </div>
 
                       @if (obtenerEmpleadosDelServicio(srv.id).length === 0) {
-                        <div style="padding: 14px; text-align: center; color: #94a3b8; font-size: 12px;">
+                        <div class="personal-drawer-empty">
                           ⚠️ Este servicio no cuenta con personal adscrito actualmente.
                         </div>
                       } @else {
-                        <div style="display: flex; flex-direction: column; gap: 10px;">
+                        <div class="personal-cargos-list">
                           @for (grupo of obtenerEmpleadosAgrupadosPorCargo(srv.id); track grupo.cargo) {
-                            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 12px;">
-                              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                                <strong style="font-size: 11.5px; color: #1e293b; display: flex; align-items: center; gap: 5px;">
-                                  <span style="color: #2563eb;">🏷️</span> {{ grupo.cargo }}
+                            <div class="personal-cargo-group">
+                              <div class="personal-cargo-header">
+                                <strong class="personal-cargo-title">
+                                  <span class="personal-cargo-pin" aria-hidden="true">🏷️</span> {{ grupo.cargo }}
                                 </strong>
-                                <span style="font-size: 10.5px; color: #64748b; font-weight: 600;">
+                                <span class="personal-cargo-count">
                                   {{ grupo.colaboradores.length }} {{ grupo.colaboradores.length === 1 ? 'colaborador' : 'colaboradores' }}
                                 </span>
                               </div>
 
-                              <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px;">
+                              <div class="personal-cards-grid">
                                 @for (colab of grupo.colaboradores; track colab.id) {
-                                  <div style="background: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px;">
-                                    <div style="display: flex; flex-direction: column; gap: 1px; min-width: 0;">
-                                      <span style="font-size: 12px; font-weight: 700; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" [title]="colab.nombre">
+                                  <div class="colaborador-mini-card">
+                                    <div class="colaborador-mini-info">
+                                      <span class="colaborador-mini-name" [title]="colab.nombre">
                                         {{ colab.nombre }}
                                       </span>
-                                      <span style="font-size: 10.5px; color: #64748b; font-family: monospace;">
+                                      <span class="colaborador-mini-doc">
                                         CC: {{ colab.documento }}
                                       </span>
                                     </div>
-                                    <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 2px;">
-                                      <span style="font-size: 10.5px; background: #f1f5f9; color: #334155; padding: 1px 6px; border-radius: 4px; font-weight: 600;" title="Horas de contrato mensual">
+                                    <div class="colaborador-mini-metrics">
+                                      <span class="colaborador-contrato-badge" title="Horas de contrato mensual">
                                         ⏱️ {{ colab.horasContratoMes || 168 }}h/mes
                                       </span>
                                       <span
-                                        style="font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px;"
-                                        [style.background]="(colab.saldoBancoAnterior || 0) < 0 ? '#fee2e2' : (colab.saldoBancoAnterior || 0) > 0 ? '#dcfce7' : '#f1f5f9'"
-                                        [style.color]="(colab.saldoBancoAnterior || 0) < 0 ? '#b91c1c' : (colab.saldoBancoAnterior || 0) > 0 ? '#15803d' : '#475569'"
+                                        class="colaborador-banco-badge"
+                                        [class.banco-neg]="(colab.saldoBancoAnterior || 0) < 0"
+                                        [class.banco-pos]="(colab.saldoBancoAnterior || 0) > 0"
                                         title="Saldo en Banco de Horas"
                                       >
                                         🏦 {{ (colab.saldoBancoAnterior || 0) > 0 ? '+' : '' }}{{ colab.saldoBancoAnterior || 0 }}h
@@ -606,6 +615,7 @@ import {
   `,
 })
 export class ConfiguracionServiciosComponent {
+  @Input() macroprocesos: MacroprocesoInfo[] = [];
   @Input() servicios: ServicioHospitalario[] = [];
   @Input() empleados: EmpleadoHospital[] = [];
   @Input() totalCategoriasUnicas = 0;
@@ -615,12 +625,10 @@ export class ConfiguracionServiciosComponent {
   @Input() nuevoServicioNombre = '';
   @Input() nuevoServicioTipoAsistencia: any = 'URGENCIAS';
   @Input() nuevoServicioModalidadDias: any = 'TODOS_24_7';
-  @Input() nuevoServicioReqManana = 4;
-  @Input() nuevoServicioReqTarde = 4;
+  @Input() nuevoServicioReqDia = 4;
   @Input() nuevoServicioReqNoche = 2;
-  @Input() nuevoServicioReqMananaFds = 4;
-  @Input() nuevoServicioReqTardeFds = 4;
-  @Input() nuevoServicioReqNocheFds = 2;
+  @Input() nuevoServicioReqDiaDomFest = 2;
+  @Input() nuevoServicioReqNocheDomFest = 1;
   @Input() listaTurnosCatalogo: TipoTurnoConfig[] = [];
   @Input() nuevoServicioTurnosHabilitados: string[] = [];
   @Input() nuevoServicioReglasPorCargo: ReglaCargoServicio[] = [];
@@ -633,15 +641,13 @@ export class ConfiguracionServiciosComponent {
   @Output() cambiarNuevoServicioNombre = new EventEmitter<string>();
   @Output() cambiarNuevoServicioTipoAsistencia = new EventEmitter<any>();
   @Output() cambiarNuevoServicioModalidadDias = new EventEmitter<any>();
-  @Output() cambiarNuevoServicioReqManana = new EventEmitter<number>();
-  @Output() cambiarNuevoServicioReqTarde = new EventEmitter<number>();
+  @Output() cambiarNuevoServicioReqDia = new EventEmitter<number>();
   @Output() cambiarNuevoServicioReqNoche = new EventEmitter<number>();
-  @Output() cambiarNuevoServicioReqMananaFds = new EventEmitter<number>();
-  @Output() cambiarNuevoServicioReqTardeFds = new EventEmitter<number>();
-  @Output() cambiarNuevoServicioReqNocheFds = new EventEmitter<number>();
+  @Output() cambiarNuevoServicioReqDiaDomFest = new EventEmitter<number>();
+  @Output() cambiarNuevoServicioReqNocheDomFest = new EventEmitter<number>();
   @Output() aplicarPlantillaTurnosServicio = new EventEmitter<'ROTATIVO_8H' | 'GUARDIAS_12_24' | 'ADMINISTRATIVO' | 'TODOS'>();
   @Output() alternarTurnoEnServicioForm = new EventEmitter<string>();
-  @Output() actualizarMetaCargoForm = new EventEmitter<{ categoriaNombre: string; campo: 'reqManana' | 'reqTarde' | 'reqNoche' | 'reqMananaFds' | 'reqTardeFds' | 'reqNocheFds'; valor: number }>();
+  @Output() actualizarMetaCargoForm = new EventEmitter<{ categoriaNombre: string; campo: 'reqDia' | 'reqNoche' | 'reqDiaDomFest' | 'reqNocheDomFest'; valor: number }>();
   @Output() alternarTurnoEnCargoForm = new EventEmitter<{ categoriaNombre: string; codigoTurno: string }>();
   @Output() guardarServicioAutonomo = new EventEmitter<void>();
   @Output() cancelarEdicionServicio = new EventEmitter<void>();
@@ -654,6 +660,50 @@ export class ConfiguracionServiciosComponent {
   @Output() eliminarServicioAutonomo = new EventEmitter<ServicioHospitalario>();
 
   serviciosExpandidos = signal<Set<string>>(new Set<string>());
+  filtroMacroproceso = signal<string>('TODOS');
+
+  get catalogoMacroprocesos(): MacroprocesoInfo[] {
+    return this.macroprocesos || [];
+  }
+
+  get serviciosFiltradosPorMacroproceso(): ServicioHospitalario[] {
+    const f = this.filtroMacroproceso();
+    if (!f || f === 'TODOS') return this.servicios;
+    return this.servicios.filter(
+      (s) => (s.tipoAsistencia || 'URGENCIAS').toUpperCase() === f
+    );
+  }
+
+  infoMacroproceso(codigo?: string): { codigo: string; nombre: string; nombreCorto: string; icono: string; modalidadSugerida?: any; plantillaTurnosSugerida?: any } {
+    const cod = (codigo || 'URGENCIAS').toUpperCase();
+    return (
+      (this.macroprocesos || []).find((m) => m.codigo === cod) || {
+        codigo: cod,
+        nombre: cod,
+        nombreCorto: cod,
+        icono: '🏥',
+      }
+    );
+  }
+
+  contarServiciosEnMacroproceso(codigo: string): number {
+    return (this.servicios || []).filter(
+      (s) => (s.tipoAsistencia || 'URGENCIAS').toUpperCase() === codigo
+    ).length;
+  }
+
+  onSeleccionarMacroprocesoForm(codigo: string): void {
+    this.cambiarNuevoServicioTipoAsistencia.emit(codigo);
+    if (!this.servicioEditandoId) {
+      const info = this.infoMacroproceso(codigo);
+      if (info.modalidadSugerida) {
+        this.cambiarNuevoServicioModalidadDias.emit(info.modalidadSugerida);
+      }
+      if (info.plantillaTurnosSugerida) {
+        this.aplicarPlantillaTurnosServicio.emit(info.plantillaTurnosSugerida);
+      }
+    }
+  }
 
   alternarDesplieguePersonal(servicioId: string): void {
     this.serviciosExpandidos.update((set) => {
@@ -708,7 +758,7 @@ export class ConfiguracionServiciosComponent {
 
   etiquetaModalidadDias(mod?: string): string {
     if (mod === 'TODOS_24_7') return 'Todos los días 24/7 (Metas continuas)';
-    if (mod === 'TODOS_GUARDIA_FDS') return '24/7 con guardia FDS/Festivos';
+    if (mod === 'TODOS_GUARDIA_FDS') return '24/7 (Lun–Sáb y Dom/Fest diferenciado)';
     if (mod === 'LUN_SAB_SIN_FESTIVOS') return 'Lunes a Sábado (Cierra Dom/Fest)';
     if (mod === 'LUN_VIE_HABILES') return 'Lunes a Viernes Hábiles';
     return 'Todos los días 24/7';

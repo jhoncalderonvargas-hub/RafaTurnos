@@ -6,14 +6,17 @@ import {
   Delete,
   Get,
   NotFoundException,
+  Optional,
   Param,
   Post,
   Put,
-  Query,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
+import { desglosarHorarioOrdinario, hoyColombiaIso } from '../../shared/liquidacion-horas';
+import { LiquidacionService } from '../liquidacion/liquidacion.module';
 
-function normalizarTipoAsistencia(tipo: any): any {
+function normalizarCodigoMacroproceso(tipo: any): string {
   if (!tipo) return 'URGENCIAS';
   const val = String(tipo).trim().toUpperCase();
   if (val === 'UCI' || val === 'CUIDADOS_INTENSIVOS') return 'CUIDADOS_INTENSIVOS';
@@ -21,19 +24,117 @@ function normalizarTipoAsistencia(tipo: any): any {
   if (val === 'QUIRURGICO') return 'QUIRURGICO';
   if (val === 'HOSPITALIZACION') return 'HOSPITALIZACION';
   if (val === 'APOYO_DIAGNOSTICO') return 'APOYO_DIAGNOSTICO';
+  if (val === 'ADMINISTRATIVO') return 'ADMINISTRATIVO';
+  if (val === 'APOYO_OPERATIVO') return 'APOYO_OPERATIVO';
   if (val === 'URGENCIAS') return 'URGENCIAS';
-  return 'CONSULTA_EXTERNA';
+  return val;
 }
 
 @Controller('api/v1/servicios-admin')
 export class ServiciosAdminController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly liquidacionService: LiquidacionService,
+    @Optional() private readonly configService?: ConfigService
+  ) {}
+
+  private obtenerConfigIntranet(overrideUrl?: string): {
+    intranetUrl: string;
+    headers: Record<string, string>;
+  } {
+    const intranetUrl =
+      (overrideUrl && String(overrideUrl).trim()) ||
+      this.configService?.get<string>('INTRANET_API_URL') ||
+      process.env.INTRANET_API_URL ||
+      'http://localhost:4300';
+    const apiKey =
+      this.configService?.get<string>('INTRANET_API_KEY') ||
+      process.env.INTRANET_API_KEY ||
+      '';
+    const headers: Record<string, string> = {};
+    if (apiKey.trim()) {
+      headers['x-api-key'] = apiKey.trim();
+    }
+    return { intranetUrl, headers };
+  }
+
+  // 0. Sincronizar y obtener Catálogo de Macroprocesos (Intranet -> PostgreSQL tabla macroprocesos)
+  @Get('macroprocesos')
+  async listarMacroprocesosIntranet() {
+    const { intranetUrl, headers } = this.obtenerConfigIntranet();
+    try {
+      const resp = await fetch(`${intranetUrl}/api/intranet/macroprocesos`, { headers });
+      if (resp.ok) {
+        const lista = await resp.json();
+        if (Array.isArray(lista) && lista.length > 0) {
+          for (const m of lista) {
+            const cod = String(m.codigo || '').trim().toUpperCase();
+            if (!cod) continue;
+            await this.prisma.macroproceso.upsert({
+              where: { codigo: cod },
+              update: {
+                nombre: m.nombre || cod,
+                nombreCorto: m.nombreCorto || m.nombre || cod,
+                tipoProceso: m.tipoProceso || 'MISIONAL_ASISTENCIAL',
+                icono: m.icono || '🏥',
+                orden: Number(m.orden) || 1,
+                modalidadSugerida: m.modalidadSugerida || 'TODOS_24_7',
+                plantillaTurnosSugerida: m.plantillaTurnosSugerida || 'ROTATIVO_8H',
+              },
+              create: {
+                id: `mp-${cod.toLowerCase().replace(/_/g, '-')}`,
+                codigo: cod,
+                nombre: m.nombre || cod,
+                nombreCorto: m.nombreCorto || m.nombre || cod,
+                tipoProceso: m.tipoProceso || 'MISIONAL_ASISTENCIAL',
+                icono: m.icono || '🏥',
+                orden: Number(m.orden) || 1,
+                modalidadSugerida: m.modalidadSugerida || 'TODOS_24_7',
+                plantillaTurnosSugerida: m.plantillaTurnosSugerida || 'ROTATIVO_8H',
+              },
+            });
+          }
+        }
+      } else {
+        console.warn(`Intranet macroprocesos respondió HTTP ${resp.status}; usando catálogo en BD.`);
+      }
+    } catch (err: any) {
+      console.warn(`No se pudo sincronizar macroprocesos desde Intranet (${err?.message || 'error'}); usando catálogo en BD.`);
+    }
+    return this.prisma.macroproceso.findMany({ orderBy: { orden: 'asc' } });
+  }
+
+  private async resolverMacroprocesoId(codigoOId?: string): Promise<string> {
+    const cod = normalizarCodigoMacroproceso(codigoOId);
+    const porCodigo = await this.prisma.macroproceso.findFirst({
+      where: {
+        OR: [{ codigo: cod }, { id: String(codigoOId || '') }],
+      },
+    });
+    if (porCodigo) return porCodigo.id;
+
+    const creado = await this.prisma.macroproceso.create({
+      data: {
+        id: `mp-${cod.toLowerCase().replace(/_/g, '-')}`,
+        codigo: cod,
+        nombre: cod,
+        nombreCorto: cod,
+        tipoProceso: 'MISIONAL_ASISTENCIAL',
+        icono: '🏥',
+        orden: 99,
+        modalidadSugerida: 'TODOS_24_7',
+        plantillaTurnosSugerida: 'ROTATIVO_8H',
+      },
+    });
+    return creado.id;
+  }
 
   // 1. Listar todos los servicios con sus servicios hermanos enlazados y desglose por cargo
   @Get()
   async listarServicios() {
     const servicios = await this.prisma.servicio.findMany({
       include: {
+        macroproceso: true,
         serviciosHermanosOrigen: {
           include: { servicioHermano: true },
         },
@@ -55,9 +156,9 @@ export class ServiciosAdminController {
 
     return servicios.map((s) => {
       const turnosSrv =
-        Array.isArray((s as any).turnosHabilitadosCodigos) && (s as any).turnosHabilitadosCodigos.length > 0
-          ? (s as any).turnosHabilitadosCodigos
-          : ['M8', 'T8', 'N8', 'M6', 'T6', 'N12', 'D12', 'G24', 'ADM', 'MD', 'AP', 'DISP', 'S', 'L', 'COMP', 'VAC', 'INC'];
+        Array.isArray(s.turnosHabilitadosCodigos) && s.turnosHabilitadosCodigos.length > 0
+          ? s.turnosHabilitadosCodigos
+          : ['M8', 'T8', 'N8', 'M6', 'T6', 'N12', 'D12', 'G24', 'ADM', 'MD', 'AP', 'DISP', 'S', 'L', 'COMP', 'FAM', 'VAC', 'INC', 'LIC'];
 
       // Agrupar turnos habilitados por categoría desde la tabla servicios_turnos_habilitados
       const mapaTurnosPorCat = new Map<string, string[]>();
@@ -84,7 +185,7 @@ export class ServiciosAdminController {
       }
 
       // Construir reglasPorCargo combinando requerimientos_cobertura y las categorías reales del servicio
-      const mapaCoberturas = new Map<string, any>();
+      const mapaCoberturas = new Map<string, (typeof s.coberturas)[number]>();
       for (const cob of s.coberturas || []) {
         if (!cob.categoria) continue;
         mapaCoberturas.set(cob.categoria.nombre, cob);
@@ -98,20 +199,26 @@ export class ServiciosAdminController {
         const cob = mapaCoberturas.get(catNombre);
         const infoCat = conteoPorCat.get(catNombre);
         const turnosCat = mapaTurnosPorCat.get(catNombre);
-        const reqM = (cob as any)?.reqManana ?? 1;
-        const reqT = (cob as any)?.reqTarde ?? 1;
-        const reqN = (cob as any)?.reqNoche ?? 0;
+        const reqD = cob?.reqDia ?? 1;
+        const reqN = cob?.reqNoche ?? 0;
+        const reqDDomFest = cob?.reqDiaDomFest ?? reqD;
+        const reqNDomFest = cob?.reqNocheDomFest ?? reqN;
+        const sinTurnosExplicitos =
+          !turnosCat &&
+          Boolean(cob) &&
+          reqD === 0 &&
+          reqN === 0 &&
+          reqDDomFest === 0 &&
+          reqNDomFest === 0;
         return {
           categoriaId: cob?.categoriaId || infoCat?.id,
           categoriaNombre: catNombre,
           empleadosCount: infoCat?.count || 0,
-          reqManana: reqM,
-          reqTarde: reqT,
+          reqDia: reqD,
           reqNoche: reqN,
-          reqMananaFds: (cob as any)?.reqMananaFds ?? reqM,
-          reqTardeFds: (cob as any)?.reqTardeFds ?? reqT,
-          reqNocheFds: (cob as any)?.reqNocheFds ?? reqN,
-          turnosHabilitados: turnosCat && turnosCat.length > 0 ? turnosCat : turnosSrv,
+          reqDiaDomFest: reqDDomFest,
+          reqNocheDomFest: reqNDomFest,
+          turnosHabilitados: turnosCat && turnosCat.length > 0 ? turnosCat : sinTurnosExplicitos ? [] : turnosSrv,
         };
       });
 
@@ -119,15 +226,15 @@ export class ServiciosAdminController {
         id: s.id,
         codigo: s.codigo,
         nombre: s.nombre,
-        tipoAsistencia: s.tipoAsistencia,
+        macroprocesoId: s.macroprocesoId,
+        macroprocesoNombre: s.macroproceso?.nombre,
+        tipoAsistencia: s.macroproceso?.codigo || 'URGENCIAS',
         intranetId: s.intranetId,
-        reqManana: s.reqManana ?? 4,
-        reqTarde: s.reqTarde ?? 4,
+        reqDia: s.reqDia ?? 4,
         reqNoche: s.reqNoche ?? 2,
-        modalidadDias: (s as any).modalidadDias || 'TODOS_24_7',
-        reqMananaFds: (s as any).reqMananaFds ?? s.reqManana ?? 4,
-        reqTardeFds: (s as any).reqTardeFds ?? s.reqTarde ?? 4,
-        reqNocheFds: (s as any).reqNocheFds ?? s.reqNoche ?? 2,
+        modalidadDias: s.modalidadDias || 'TODOS_24_7',
+        reqDiaDomFest: s.reqDiaDomFest ?? s.reqDia ?? 4,
+        reqNocheDomFest: s.reqNocheDomFest ?? s.reqNoche ?? 2,
         turnosHabilitados: turnosSrv,
         reglasPorCargo,
         empleadosCount: s._count.empleadosBase,
@@ -159,17 +266,17 @@ export class ServiciosAdminController {
   // 1.1b Sincronización del Censo Maestro de Personal desde Intranet Hospitalaria
   @Post('sincronizar-empleados-intranet')
   async sincronizarEmpleadosIntranet(@Body() body?: { intranetUrl?: string }) {
-    const intranetUrl =
-      body?.intranetUrl || process.env.INTRANET_API_URL || 'http://localhost:4300';
+    const { intranetUrl, headers } = this.obtenerConfigIntranet(body?.intranetUrl);
 
     let censo: any[] = [];
     try {
-      const resp = await fetch(`${intranetUrl}/api/intranet/empleados`);
+      const resp = await fetch(`${intranetUrl}/api/intranet/empleados`, { headers });
       if (!resp.ok) {
         throw new BadRequestException(`Intranet respondió con código ${resp.status}`);
       }
       censo = await resp.json();
     } catch (err: any) {
+      if (err instanceof BadRequestException) throw err;
       throw new BadRequestException(
         `No se pudo conectar con la Intranet en ${intranetUrl}: ${err.message}`
       );
@@ -181,16 +288,15 @@ export class ServiciosAdminController {
 
     const [categoriasDb, serviciosDb] = await Promise.all([
       this.prisma.categoriaProfesional.findMany(),
-      this.prisma.servicio.findMany(),
+      this.prisma.servicio.findMany({ orderBy: { nombre: 'asc' } }),
     ]);
 
     const mapaCat = new Map(categoriasDb.map((c) => [c.nombre.trim().toLowerCase(), c.id]));
-    const mapaSrv = new Map(
+    const mapaServiciosPorCodigo = new Map(
       serviciosDb.map((s) => [s.codigo.trim().toUpperCase(), s.id])
     );
-    for (const s of serviciosDb) {
-      mapaSrv.set(s.id, s.id);
-    }
+    const srvDefaultId =
+      serviciosDb.find((s) => s.codigo === 'URG')?.id || serviciosDb[0]?.id;
 
     const docs = [
       ...new Set(
@@ -214,7 +320,7 @@ export class ServiciosAdminController {
         const doc = String(item.documento || '').trim();
         if (!doc) continue;
 
-        // Resolver categoría
+        // Resolver categoría (Cargo Profesional reportado por la Intranet)
         const cargoNombre = String(item.cargoNombre || 'Auxiliar de Enfermería').trim();
         let catId = mapaCat.get(cargoNombre.toLowerCase());
         if (!catId) {
@@ -225,17 +331,16 @@ export class ServiciosAdminController {
           mapaCat.set(cargoNombre.toLowerCase(), catId);
         }
 
-        // Resolver servicio base
-        const srvCodigo = String(item.servicioCodigo || 'URG').trim().toUpperCase();
-        const srvId = mapaSrv.get(srvCodigo) || serviciosDb[0]?.id;
-        if (!srvId) continue;
-
         const horasMes = Number(item.horasContratoMes) || 168;
         const correo = item.correo || `${doc}@hospital.gov.co`;
 
         const existente = mapaExistentes.get(doc);
 
         if (!existente) {
+          const codSrv = String(item.servicioCodigo || '').trim().toUpperCase();
+          const servicioAsignadoId =
+            (codSrv ? mapaServiciosPorCodigo.get(codSrv) : undefined) || srvDefaultId;
+          if (!servicioAsignadoId) continue;
           const nuevo = await tx.empleado.create({
             data: {
               documento: doc,
@@ -244,20 +349,22 @@ export class ServiciosAdminController {
               horasSemanalesLey: 42,
               horasContratoMes: horasMes,
               categoriaId: catId,
-              servicioBaseId: srvId,
+              servicioBaseId: servicioAsignadoId,
             },
             select: { id: true, documento: true, nombre: true },
           });
           mapaExistentes.set(doc, nuevo);
           creados++;
         } else {
+          // La Intranet solo abarca hasta el Cargo Profesional (categoriaId);
+          // el servicioBaseId es propiedad exclusiva de Rafa Turnos y no se sobrescribe.
           await tx.empleado.update({
             where: { id: existente.id },
             data: {
               nombre: item.nombre || existente.nombre,
+              correo,
               horasContratoMes: horasMes,
               categoriaId: catId,
-              ...(item.servicioCodigo ? { servicioBaseId: srvId } : {}),
             },
           });
           actualizados++;
@@ -297,42 +404,100 @@ export class ServiciosAdminController {
       minutosAlmuerzo?: number;
       colorHex: string;
       descuentaBancoHoras?: boolean;
+      horasAmortizacionBanco?: number | null;
       esNocturnoPesado?: boolean;
       visibleEnPaleta?: boolean;
+      modoJornada?: 'HORARIO' | 'GUARDIA_24H' | 'DESCANSO';
     }
   ) {
-    const cod = data.codigo.trim().toUpperCase();
-    const minAlmuerzo = data.minutosAlmuerzo !== undefined ? Math.max(0, Number(data.minutosAlmuerzo) || 0) : 0;
-    return this.prisma.tipoTurno.upsert({
+    const cod = String(data?.codigo || '').trim().toUpperCase();
+    const nom = String(data?.nombre || '').trim();
+    if (!cod || !nom) {
+      throw new BadRequestException('El código y el nombre del turno son obligatorios.');
+    }
+
+    const minAlmuerzo =
+      data.minutosAlmuerzo !== undefined ? Math.max(0, Number(data.minutosAlmuerzo) || 0) : 0;
+    const codNoOperativo = ['L', 'S', 'COMP', 'VAC', 'INC', 'LIC', 'FAM', 'DISP', 'BLANCO'].includes(
+      cod
+    );
+    let horaInicio = String(data.horaInicio || '00:00').trim() || '00:00';
+    let horaFin = String(data.horaFin || '00:00').trim() || '00:00';
+    let horasOrdinarias = Number(data.horasOrdinarias) || 0;
+    let horasDiurnas = Number(data.horasDiurnas) || 0;
+    let horasNocturnas = Number(data.horasNocturnas) || 0;
+
+    if (data.modoJornada === 'DESCANSO') {
+      horaInicio = '00:00';
+      horaFin = '00:00';
+      horasOrdinarias = 0;
+      horasDiurnas = 0;
+      horasNocturnas = 0;
+    } else if (
+      !codNoOperativo &&
+      (horasOrdinarias > 0 || data.modoJornada === 'HORARIO' || data.modoJornada === 'GUARDIA_24H') &&
+      horaInicio &&
+      horaFin
+    ) {
+      const esGuardia24 =
+        data.modoJornada === 'GUARDIA_24H' || cod === 'G24' || Number(data.horasOrdinarias) >= 24;
+      const desglose = desglosarHorarioOrdinario(
+        horaInicio,
+        horaFin,
+        minAlmuerzo,
+        hoyColombiaIso(),
+        esGuardia24
+      );
+      if (!desglose) {
+        throw new BadRequestException(
+          'Horario de turno inválido: en modo HORARIO la hora de inicio y fin no pueden ser iguales y el almuerzo debe ser menor que la duración.'
+        );
+      }
+      horasOrdinarias = desglose.ordinarias;
+      horasDiurnas = desglose.diurnas;
+      horasNocturnas = desglose.nocturnas;
+    }
+
+    const horasAmortizacionBanco =
+      data.horasAmortizacionBanco !== undefined && data.horasAmortizacionBanco !== null
+        ? Math.max(0.5, Number(data.horasAmortizacionBanco) || 8)
+        : 8;
+
+    const guardado = await this.prisma.tipoTurno.upsert({
       where: { codigo: cod },
       create: {
         codigo: cod,
-        nombre: data.nombre.trim(),
-        horaInicio: data.horaInicio,
-        horaFin: data.horaFin,
-        horasOrdinarias: Number(data.horasOrdinarias) || 0,
-        horasDiurnas: Number(data.horasDiurnas) || 0,
-        horasNocturnas: Number(data.horasNocturnas) || 0,
+        nombre: nom,
+        horaInicio,
+        horaFin,
+        horasOrdinarias,
+        horasDiurnas,
+        horasNocturnas,
         minutosAlmuerzo: minAlmuerzo,
         colorHex: data.colorHex || '#E0F2FE',
         descuentaBancoHoras: !!data.descuentaBancoHoras,
+        horasAmortizacionBanco,
         esNocturnoPesado: !!data.esNocturnoPesado,
         visibleEnPaleta: data.visibleEnPaleta !== undefined ? !!data.visibleEnPaleta : true,
-      } as any,
+      },
       update: {
-        nombre: data.nombre.trim(),
-        horaInicio: data.horaInicio,
-        horaFin: data.horaFin,
-        horasOrdinarias: Number(data.horasOrdinarias) || 0,
-        horasDiurnas: Number(data.horasDiurnas) || 0,
-        horasNocturnas: Number(data.horasNocturnas) || 0,
+        nombre: nom,
+        horaInicio,
+        horaFin,
+        horasOrdinarias,
+        horasDiurnas,
+        horasNocturnas,
         minutosAlmuerzo: minAlmuerzo,
         colorHex: data.colorHex || '#E0F2FE',
         descuentaBancoHoras: !!data.descuentaBancoHoras,
+        horasAmortizacionBanco,
         esNocturnoPesado: !!data.esNocturnoPesado,
         ...(data.visibleEnPaleta !== undefined ? { visibleEnPaleta: !!data.visibleEnPaleta } : {}),
-      } as any,
+      },
     });
+
+    await this.liquidacionService.recalcularPorTipoTurno(guardado.id);
+    return guardado;
   }
 
   private async sincronizarReglasPorCargoEnDb(
@@ -341,15 +506,15 @@ export class ServiciosAdminController {
     reglasPorCargo?: {
       categoriaId?: string;
       categoriaNombre: string;
-      reqManana?: number;
-      reqTarde?: number;
+      reqDia?: number;
       reqNoche?: number;
-      reqMananaFds?: number;
-      reqTardeFds?: number;
-      reqNocheFds?: number;
+      reqDiaDomFest?: number;
+      reqNocheDomFest?: number;
       turnosHabilitados?: string[];
     }[]
   ) {
+    if (!Array.isArray(reglasPorCargo)) return;
+
     const [categoriasDb, tiposTurnoDb] = await Promise.all([
       this.prisma.categoriaProfesional.findMany(),
       this.prisma.tipoTurno.findMany(),
@@ -359,120 +524,122 @@ export class ServiciosAdminController {
     const mapaTurnoPorCod = new Map(tiposTurnoDb.map((t) => [t.codigo.trim().toUpperCase(), t.id]));
     const mapaTurnoPorId = new Map(tiposTurnoDb.map((t) => [t.id, t]));
 
-    if (Array.isArray(reglasPorCargo) && reglasPorCargo.length > 0) {
-      await this.prisma.$transaction(async (tx) => {
-        for (const regla of reglasPorCargo) {
-          let catId =
-            regla.categoriaId ||
-            mapaCatPorNombre.get(
-              (regla.categoriaNombre || '').trim().toLowerCase()
+    await this.prisma.$transaction(async (tx) => {
+      const categoriasConservadas: string[] = [];
+
+      for (const regla of reglasPorCargo) {
+        let catId =
+          regla.categoriaId ||
+          mapaCatPorNombre.get((regla.categoriaNombre || '').trim().toLowerCase());
+        if (!catId && regla.categoriaNombre) {
+          const creada = await tx.categoriaProfesional.upsert({
+            where: { nombre: regla.categoriaNombre.trim() },
+            update: {},
+            create: { nombre: regla.categoriaNombre.trim() },
+          });
+          catId = creada.id;
+          mapaCatPorNombre.set(creada.nombre.toLowerCase(), creada.id);
+        }
+        if (!catId) continue;
+        categoriasConservadas.push(catId);
+
+        const listaExplicita = Array.isArray(regla.turnosHabilitados);
+        const codigosCat = listaExplicita
+          ? regla.turnosHabilitados!.map((c) => String(c).trim().toUpperCase()).filter(Boolean)
+          : turnosServicio;
+
+        const turnosObjCat = codigosCat
+          .map((cod) => mapaTurnoPorCod.get(cod))
+          .filter((id): id is string => Boolean(id))
+          .map((id) => mapaTurnoPorId.get(id));
+
+        const sinTurnosCat = listaExplicita && codigosCat.length === 0;
+        const tieneNocheCat = sinTurnosCat
+          ? false
+          : turnosObjCat.length === 0 ||
+            turnosObjCat.some(
+              (t) => t && t.horasOrdinarias > 0 && (t.esNocturnoPesado || t.horasNocturnas >= 6)
             );
-          if (!catId && regla.categoriaNombre) {
-            const creada = await tx.categoriaProfesional.upsert({
-              where: { nombre: regla.categoriaNombre.trim() },
-              update: {},
-              create: { nombre: regla.categoriaNombre.trim() },
-            });
-            catId = creada.id;
-            mapaCatPorNombre.set(creada.nombre.toLowerCase(), creada.id);
-          }
-          if (!catId) continue;
+        const tieneDiaCat = sinTurnosCat
+          ? false
+          : turnosObjCat.length === 0 ||
+            turnosObjCat.some(
+              (t) =>
+                t &&
+                t.horasOrdinarias > 0 &&
+                (t.horasOrdinarias >= 24 || (!t.esNocturnoPesado && t.horasNocturnas < 6))
+            );
 
-          const codigosCat =
-            Array.isArray(regla.turnosHabilitados) &&
-            regla.turnosHabilitados.length > 0
-              ? regla.turnosHabilitados.map((c) =>
-                  String(c).trim().toUpperCase()
-                )
-              : turnosServicio;
+        const reqD = tieneDiaCat ? Math.max(0, Number(regla.reqDia) || 0) : 0;
+        const reqN = tieneNocheCat ? Math.max(0, Number(regla.reqNoche) || 0) : 0;
+        const reqDDomFest = tieneDiaCat
+          ? regla.reqDiaDomFest !== undefined
+            ? Math.max(0, Number(regla.reqDiaDomFest) || 0)
+            : reqD
+          : 0;
+        const reqNDomFest = tieneNocheCat
+          ? regla.reqNocheDomFest !== undefined
+            ? Math.max(0, Number(regla.reqNocheDomFest) || 0)
+            : reqN
+          : 0;
 
-          const turnosObjCat = codigosCat
-            .map((cod) => mapaTurnoPorCod.get(cod))
-            .filter((id): id is string => Boolean(id))
-            .map((id) => mapaTurnoPorId.get(id));
-
-          const tieneNocheCat = turnosObjCat.some(
-            (t) => t && (t.esNocturnoPesado || t.horasNocturnas >= 6)
-          );
-          const tieneTardeCat = turnosObjCat.some(
-            (t) => t && (t.horasDiurnas > 0 || (t.horaFin && parseInt(t.horaFin.split(':')[0], 10) >= 15))
-          );
-          const tieneMananaCat = turnosObjCat.some(
-            (t) => t && (t.horasDiurnas > 0 || (t.horaInicio && parseInt(t.horaInicio.split(':')[0], 10) < 12))
-          );
-
-          const reqM = tieneMananaCat ? Math.max(0, Number(regla.reqManana) || 0) : 0;
-          const reqT = tieneTardeCat ? Math.max(0, Number(regla.reqTarde) || 0) : 0;
-          const reqN = tieneNocheCat ? Math.max(0, Number(regla.reqNoche) || 0) : 0;
-          const reqMFds = tieneMananaCat
-            ? regla.reqMananaFds !== undefined
-              ? Math.max(0, Number(regla.reqMananaFds) || 0)
-              : reqM
-            : 0;
-          const reqTFds = tieneTardeCat
-            ? regla.reqTardeFds !== undefined
-              ? Math.max(0, Number(regla.reqTardeFds) || 0)
-              : reqT
-            : 0;
-          const reqNFds = tieneNocheCat
-            ? regla.reqNocheFds !== undefined
-              ? Math.max(0, Number(regla.reqNocheFds) || 0)
-              : reqN
-            : 0;
-
-          await (tx.requerimientoCobertura as any).upsert({
-            where: {
-              servicioId_categoriaId: {
-                servicioId,
-                categoriaId: catId,
-              },
-            },
-            update: {
-              cantidadMinima: Math.max(1, reqM),
-              reqManana: reqM,
-              reqTarde: reqT,
-              reqNoche: reqN,
-              reqMananaFds: reqMFds,
-              reqTardeFds: reqTFds,
-              reqNocheFds: reqNFds,
-            },
-            create: {
+        await tx.requerimientoCobertura.upsert({
+          where: {
+            servicioId_categoriaId: {
               servicioId,
               categoriaId: catId,
-              cantidadMinima: Math.max(1, reqM),
-              aplicaFestivoDom: true,
-              reqManana: reqM,
-              reqTarde: reqT,
-              reqNoche: reqN,
-              reqMananaFds: reqMFds,
-              reqTardeFds: reqTFds,
-              reqNocheFds: reqNFds,
             },
+          },
+          update: {
+            reqDia: reqD,
+            reqNoche: reqN,
+            reqDiaDomFest: reqDDomFest,
+            reqNocheDomFest: reqNDomFest,
+          },
+          create: {
+            servicioId,
+            categoriaId: catId,
+            reqDia: reqD,
+            reqNoche: reqN,
+            reqDiaDomFest: reqDDomFest,
+            reqNocheDomFest: reqNDomFest,
+          },
+        });
+
+        await tx.servicioTurnoHabilitado.deleteMany({
+          where: { servicioId, categoriaId: catId },
+        });
+
+        const filasTurnos = codigosCat
+          .map((cod) => mapaTurnoPorCod.get(cod))
+          .filter((id): id is string => Boolean(id))
+          .map((tipoTurnoId) => ({
+            servicioId,
+            categoriaId: catId!,
+            tipoTurnoId,
+            habilitado: true,
+          }));
+
+        if (filasTurnos.length > 0) {
+          await tx.servicioTurnoHabilitado.createMany({
+            data: filasTurnos,
+            skipDuplicates: true,
           });
-
-          await tx.servicioTurnoHabilitado.deleteMany({
-            where: { servicioId, categoriaId: catId },
-          });
-
-          const filasTurnos = codigosCat
-            .map((cod) => mapaTurnoPorCod.get(cod))
-            .filter((id): id is string => Boolean(id))
-            .map((tipoTurnoId) => ({
-              servicioId,
-              categoriaId: catId!,
-              tipoTurnoId,
-              habilitado: true,
-            }));
-
-          if (filasTurnos.length > 0) {
-            await tx.servicioTurnoHabilitado.createMany({
-              data: filasTurnos,
-              skipDuplicates: true,
-            });
-          }
         }
-      });
-    }
+      }
+
+      if (categoriasConservadas.length > 0) {
+        await tx.servicioTurnoHabilitado.deleteMany({
+          where: { servicioId, categoriaId: { notIn: categoriasConservadas } },
+        });
+        await tx.requerimientoCobertura.deleteMany({
+          where: { servicioId, categoriaId: { notIn: categoriasConservadas } },
+        });
+      } else {
+        await tx.servicioTurnoHabilitado.deleteMany({ where: { servicioId } });
+        await tx.requerimientoCobertura.deleteMany({ where: { servicioId } });
+      }
+    });
   }
 
   // 2. Crear un servicio nuevo (autónomo en Rafa Turnos)
@@ -482,15 +649,14 @@ export class ServiciosAdminController {
     data: {
       codigo: string;
       nombre: string;
-      tipoAsistencia: any;
+      tipoAsistencia?: any;
+      macroprocesoId?: string;
       intranetId?: string;
-      reqManana?: number;
-      reqTarde?: number;
+      reqDia?: number;
       reqNoche?: number;
       modalidadDias?: string;
-      reqMananaFds?: number;
-      reqTardeFds?: number;
-      reqNocheFds?: number;
+      reqDiaDomFest?: number;
+      reqNocheDomFest?: number;
       turnosHabilitados?: string[];
       reglasPorCargo?: any[];
     }
@@ -511,27 +677,25 @@ export class ServiciosAdminController {
 
     const turnosLimpios = Array.isArray(data.turnosHabilitados)
       ? Array.from(new Set(data.turnosHabilitados.map((t) => String(t).trim().toUpperCase()).filter(Boolean)))
-      : ['M8', 'T8', 'N8', 'D12', 'G24', 'S', 'L', 'COMP', 'VAC', 'INC'];
+      : ['M8', 'T8', 'N8', 'D12', 'G24', 'S', 'L', 'COMP', 'FAM', 'VAC', 'INC', 'LIC'];
 
-    const reqM = data.reqManana !== undefined ? Math.max(0, Number(data.reqManana) || 0) : 4;
-    const reqT = data.reqTarde !== undefined ? Math.max(0, Number(data.reqTarde) || 0) : 4;
+    const reqD = data.reqDia !== undefined ? Math.max(0, Number(data.reqDia) || 0) : 4;
     const reqN = data.reqNoche !== undefined ? Math.max(0, Number(data.reqNoche) || 0) : 2;
+    const macroprocesoId = await this.resolverMacroprocesoId(data.macroprocesoId || data.tipoAsistencia);
 
     const creado = await this.prisma.servicio.create({
       data: {
         codigo: cod,
         nombre: nom,
-        tipoAsistencia: normalizarTipoAsistencia(data.tipoAsistencia),
+        macroprocesoId,
         intranetId: data.intranetId,
-        reqManana: reqM,
-        reqTarde: reqT,
+        reqDia: reqD,
         reqNoche: reqN,
         modalidadDias: data.modalidadDias || 'TODOS_24_7',
-        reqMananaFds: data.reqMananaFds !== undefined ? Math.max(0, Number(data.reqMananaFds) || 0) : reqM,
-        reqTardeFds: data.reqTardeFds !== undefined ? Math.max(0, Number(data.reqTardeFds) || 0) : reqT,
-        reqNocheFds: data.reqNocheFds !== undefined ? Math.max(0, Number(data.reqNocheFds) || 0) : reqN,
+        reqDiaDomFest: data.reqDiaDomFest !== undefined ? Math.max(0, Number(data.reqDiaDomFest) || 0) : reqD,
+        reqNocheDomFest: data.reqNocheDomFest !== undefined ? Math.max(0, Number(data.reqNocheDomFest) || 0) : reqN,
         turnosHabilitadosCodigos: turnosLimpios,
-      } as any,
+      },
     });
 
     await this.sincronizarReglasPorCargoEnDb(creado.id, turnosLimpios, data.reglasPorCargo);
@@ -546,18 +710,22 @@ export class ServiciosAdminController {
     data: {
       codigo: string;
       nombre: string;
-      tipoAsistencia: any;
-      reqManana?: number;
-      reqTarde?: number;
+      tipoAsistencia?: any;
+      macroprocesoId?: string;
+      reqDia?: number;
       reqNoche?: number;
       modalidadDias?: string;
-      reqMananaFds?: number;
-      reqTardeFds?: number;
-      reqNocheFds?: number;
+      reqDiaDomFest?: number;
+      reqNocheDomFest?: number;
       turnosHabilitados?: string[];
       reglasPorCargo?: any[];
     }
   ) {
+    const existente = await this.prisma.servicio.findUnique({ where: { id } });
+    if (!existente) {
+      throw new NotFoundException(`No se encontró el servicio '${id}'.`);
+    }
+
     const cod = data.codigo?.trim().toUpperCase();
     const nom = data.nombre?.trim();
 
@@ -581,34 +749,44 @@ export class ServiciosAdminController {
 
     const tiposTurnoDb = await this.prisma.tipoTurno.findMany();
     const mapaTurnoPorCod = new Map(tiposTurnoDb.map((t) => [t.codigo.trim().toUpperCase(), t]));
+    const turnosObjSrv = (turnosLimpios || [])
+      .map((c) => mapaTurnoPorCod.get(c))
+      .filter((t): t is NonNullable<typeof t> => Boolean(t));
 
-    const tieneNocheSrv = turnosLimpios
-      ? turnosLimpios.some((c) => {
-          const t = mapaTurnoPorCod.get(c);
-          return t && (t.esNocturnoPesado || t.horasNocturnas >= 6);
-        })
-      : true;
+    const tieneNocheSrv =
+      !turnosLimpios || turnosObjSrv.length === 0
+        ? true
+        : turnosObjSrv.some((t) => t.horasOrdinarias > 0 && (t.esNocturnoPesado || t.horasNocturnas >= 6));
+    const tieneDiaSrv =
+      !turnosLimpios || turnosObjSrv.length === 0
+        ? true
+        : turnosObjSrv.some(
+            (t) => t.horasOrdinarias > 0 && (t.horasOrdinarias >= 24 || (!t.esNocturnoPesado && t.horasNocturnas < 6))
+          );
+
+    const macroprocesoEntrada = data.macroprocesoId || data.tipoAsistencia;
+    const macroprocesoId = macroprocesoEntrada
+      ? await this.resolverMacroprocesoId(macroprocesoEntrada)
+      : existente.macroprocesoId;
 
     const actualizado = await this.prisma.servicio.update({
       where: { id },
       data: {
         codigo: cod,
         nombre: nom,
-        tipoAsistencia: normalizarTipoAsistencia(data.tipoAsistencia),
-        ...(data.reqManana !== undefined ? { reqManana: Math.max(0, Number(data.reqManana) || 0) } : {}),
-        ...(data.reqTarde !== undefined ? { reqTarde: Math.max(0, Number(data.reqTarde) || 0) } : {}),
+        macroprocesoId,
+        ...(data.reqDia !== undefined ? { reqDia: tieneDiaSrv ? Math.max(0, Number(data.reqDia) || 0) : 0 } : {}),
         ...(data.reqNoche !== undefined ? { reqNoche: tieneNocheSrv ? Math.max(0, Number(data.reqNoche) || 0) : 0 } : {}),
         ...(data.modalidadDias !== undefined ? { modalidadDias: data.modalidadDias } : {}),
-        ...(data.reqMananaFds !== undefined ? { reqMananaFds: Math.max(0, Number(data.reqMananaFds) || 0) } : {}),
-        ...(data.reqTardeFds !== undefined ? { reqTardeFds: Math.max(0, Number(data.reqTardeFds) || 0) } : {}),
-        ...(data.reqNocheFds !== undefined ? { reqNocheFds: tieneNocheSrv ? Math.max(0, Number(data.reqNocheFds) || 0) : 0 } : {}),
+        ...(data.reqDiaDomFest !== undefined ? { reqDiaDomFest: tieneDiaSrv ? Math.max(0, Number(data.reqDiaDomFest) || 0) : 0 } : {}),
+        ...(data.reqNocheDomFest !== undefined ? { reqNocheDomFest: tieneNocheSrv ? Math.max(0, Number(data.reqNocheDomFest) || 0) : 0 } : {}),
         ...(turnosLimpios !== undefined ? { turnosHabilitadosCodigos: turnosLimpios } : {}),
-      } as any,
+      },
     });
 
     await this.sincronizarReglasPorCargoEnDb(
       id,
-      turnosLimpios || (actualizado as any).turnosHabilitadosCodigos || ['M8', 'T8', 'N8'],
+      turnosLimpios || actualizado.turnosHabilitadosCodigos || ['M8', 'T8', 'N8'],
       data.reglasPorCargo
     );
 
@@ -677,6 +855,23 @@ export class ServiciosAdminController {
     @Param('id') servicioId: string,
     @Param('hermanoId') hermanoId: string
   ) {
+    if (!servicioId || !hermanoId) {
+      throw new BadRequestException('Debe especificar ambos identificadores de servicio.');
+    }
+    if (servicioId === hermanoId) {
+      throw new BadRequestException('Un servicio no puede enlazarse consigo mismo como servicio de apoyo.');
+    }
+    const [srvPrincipal, srvHermano] = await Promise.all([
+      this.prisma.servicio.findUnique({ where: { id: servicioId } }),
+      this.prisma.servicio.findUnique({ where: { id: hermanoId } }),
+    ]);
+    if (!srvPrincipal) {
+      throw new NotFoundException(`El servicio principal '${servicioId}' no existe.`);
+    }
+    if (!srvHermano) {
+      throw new NotFoundException(`El servicio hermano '${hermanoId}' no existe.`);
+    }
+
     await this.prisma.$transaction([
       this.prisma.servicioHermano.upsert({
         where: {
@@ -719,9 +914,26 @@ export class ServiciosAdminController {
   async adscribirEmpleadoAServicio(
     @Body() body: { empleadoId: string; servicioBaseId: string }
   ) {
+    const empleadoId = String(body?.empleadoId || '').trim();
+    const servicioBaseId = String(body?.servicioBaseId || '').trim();
+    if (!empleadoId || !servicioBaseId) {
+      throw new BadRequestException('empleadoId y servicioBaseId son obligatorios.');
+    }
+
+    const [emp, srv] = await Promise.all([
+      this.prisma.empleado.findUnique({ where: { id: empleadoId } }),
+      this.prisma.servicio.findUnique({ where: { id: servicioBaseId } }),
+    ]);
+    if (!emp) {
+      throw new NotFoundException(`No se encontró el colaborador '${empleadoId}'.`);
+    }
+    if (!srv) {
+      throw new NotFoundException(`No se encontró el servicio '${servicioBaseId}'.`);
+    }
+
     return this.prisma.empleado.update({
-      where: { id: body.empleadoId },
-      data: { servicioBaseId: body.servicioBaseId },
+      where: { id: empleadoId },
+      data: { servicioBaseId },
     });
   }
 }

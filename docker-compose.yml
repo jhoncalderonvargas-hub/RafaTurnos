@@ -1,6 +1,6 @@
 services:
   # ========================================================
-  # 1. Base de Datos Relacional PostgreSQL 16
+  # 1. Base de Datos Relacional PostgreSQL 16 (solo loopback)
   # ========================================================
   db:
     image: postgres:16
@@ -11,7 +11,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-admin123}
       POSTGRES_DB: ${POSTGRES_DB:-turnos}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -39,7 +39,10 @@ services:
     environment:
       PORT: 3000
       DATABASE_URL: "postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-admin123}@db:5432/${POSTGRES_DB:-turnos}?schema=public"
+      CORS_ORIGIN: "${CORS_ORIGIN:-http://localhost:4200,http://localhost:4300}"
+      # IMPORTANTE: En producción define INTRANET_JWT_SECRET, INTRANET_API_KEY y POSTGRES_PASSWORD en tu .env raíz
       INTRANET_JWT_SECRET: "${INTRANET_JWT_SECRET:-clave_secreta_compartida_con_intranet_hospitalaria}"
+      INTRANET_API_KEY: "${INTRANET_API_KEY:-api_key_interna_lectura_maestros}"
       INTRANET_RETURN_URL: "${INTRANET_RETURN_URL:-http://localhost:4300}"
       INTRANET_API_URL: "${INTRANET_API_URL:-http://host.docker.internal:4300}"
     ports:

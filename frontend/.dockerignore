@@ -1,6 +1,15 @@
 node_modules
 dist
+out-tsc
+coverage
+**/*.spec.ts
+.angular
+uploads
+_backup_*
+*.bak*
+*.tgz
 .git
 .gitignore
+.env
+.env.*
 *.log
-.angular

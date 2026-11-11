@@ -1,6 +1,23 @@
-import { Body, Controller, Delete, Get, Param, Post, Query, Module } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  ConflictException,
+  Controller,
+  Delete,
+  Get,
+  Module,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { FestivoDto, FestivosColombiaService } from './festivos-colombia.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  esFechaIsoValida,
+  formatearPorcentaje,
+  hoyColombiaIso,
+  recargosVigentes,
+} from '../../shared/liquidacion-horas';
 
 @Controller('api/v1/festivos')
 export class FestivosController {
@@ -16,17 +33,15 @@ export class FestivosController {
     total: number;
     festivos: FestivoDto[];
   }> {
-    const anio = anioStr ? parseInt(anioStr, 10) : new Date().getFullYear();
+    const anio = anioStr ? Number(anioStr) : Number(hoyColombiaIso().substring(0, 4));
+    if (!Number.isInteger(anio) || anio < 1900 || anio > 2100) {
+      throw new BadRequestException('El parámetro anio debe ser un año válido (1900–2100).');
+    }
     const oficiales = this.festivosService.generarFestivosAlgoritmo(anio);
 
-    let festivosDb: any[] = [];
-    try {
-      festivosDb = await this.prisma.festivoColombia.findMany({
-        where: { anio },
-      });
-    } catch {
-      festivosDb = [];
-    }
+    const festivosDb = await this.prisma.festivoColombia.findMany({
+      where: { anio },
+    });
 
     const mapa = new Map<string, FestivoDto>();
     for (const f of oficiales) {
@@ -63,24 +78,26 @@ export class FestivosController {
     esFestivo: boolean;
     recargoLegalCst: string;
   }> {
-    const esOficial = this.festivosService.esFestivo(fechaIso);
-    let existeEnDb = false;
-
-    try {
-      const dateObj = new Date(fechaIso + 'T00:00:00.000Z');
-      const reg = await this.prisma.festivoColombia.findUnique({
-        where: { fecha: dateObj },
-      });
-      existeEnDb = !!reg;
-    } catch {
-      existeEnDb = false;
+    if (!esFechaIsoValida(fechaIso)) {
+      throw new BadRequestException(`Fecha ISO inválida: "${fechaIso}". Se requiere formato YYYY-MM-DD existente en calendario.`);
     }
 
-    const esFestivo = esOficial || existeEnDb;
+    const anio = Number(fechaIso.substring(0, 4));
+    await this.festivosService.asegurarAnios([anio, anio + 1]);
+    const esEnCache = this.festivosService.esFestivo(fechaIso);
+
+    const dateObj = new Date(`${fechaIso}T00:00:00.000Z`);
+    const reg = await this.prisma.festivoColombia.findUnique({
+      where: { fecha: dateObj },
+    });
+    const esFestivo = esEnCache || Boolean(reg);
+
     return {
       fecha: fechaIso,
       esFestivo,
-      recargoLegalCst: esFestivo ? '75% Dominical/Festivo (Art. 179 CST)' : '0% Día Ordinario',
+      recargoLegalCst: esFestivo
+        ? `${formatearPorcentaje(recargosVigentes(fechaIso).dominical)} Dominical/Festivo (Art. 179 CST, Ley 2466/2025)`
+        : '0% Día Ordinario',
     };
   }
 
@@ -88,34 +105,55 @@ export class FestivosController {
   async registrarDiaCivicoInstitucional(
     @Body() body: { fecha: string; nombre: string }
   ): Promise<{ mensaje: string; festivo: FestivoDto }> {
-    const anio = parseInt(body.fecha.substring(0, 4), 10);
-    const dateObj = new Date(body.fecha + 'T00:00:00.000Z');
+    const fecha = String(body?.fecha || '').trim();
+    const nombre = String(body?.nombre || '').trim();
+
+    if (!esFechaIsoValida(fecha)) {
+      throw new BadRequestException(`La fecha "${fecha}" no es válida en calendario (YYYY-MM-DD).`);
+    }
+    if (!nombre) {
+      throw new BadRequestException('El nombre o motivo del Día Cívico es obligatorio.');
+    }
+
+    const anio = Number(fecha.substring(0, 4));
+    const esOficialAlgoritmo = this.festivosService
+      .generarFestivosAlgoritmo(anio)
+      .some((f) => f.fecha === fecha);
+    const dateObj = new Date(`${fecha}T00:00:00.000Z`);
+    const existenteDb = await this.prisma.festivoColombia.findUnique({
+      where: { fecha: dateObj },
+    });
+
+    if (esOficialAlgoritmo || existenteDb?.esOficialLey) {
+      throw new ConflictException(
+        `La fecha ${fecha} corresponde a un festivo oficial de ley en Colombia y no puede sobrescribirse como Día Cívico.`
+      );
+    }
+
     const nuevo: FestivoDto = {
-      fecha: body.fecha,
+      fecha,
       anio,
-      nombre: body.nombre,
+      nombre,
       esOficialLey: false,
     };
 
-    try {
-      await this.prisma.festivoColombia.upsert({
-        where: { fecha: dateObj },
-        create: {
-          fecha: dateObj,
-          anio,
-          nombre: body.nombre,
-          esOficialLey: false,
-          esIrrenunciable: true,
-        },
-        update: {
-          nombre: body.nombre,
-          esOficialLey: false,
-        },
-      });
-    } catch {}
+    await this.prisma.festivoColombia.upsert({
+      where: { fecha: dateObj },
+      create: {
+        fecha: dateObj,
+        anio,
+        nombre,
+        esOficialLey: false,
+        esIrrenunciable: true,
+      },
+      update: {
+        nombre,
+        esOficialLey: false,
+      },
+    });
 
     const todos = await this.obtenerFestivosPorAnio(String(anio));
-    this.festivosService.invalidarYRefrescarAnio(
+    await this.festivosService.invalidarYRefrescarAnio(
       anio,
       todos.festivos.map((f) => f.fecha)
     );
@@ -128,16 +166,31 @@ export class FestivosController {
 
   @Delete('dia-civico/:fechaIso')
   async eliminarDiaCivico(@Param('fechaIso') fechaIso: string): Promise<{ mensaje: string }> {
-    const anio = parseInt(fechaIso.substring(0, 4), 10);
-    try {
-      const dateObj = new Date(fechaIso + 'T00:00:00.000Z');
-      await this.prisma.festivoColombia.deleteMany({
-        where: { fecha: dateObj, esOficialLey: false },
-      });
-    } catch {}
+    if (!esFechaIsoValida(fechaIso)) {
+      throw new BadRequestException(`Fecha ISO inválida: "${fechaIso}". Se requiere YYYY-MM-DD.`);
+    }
+
+    const anio = Number(fechaIso.substring(0, 4));
+    const esOficialAlgoritmo = this.festivosService
+      .generarFestivosAlgoritmo(anio)
+      .some((f) => f.fecha === fechaIso);
+    const dateObj = new Date(`${fechaIso}T00:00:00.000Z`);
+    const existenteDb = await this.prisma.festivoColombia.findUnique({
+      where: { fecha: dateObj },
+    });
+
+    if (esOficialAlgoritmo || existenteDb?.esOficialLey) {
+      throw new ConflictException(
+        `La fecha ${fechaIso} es un festivo oficial de ley y no puede eliminarse.`
+      );
+    }
+
+    await this.prisma.festivoColombia.deleteMany({
+      where: { fecha: dateObj, esOficialLey: false },
+    });
 
     const todos = await this.obtenerFestivosPorAnio(String(anio));
-    this.festivosService.invalidarYRefrescarAnio(
+    await this.festivosService.invalidarYRefrescarAnio(
       anio,
       todos.festivos.map((f) => f.fecha)
     );

@@ -1,0 +1,348 @@
+:host {
+  display: contents;
+}
+
+.btn-clear-grid {
+  background: #ffffff;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-clear-grid:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+/* FORMULARIO CATÁLOGO DE TURNOS */
+.two-col-inputs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.55fr);
+  gap: 12px;
+  align-items: end;
+}
+
+.two-col-inputs.two-col-equal {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.two-col-inputs .form-row {
+  min-width: 0;
+}
+
+.auto-calc-banner {
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  color: #0f172a;
+}
+
+.calc-sub {
+  margin-left: 6px;
+  font-size: 11.5px;
+  color: #475569;
+}
+
+.calc-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.calc-pill-day {
+  background: #ffffff;
+  border: 1px solid #7dd3fc;
+  color: #0369a1;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+}
+
+.calc-pill-night {
+  background: #f5f3ff;
+  border: 1px solid #c4b5fd;
+  color: #6d28d9;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+}
+
+.color-themes-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.color-theme-swatch {
+  min-width: 44px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  font-weight: 800;
+  font-size: 12px;
+  cursor: pointer;
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+
+.color-theme-swatch.selected {
+  outline: 2px solid #0f172a;
+  transform: scale(1.06);
+}
+
+.form-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+}
+
+.amortizacion-banco-box {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: #f0fdfa;
+  border: 1px solid #99f6e4;
+  border-radius: 6px;
+}
+
+.amortizacion-banco-label {
+  color: #0f766e !important;
+}
+
+.catalogo-search-wrap {
+  min-width: 140px;
+  max-width: 180px;
+}
+
+.btn-palette-toggle {
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #64748b;
+  padding: 3px 6px;
+  border-radius: 6px;
+  font-size: 10.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-palette-toggle.active {
+  background: #f0fdf4;
+  border-color: #86efac;
+  color: #166534;
+}
+
+/* TABLAS RESPONSIVAS Y MAQUETACIÓN CATÁLOGO DE TURNOS */
+.catalogo-turnos-grid {
+  display: grid;
+  grid-template-columns: minmax(340px, 390px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 24px;
+}
+
+.catalogo-form-card {
+  min-width: 0;
+  width: 100%;
+  position: sticky;
+  top: 80px;
+  z-index: 10;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+}
+
+.catalogo-table-card {
+  min-width: 0;
+  width: 100%;
+}
+
+.catalogo-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+}
+
+.catalogo-table th {
+  background: #f8fafc;
+  font-weight: 700;
+  color: #334155;
+  padding: 8px;
+  border-bottom: 2px solid #e2e8f0;
+  white-space: nowrap;
+  font-size: 11.5px;
+}
+
+.catalogo-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: middle;
+}
+
+.catalogo-table tbody tr:hover td {
+  background-color: #f8fafc;
+}
+
+.col-turno {
+  min-width: 110px;
+}
+
+.turno-cell-cluster {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.catalogo-mini-shift {
+  border: 1px solid;
+}
+
+.turno-info-block {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.turno-title {
+  font-weight: 700;
+  color: #1e293b;
+  font-size: 11.5px;
+  line-height: 1.2;
+}
+
+.badge-custom-sm {
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 4px;
+  border: 1px solid #cbd5e1;
+  width: fit-content;
+}
+
+.col-horario {
+  white-space: nowrap;
+  font-family: monospace;
+  font-size: 11px;
+  color: #475569;
+  padding: 6px;
+}
+
+.col-horas {
+  white-space: nowrap;
+}
+
+.horas-metric-cluster {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.horas-total-num {
+  font-size: 12px;
+  color: #0f172a;
+}
+
+.horas-pill-row {
+  display: flex;
+  gap: 3px;
+}
+
+.badge-sub-day {
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  color: #0284c7;
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.badge-sub-night {
+  background: #f5f3ff;
+  border: 1px solid #ddd6fe;
+  color: #7c3aed;
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.col-reglas {
+  min-width: 80px;
+}
+
+.reglas-tags-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.badge-banco-mini {
+  background: #ecfeff;
+  border: 1px solid #a5f3fc;
+  color: #0e7490;
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.col-gestion {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.gestion-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.gestion-cluster .btn-sm-primary {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.catalogo-empty-cell {
+  text-align: center;
+  padding: 22px;
+}
+
+@media (max-width: 1120px) {
+  .catalogo-turnos-grid {
+    grid-template-columns: 1fr;
+  }
+  .catalogo-form-card {
+    position: static;
+  }
+}
+
+@media (max-width: 480px) {
+  .two-col-inputs,
+  .two-col-inputs.two-col-equal {
+    grid-template-columns: 1fr;
+  }
+}

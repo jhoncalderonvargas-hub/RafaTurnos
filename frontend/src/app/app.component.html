@@ -1,58 +1,63 @@
-@if (!sesionActual()) {
-  <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #0f172a; color: #f8fafc; font-family: 'Segoe UI', system-ui, sans-serif; padding: 24px;">
-    <div style="max-width: 460px; width: 100%; background: #1e293b; border: 1px solid #334155; border-radius: 16px; padding: 32px; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.35);">
-      <div style="font-size: 42px; margin-bottom: 12px;">🏥</div>
-      <h2 style="font-size: 20px; font-weight: 700; margin-bottom: 8px; color: #f8fafc;">
-        @if (verificandoSesionSso()) {
+@if (!catalogos.sesionActual()) {
+  <div class="sso-lock-screen">
+    <div class="sso-lock-card">
+      <div class="sso-lock-icon" aria-hidden="true">🏥</div>
+      <h2 class="sso-lock-title">
+        @if (catalogos.verificandoSesionSso()) {
           Verificando credencial SSO...
         } @else {
           Acceso Exclusivo desde la Intranet Hospitalaria
         }
       </h2>
-      <p style="font-size: 13.5px; color: #94a3b8; line-height: 1.5; margin-bottom: 22px;">
-        @if (verificandoSesionSso()) {
+      <p class="sso-lock-desc">
+        @if (catalogos.verificandoSesionSso()) {
           Validando firma criptográfica del token con el servidor...
         } @else {
           Rafa Turnos opera como módulo satélite autenticado. Ingresa desde el portal de la Intranet para cargar tu perfil y permisos.
         }
       </p>
-      @if (!verificandoSesionSso()) {
+      @if (!catalogos.verificandoSesionSso()) {
         <button
-          class="btn-primary"
-          style="width: 100%; padding: 12px 18px; font-size: 14px; font-weight: 600; justify-content: center;"
-          (click)="notificarIntranet()">
+          type="button"
+          class="btn-primary sso-lock-btn"
+          (click)="catalogos.notificarIntranet()">
           🔐 Ir al Portal de la Intranet Hospitalaria
         </button>
       }
     </div>
   </div>
 } @else {
-<div class="app-shell" (mouseup)="finalizarPintadoRaton()">
+<div class="app-shell">
   <!-- MENÚ LATERAL IZQUIERDO COLAPSABLE AUTOMÁTICAMENTE POR HOVER (ESTILO THURNI) -->
   <app-sidebar-navegacion
     [sidebarFijo]="sidebarFijo()"
     [sidebarContraido]="sidebarContraido()"
     [sidebarHovered]="sidebarHovered()"
     [vistaActual]="vistaActual()"
-    [esColaborador]="esColaborador()"
-    [esAdminTh]="esAdminTh()"
-    [notificacionesSolicitudesCount]="notificacionesSolicitudesCount()"
-    [propuestasRecibidasCount]="propuestasRecibidasPortal().length"
-    [sesionActual]="sesionActual()"
+    [esColaborador]="catalogos.esColaborador()"
+    [esAdminTh]="catalogos.esAdminTh()"
+    [notificacionesSolicitudesCount]="permutasAuditoria.notificacionesSolicitudesCount()"
+    [propuestasRecibidasCount]="portalReportes.propuestasRecibidasPortal().length"
+    [sesionActual]="catalogos.sesionActual()"
     (alternarFijarSidebar)="alternarFijarSidebar()"
     (sidebarMouseEnter)="onSidebarMouseEnter()"
     (sidebarMouseLeave)="onSidebarMouseLeave()"
     (itemNavegacionClick)="onItemNavegacionClick($event)"
-    (abrirModalIcal)="abrirModalIcal()"
-    (notificarIntranet)="notificarIntranet()"
+    (abrirModalIcal)="portalReportes.abrirModalIcal()"
+    (notificarIntranet)="catalogos.notificarIntranet()"
   />
 
   <!-- ÁREA DE TRABAJO PRINCIPAL -->
   <main class="main-workspace">
-    @if (mensajeToast()) {
-      <div class="toast-banner">
-        <span>✅ {{ mensajeToast() }}</span>
-        <button (click)="mensajeToast.set('')">✕</button>
+    @if (notificacion.mensajeToast()) {
+      <div class="toast-banner" role="status" aria-live="polite">
+        <span>{{ notificacion.mensajeToast() }}</span>
+        <button
+          type="button"
+          aria-label="Cerrar notificación"
+          (click)="notificacion.limpiar()">
+          ✕
+        </button>
       </div>
     }
 
@@ -61,59 +66,65 @@
   <!-- ======================================================================= -->
   @if (vistaActual() === 'PLANIFICADOR') {
     <app-planificador-cuadrante
-      [servicioSeleccionadoId]="servicioSeleccionadoId()"
-      [serviciosVisibles]="serviciosVisibles()"
-      [servicios]="servicios()"
-      [mesSeleccionado]="mesSeleccionado()"
-      [mesesDisponibles]="mesesDisponiblesPlanificador()"
-      [anioSeleccionado]="anioSeleccionado()"
-      [filtroCategoriaActiva]="filtroCategoriaActiva()"
-      [categoriasEnServicioActual]="categoriasEnServicioActual()"
-      [estadoCuadrante]="estadoCuadrante()"
-      [autoAvanzarAlTeclear]="autoAvanzarAlTeclear()"
-      [mostrarComparadorPrevisto]="mostrarComparadorPrevisto()"
-      [ultimaSincronizacionIntranet]="ultimaSincronizacionIntranet()"
-      [sincronizandoNovedades]="sincronizandoNovedades()"
-      [pilaDeshacer]="pilaDeshacer()"
-      [pilaRehacer]="pilaRehacer()"
-      [esCoordinador]="esCoordinador()"
-      [turnoPincelActivo]="turnoPincelActivo()"
-      [listaTurnosPaleta]="listaTurnosPaleta()"
-      [infraccionesActivas]="infraccionesActivas()"
-      [clonandoConCtrl]="clonandoConCtrl()"
-      [turnoClonandoConCtrl]="turnoClonandoConCtrl()"
-      [teclaCtrlPresionada]="teclaCtrlPresionada()"
-      [diasDelMes]="diasDelMes()"
-      [celdaEnfocada]="celdaEnfocada()"
-      [filasCuadrante]="filasCuadrante()"
-      [conteoPorCategoriaCuadrante]="conteoPorCategoriaCuadrante()"
-      [catalogoTurnosMap]="catalogoTurnosMap()"
-      [reglaCargoActivaEnCuadrante]="reglaCargoActivaEnCuadrante()"
-      [servicioActual]="servicioActual()"
-      [coberturaPorDia]="coberturaPorDia()"
+      [macroprocesos]="catalogos.macroprocesos()"
+      [servicioSeleccionadoId]="catalogos.servicioSeleccionadoId()"
+      [serviciosVisibles]="catalogos.serviciosVisibles()"
+      [servicios]="catalogos.servicios()"
+      [mesSeleccionado]="catalogos.mesSeleccionado()"
+      [mesesDisponibles]="cuadrante.mesesDisponiblesPlanificador()"
+      [anioSeleccionado]="catalogos.anioSeleccionado()"
+      [aniosDisponibles]="cuadrante.aniosDisponibles()"
+      [esPeriodoActual]="catalogos.esPeriodoActual()"
+      [filtroCategoriaActiva]="cuadrante.filtroCategoriaActiva()"
+      [categoriasEnServicioActual]="cuadrante.categoriasEnServicioActual()"
+      [estadoCuadrante]="cuadrante.estadoCuadrante()"
+      [autoAvanzarAlTeclear]="cuadrante.autoAvanzarAlTeclear()"
+      [mostrarComparadorPrevisto]="cuadrante.mostrarComparadorPrevisto()"
+      [ultimaSincronizacionIntranet]="cuadrante.ultimaSincronizacionIntranet()"
+      [sincronizandoNovedades]="cuadrante.sincronizandoNovedades()"
+      [pilaDeshacer]="cuadrante.pilaDeshacer()"
+      [pilaRehacer]="cuadrante.pilaRehacer()"
+      [esCoordinador]="catalogos.esCoordinador()"
+      [turnoPincelActivo]="cuadrante.turnoPincelActivo()"
+      [listaTurnosPaleta]="cuadrante.listaTurnosPaleta()"
+      [infraccionesActivas]="cuadrante.infraccionesActivas()"
+      [clonandoConCtrl]="cuadrante.clonandoConCtrl()"
+      [turnoClonandoConCtrl]="cuadrante.turnoClonandoConCtrl()"
+      [teclaCtrlPresionada]="cuadrante.teclaCtrlPresionada()"
+      [diasDelMes]="cuadrante.diasDelMes()"
+      [celdaEnfocada]="cuadrante.celdaEnfocada()"
+      [filasCuadrante]="cuadrante.filasCuadrante()"
+      [conteoPorCategoriaCuadrante]="cuadrante.conteoPorCategoriaCuadrante()"
+      [catalogoTurnosMap]="catalogos.catalogoTurnosMap()"
+      [reglaCargoActivaEnCuadrante]="cuadrante.reglaCargoActivaEnCuadrante()"
+      [servicioActual]="catalogos.servicioActual()"
+      [coberturaPorDia]="cuadrante.coberturaPorDia()"
       (cambiarServicio)="cambiarServicio($event)"
       (cambiarMes)="cambiarMes($event)"
-      (cambiarFiltroCategoria)="filtroCategoriaActiva.set($event)"
-      (cambiarAutoAvanzar)="autoAvanzarAlTeclear.set($event)"
-      (cambiarMostrarComparador)="mostrarComparadorPrevisto.set($event)"
-      (sincronizarNovedadesIntranet)="sincronizarNovedadesIntranet()"
-      (abrirModalRotacion)="abrirModalRotacion()"
-      (ejecutarAutocompletarHuecos)="ejecutarAutocompletarHuecos()"
-      (deshacerUltimaAccion)="deshacerUltimaAccion()"
-      (rehacerUltimaAccion)="rehacerUltimaAccion()"
-      (limpiarCuadranteCompleto)="limpiarCuadranteCompleto()"
-      (cambiarEstadoCuadrante)="cambiarEstadoCuadrante()"
-      (revertirABorrador)="revertirCuadranteABorrador()"
-      (exportarExcelNomina)="exportarExcelNomina()"
-      (seleccionarPincel)="seleccionarPincel($event)"
-      (dragStartPaleta)="onDragStartPaleta($event.event, $event.codigo)"
-      (enfocarCelda)="enfocarCelda($event.empId, $event.dia)"
-      (quitarPersonalApoyo)="quitarPersonalApoyo($event)"
-      (iniciarPintadoCelda)="iniciarPintadoCelda($event.empId, $event.dia, $event.event)"
-      (continuarPintadoCelda)="continuarPintadoCelda($event.empId, $event.dia)"
-      (dragOverCelda)="onDragOverCelda($event)"
-      (dropCelda)="onDropCelda($event.event, $event.empId, $event.dia)"
-      (keyDownCelda)="onKeyDownCelda($event.event, $event.empId, $event.dia)"
+      (cambiarAnio)="cambiarAnio($event)"
+      (navegarMes)="navegarMes($event)"
+      (irAMesActual)="irAMesActual()"
+      (cambiarFiltroCategoria)="cuadrante.filtroCategoriaActiva.set($event)"
+      (cambiarAutoAvanzar)="cuadrante.autoAvanzarAlTeclear.set($event)"
+      (cambiarMostrarComparador)="cuadrante.mostrarComparadorPrevisto.set($event)"
+      (sincronizarNovedadesIntranet)="cuadrante.sincronizarNovedadesIntranet()"
+      (abrirModalRotacion)="cuadrante.abrirModalRotacion()"
+      (ejecutarAutocompletarHuecos)="cuadrante.ejecutarAutocompletarHuecos()"
+      (deshacerUltimaAccion)="cuadrante.deshacerUltimaAccion()"
+      (rehacerUltimaAccion)="cuadrante.rehacerUltimaAccion()"
+      (limpiarCuadranteCompleto)="cuadrante.limpiarCuadranteCompleto()"
+      (cambiarEstadoCuadrante)="cuadrante.cambiarEstadoCuadrante()"
+      (revertirABorrador)="cuadrante.revertirCuadranteABorrador()"
+      (exportarExcelNomina)="cuadrante.exportarExcelNomina()"
+      (seleccionarPincel)="cuadrante.seleccionarPincel($event)"
+      (dragStartPaleta)="cuadrante.onDragStartPaleta($event.event, $event.codigo)"
+      (enfocarCelda)="cuadrante.enfocarCelda($event.empId, $event.dia)"
+      (quitarPersonalApoyo)="cuadrante.quitarPersonalApoyo($event)"
+      (iniciarPintadoCelda)="cuadrante.iniciarPintadoCelda($event.empId, $event.dia, $event.event)"
+      (continuarPintadoCelda)="cuadrante.continuarPintadoCelda($event.empId, $event.dia)"
+      (dragOverCelda)="cuadrante.onDragOverCelda($event)"
+      (dropCelda)="cuadrante.onDropCelda($event.event, $event.empId, $event.dia)"
+      (keyDownCelda)="cuadrante.onKeyDownCelda($event.event, $event.empId, $event.dia)"
     />
   }
 
@@ -122,22 +133,22 @@
   <!-- ======================================================================= -->
   @if (vistaActual() === 'DASHBOARD') {
     <app-dashboard-solicitudes
-      [porcentajeCobertura]="porcentajeCoberturaGlobal()"
-      [servicioSeleccionadoId]="servicioSeleccionadoId()"
-      [serviciosVisibles]="serviciosVisibles()"
-      [servicioNombre]="servicioActual().nombre"
-      [infraccionesCount]="infraccionesActivas().length"
-      [balanceBancoHoras]="balanceGlobalBancoServicio()"
-      [notificacionesCount]="notificacionesSolicitudesCount()"
-      [esColaborador]="esColaborador()"
-      [permutas]="permutasVisiblesDashboard()"
-      [bitacoraAuditoria]="bitacoraAuditoria()"
-      [sesionActual]="sesionActual()"
+      [porcentajeCobertura]="cuadrante.porcentajeCoberturaGlobal()"
+      [servicioSeleccionadoId]="catalogos.servicioSeleccionadoId()"
+      [serviciosVisibles]="catalogos.serviciosVisibles()"
+      [servicioNombre]="catalogos.servicioActual().nombre"
+      [infraccionesCount]="cuadrante.infraccionesActivas().length"
+      [balanceBancoHoras]="cuadrante.balanceGlobalBancoServicio()"
+      [notificacionesCount]="permutasAuditoria.notificacionesSolicitudesCount()"
+      [esColaborador]="catalogos.esColaborador()"
+      [permutas]="permutasAuditoria.permutasVisiblesDashboard()"
+      [bitacoraAuditoria]="permutasAuditoria.bitacoraAuditoria()"
+      [sesionActual]="catalogos.sesionActual()"
       (cambiarServicio)="cambiarServicio($event)"
-      (aprobarPermuta)="aprobarPermuta($event)"
-      (rechazarPermuta)="rechazarPermuta($event)"
-      (aceptarPropuestaPar)="aceptarPropuestaPar($event)"
-      (rechazarPropuestaPar)="rechazarPropuestaPar($event)"
+      (aprobarPermuta)="permutasAuditoria.aprobarPermuta($event)"
+      (rechazarPermuta)="permutasAuditoria.rechazarPermuta($event)"
+      (aceptarPropuestaPar)="permutasAuditoria.aceptarPropuestaPar($event)"
+      (rechazarPropuestaPar)="permutasAuditoria.rechazarPropuestaPar($event)"
       (refrescarDatos)="recargarDatosDashboard()">
     </app-dashboard-solicitudes>
   }
@@ -147,21 +158,26 @@
   <!-- ======================================================================= -->
   @if (vistaActual() === 'REPORTES') {
     <app-reportes-nomina
-      [kpi]="kpisReportes()"
-      [filas]="datosReporteCalculados()"
-      [nombreMesSeleccionado]="nombreMesSeleccionado()"
-      [anioSeleccionado]="anioSeleccionado()"
-      [mesSeleccionado]="mesSeleccionado()"
-      [mesesDisponibles]="mesesDisponiblesReportes()"
-      [filtroReporteServicioId]="filtroReporteServicioId()"
-      [servicios]="servicios()"
-      [busquedaReporteTexto]="busquedaReporteTexto()"
-      [subVistaReportes]="subVistaReportes()"
+      [kpi]="portalReportes.kpisReportes()"
+      [filas]="portalReportes.datosReporteCalculados()"
+      [nombreMesSeleccionado]="catalogos.nombreMesSeleccionado()"
+      [anioSeleccionado]="catalogos.anioSeleccionado()"
+      [aniosDisponibles]="cuadrante.aniosDisponibles()"
+      [mesSeleccionado]="catalogos.mesSeleccionado()"
+      [esPeriodoActual]="catalogos.esPeriodoActual()"
+      [mesesDisponibles]="cuadrante.mesesDisponiblesReportes()"
+      [filtroReporteServicioId]="portalReportes.filtroReporteServicioId()"
+      [servicios]="catalogos.serviciosVisibles()"
+      [busquedaReporteTexto]="portalReportes.busquedaReporteTexto()"
+      [subVistaReportes]="portalReportes.subVistaReportes()"
       (cambiarMes)="cambiarMes($event)"
-      (cambiarFiltroServicio)="filtroReporteServicioId.set($event)"
-      (cambiarBusquedaTexto)="busquedaReporteTexto.set($event)"
-      (cambiarSubVista)="subVistaReportes.set($event)"
-      (exportarExcel)="exportarExcelReportes()"
+      (cambiarAnio)="cambiarAnio($event)"
+      (navegarMes)="navegarMes($event)"
+      (irAMesActual)="irAMesActual()"
+      (cambiarFiltroServicio)="portalReportes.filtroReporteServicioId.set($event)"
+      (cambiarBusquedaTexto)="portalReportes.busquedaReporteTexto.set($event)"
+      (cambiarSubVista)="portalReportes.subVistaReportes.set($event)"
+      (exportarExcel)="portalReportes.exportarExcelReportes()"
     />
   }
 
@@ -170,14 +186,14 @@
   <!-- ======================================================================= -->
   @if (vistaActual() === 'AUDITORIA') {
     <app-auditoria-trazabilidad
-      [bitacoraAuditoria]="bitacoraAuditoria()"
-      [servicios]="servicios()"
-      [servicioActualId]="servicioSeleccionadoId()"
-      [esAdminTh]="esAdminTh()"
-      [esCoordinador]="esCoordinador()"
-      [sesionActual]="sesionActual()"
-      (refrescarBitacora)="sincronizarAuditoriasDesdePostgres($event || undefined)"
-      (filtrarServicio)="sincronizarAuditoriasDesdePostgres($event)"
+      [bitacoraAuditoria]="permutasAuditoria.bitacoraAuditoria()"
+      [servicios]="catalogos.serviciosVisibles()"
+      [servicioActualId]="catalogos.servicioSeleccionadoId()"
+      [esAdminTh]="catalogos.esAdminTh()"
+      [esCoordinador]="catalogos.esCoordinador()"
+      [sesionActual]="catalogos.sesionActual()"
+      (cambiarFiltrosServidor)="permutasAuditoria.sincronizarAuditoriasDesdePostgres($event)"
+      (avisoToast)="notificacion.mostrar($event)"
     />
   }
 
@@ -186,37 +202,42 @@
   <!-- ======================================================================= -->
   @if (vistaActual() === 'PORTAL_EMPLEADO') {
     <app-portal-colaborador
-      [portal]="datosEmpleadoPortal()"
-      [esAdminTh]="esAdminTh()"
-      [esCoordinador]="esCoordinador()"
-      [empleadoPortalId]="empleadoPortalId()"
-      [empleados]="empleadosVisiblesPortal()"
-      [rolActual]="rolActual()"
-      [mesSeleccionado]="mesSeleccionadoPortal()"
-      [anioSeleccionado]="anioSeleccionado()"
-      [mesesDisponibles]="mesesDisponiblesPortal()"
-      [estadoCuadrante]="estadoCuadrantePortal()"
-      [diaPermutaSeleccionado]="diaPermutaSeleccionado()"
-      [celdasOffsetInicioMes]="celdasOffsetInicioMesPortal()"
-      [celdasOffsetFinMes]="celdasOffsetFinMesPortal()"
-      [diasDelMes]="diasDelMesPortal()"
-      [catalogoTurnosMap]="catalogoTurnosMap()"
-      [servicios]="servicios()"
-      [propuestasRecibidas]="propuestasRecibidasPortal()"
-      [servicioDiaSeleccionado]="servicioDiaSeleccionadoPortal()"
-      [companerosPares]="companerosParesPortal()"
-      [companeroPermutaId]="companeroPermutaId()"
-      [asignaciones]="asignacionesMesPortal()"
-      [misSolicitudesEnviadas]="misSolicitudesEnviadasPortal()"
-      [equipoDeGuardiaDia]="equipoDeGuardiaDiaSeleccionado()"
+      [portal]="portalReportes.datosEmpleadoPortal()"
+      [esAdminTh]="catalogos.esAdminTh()"
+      [esCoordinador]="catalogos.esCoordinador()"
+      [empleadoPortalId]="portalReportes.empleadoPortalId()"
+      [empleados]="portalReportes.empleadosVisiblesPortal()"
+      [rolActual]="catalogos.rolActual()"
+      [mesSeleccionado]="portalReportes.mesSeleccionadoPortal()"
+      [anioSeleccionado]="catalogos.anioSeleccionado()"
+      [aniosDisponibles]="cuadrante.aniosDisponibles()"
+      [esPeriodoActual]="portalReportes.esPeriodoActualPortal()"
+      [puedeIrAHoy]="portalReportes.puedeIrAHoyPortal()"
+      [mesesDisponibles]="portalReportes.mesesDisponiblesPortal()"
+      [estadoCuadrante]="portalReportes.estadoCuadrantePortal()"
+      [diaPermutaSeleccionado]="portalReportes.diaPermutaSeleccionado()"
+      [celdasOffsetInicioMes]="portalReportes.celdasOffsetInicioMesPortal()"
+      [celdasOffsetFinMes]="portalReportes.celdasOffsetFinMesPortal()"
+      [diasDelMes]="portalReportes.diasDelMesPortal()"
+      [catalogoTurnosMap]="catalogos.catalogoTurnosMap()"
+      [servicios]="catalogos.servicios()"
+      [propuestasRecibidas]="portalReportes.propuestasRecibidasPortal()"
+      [servicioDiaSeleccionado]="portalReportes.servicioDiaSeleccionadoPortal()"
+      [companerosPares]="portalReportes.companerosParesPortal()"
+      [companeroPermutaId]="portalReportes.companeroPermutaId()"
+      [asignaciones]="portalReportes.asignacionesMesPortal()"
+      [misSolicitudesEnviadas]="portalReportes.misSolicitudesEnviadasPortal()"
+      [equipoDeGuardiaDia]="portalReportes.equipoDeGuardiaDiaSeleccionado()"
       (cambiarMes)="cambiarMesPortal($event)"
-      (cambiarEmpleadoPortal)="cambiarEmpleadoPortal($event)"
-      (abrirModalIcal)="abrirModalIcal()"
-      (seleccionarDiaEnPortal)="seleccionarDiaEnPortal($event)"
-      (aceptarPropuestaPar)="aceptarPropuestaPar($event)"
-      (rechazarPropuestaPar)="rechazarPropuestaPar($event)"
-      (cambiarCompaneroPermuta)="companeroPermutaId.set($event)"
-      (enviarSolicitudPermuta)="enviarSolicitudPermutaDesdePortal()"
+      (cambiarAnio)="cambiarAnioPortal($event)"
+      (irAMesActual)="irAMesActualPortal()"
+      (cambiarEmpleadoPortal)="portalReportes.cambiarEmpleadoPortal($event)"
+      (abrirModalIcal)="portalReportes.abrirModalIcal()"
+      (seleccionarDiaEnPortal)="portalReportes.seleccionarDiaEnPortal($event)"
+      (aceptarPropuestaPar)="permutasAuditoria.aceptarPropuestaPar($event)"
+      (rechazarPropuestaPar)="permutasAuditoria.rechazarPropuestaPar($event)"
+      (cambiarCompaneroPermuta)="portalReportes.companeroPermutaId.set($event)"
+      (enviarSolicitudPermuta)="portalReportes.enviarSolicitudPermutaDesdePortal()"
     />
   }
 
@@ -226,116 +247,117 @@
   @if (vistaActual() === 'CONFIGURACION') {
     <app-configuracion-general
       [subVistaConfig]="subVistaConfig()"
-      [servicios]="servicios()"
-      [empleados]="empleadosConSaldoActualizado()"
-      [totalCategoriasUnicas]="totalCategoriasUnicas()"
-      [totalEnlacesApoyo]="totalEnlacesApoyo()"
-      [servicioEditandoId]="servicioEditandoId()"
-      [nuevoServicioCodigo]="nuevoServicioCodigo()"
-      [nuevoServicioNombre]="nuevoServicioNombre()"
-      [nuevoServicioTipoAsistencia]="nuevoServicioTipoAsistencia()"
-      [nuevoServicioModalidadDias]="nuevoServicioModalidadDias()"
-      [nuevoServicioReqManana]="nuevoServicioReqManana()"
-      [nuevoServicioReqTarde]="nuevoServicioReqTarde()"
-      [nuevoServicioReqNoche]="nuevoServicioReqNoche()"
-      [nuevoServicioReqMananaFds]="nuevoServicioReqMananaFds()"
-      [nuevoServicioReqTardeFds]="nuevoServicioReqTardeFds()"
-      [nuevoServicioReqNocheFds]="nuevoServicioReqNocheFds()"
-      [listaTurnosCatalogo]="listaTurnosCatalogo()"
-      [nuevoServicioTurnosHabilitados]="nuevoServicioTurnosHabilitados()"
-      [nuevoServicioReglasPorCargo]="nuevoServicioReglasPorCargo()"
-      [turnosOperativosHabilitadosEnForm]="turnosOperativosHabilitadosEnForm()"
-      [enlaceHermanoSrv1]="enlaceHermanoSrv1()"
-      [enlaceHermanoSrv2]="enlaceHermanoSrv2()"
-      [catalogoTurnosMap]="catalogoTurnosMap()"
-      [turnoEditandoCodigo]="turnoEditandoCodigo()"
-      [turnoFormCodigo]="turnoFormCodigo()"
-      [turnoFormNombre]="turnoFormNombre()"
-      [turnoFormModoJornada]="turnoFormModoJornada()"
-      [turnoFormHoraInicio]="turnoFormHoraInicio()"
-      [turnoFormHoraFin]="turnoFormHoraFin()"
-      [turnoFormMinutosAlmuerzo]="turnoFormMinutosAlmuerzo()"
-      [calc]="calculoAutomaticoHorasTurno()"
-      [temasColorTurno]="temasColorTurno"
-      [turnoFormColorKey]="turnoFormColorKey()"
-      [turnoFormNocturnoPesado]="turnoFormNocturnoPesado()"
-      [turnoFormDescuentaBanco]="turnoFormDescuentaBanco()"
-      [anioSeleccionado]="anioSeleccionado()"
-      [listaFestivosAnio]="listaFestivosAnio()"
-      [nuevoFestivoFecha]="nuevoFestivoFecha()"
-      [nuevoFestivoNombre]="nuevoFestivoNombre()"
+      [macroprocesos]="catalogos.macroprocesos()"
+      [servicios]="catalogos.servicios()"
+      [empleados]="cuadrante.empleadosConSaldoActualizado()"
+      [totalCategoriasUnicas]="catalogos.totalCategoriasUnicas()"
+      [totalEnlacesApoyo]="catalogos.totalEnlacesApoyo()"
+      [servicioEditandoId]="catalogos.servicioEditandoId()"
+      [nuevoServicioCodigo]="catalogos.nuevoServicioCodigo()"
+      [nuevoServicioNombre]="catalogos.nuevoServicioNombre()"
+      [nuevoServicioTipoAsistencia]="catalogos.nuevoServicioTipoAsistencia()"
+      [nuevoServicioModalidadDias]="catalogos.nuevoServicioModalidadDias()"
+      [nuevoServicioReqDia]="catalogos.nuevoServicioReqDia()"
+      [nuevoServicioReqNoche]="catalogos.nuevoServicioReqNoche()"
+      [nuevoServicioReqDiaDomFest]="catalogos.nuevoServicioReqDiaDomFest()"
+      [nuevoServicioReqNocheDomFest]="catalogos.nuevoServicioReqNocheDomFest()"
+      [listaTurnosCatalogo]="catalogos.listaTurnosCatalogo()"
+      [nuevoServicioTurnosHabilitados]="catalogos.nuevoServicioTurnosHabilitados()"
+      [nuevoServicioReglasPorCargo]="catalogos.nuevoServicioReglasPorCargo()"
+      [turnosOperativosHabilitadosEnForm]="catalogos.turnosOperativosHabilitadosEnForm()"
+      [enlaceHermanoSrv1]="catalogos.enlaceHermanoSrv1()"
+      [enlaceHermanoSrv2]="catalogos.enlaceHermanoSrv2()"
+      [catalogoTurnosMap]="catalogos.catalogoTurnosMap()"
+      [turnoEditandoCodigo]="catalogos.turnoEditandoCodigo()"
+      [turnoFormCodigo]="catalogos.turnoFormCodigo()"
+      [turnoFormNombre]="catalogos.turnoFormNombre()"
+      [turnoFormModoJornada]="catalogos.turnoFormModoJornada()"
+      [turnoFormHoraInicio]="catalogos.turnoFormHoraInicio()"
+      [turnoFormHoraFin]="catalogos.turnoFormHoraFin()"
+      [turnoFormMinutosAlmuerzo]="catalogos.turnoFormMinutosAlmuerzo()"
+      [calc]="catalogos.calculoAutomaticoHorasTurno()"
+      [temasColorTurno]="catalogos.temasColorTurno"
+      [turnoFormColorKey]="catalogos.turnoFormColorKey()"
+      [turnoFormNocturnoPesado]="catalogos.turnoFormNocturnoPesado()"
+      [turnoFormDescuentaBanco]="catalogos.turnoFormDescuentaBanco()"
+      [turnoFormHorasAmortizacion]="catalogos.turnoFormHorasAmortizacion()"
+      [anioSeleccionado]="catalogos.anioSeleccionado()"
+      [aniosDisponibles]="cuadrante.aniosDisponibles()"
+      [listaFestivosAnio]="catalogos.listaFestivosAnio()"
+      [nuevoFestivoFecha]="catalogos.nuevoFestivoFecha()"
+      [nuevoFestivoNombre]="catalogos.nuevoFestivoNombre()"
       (cambiarSubVista)="subVistaConfig.set($event)"
-      (cambiarNuevoServicioCodigo)="nuevoServicioCodigo.set($event)"
-      (cambiarNuevoServicioNombre)="nuevoServicioNombre.set($event)"
-      (cambiarNuevoServicioTipoAsistencia)="nuevoServicioTipoAsistencia.set($event)"
-      (cambiarNuevoServicioModalidadDias)="nuevoServicioModalidadDias.set($event)"
-      (cambiarNuevoServicioReqManana)="nuevoServicioReqManana.set($event)"
-      (cambiarNuevoServicioReqTarde)="nuevoServicioReqTarde.set($event)"
-      (cambiarNuevoServicioReqNoche)="nuevoServicioReqNoche.set($event)"
-      (cambiarNuevoServicioReqMananaFds)="nuevoServicioReqMananaFds.set($event)"
-      (cambiarNuevoServicioReqTardeFds)="nuevoServicioReqTardeFds.set($event)"
-      (cambiarNuevoServicioReqNocheFds)="nuevoServicioReqNocheFds.set($event)"
-      (aplicarPlantillaTurnosServicio)="aplicarPlantillaTurnosServicio($event)"
-      (alternarTurnoEnServicioForm)="alternarTurnoEnServicioForm($event)"
-      (actualizarMetaCargoForm)="actualizarMetaCargoForm($event.categoriaNombre, $event.campo, $event.valor)"
-      (alternarTurnoEnCargoForm)="alternarTurnoEnCargoForm($event.categoriaNombre, $event.codigoTurno)"
-      (guardarServicioAutonomo)="guardarServicioAutonomo()"
-      (cancelarEdicionServicio)="cancelarEdicionServicio()"
-      (cambiarEnlaceHermanoSrv1)="enlaceHermanoSrv1.set($event)"
-      (cambiarEnlaceHermanoSrv2)="enlaceHermanoSrv2.set($event)"
-      (guardarEnlaceHermanos)="guardarEnlaceHermanos()"
-      (desenlazarServicioHermano)="desenlazarServicioHermano($event.srvId, $event.hermanoId)"
+      (cambiarNuevoServicioCodigo)="catalogos.nuevoServicioCodigo.set($event)"
+      (cambiarNuevoServicioNombre)="catalogos.nuevoServicioNombre.set($event)"
+      (cambiarNuevoServicioTipoAsistencia)="catalogos.nuevoServicioTipoAsistencia.set($event)"
+      (cambiarNuevoServicioModalidadDias)="catalogos.nuevoServicioModalidadDias.set($event)"
+      (cambiarNuevoServicioReqDia)="catalogos.nuevoServicioReqDia.set($event)"
+      (cambiarNuevoServicioReqNoche)="catalogos.nuevoServicioReqNoche.set($event)"
+      (cambiarNuevoServicioReqDiaDomFest)="catalogos.nuevoServicioReqDiaDomFest.set($event)"
+      (cambiarNuevoServicioReqNocheDomFest)="catalogos.nuevoServicioReqNocheDomFest.set($event)"
+      (aplicarPlantillaTurnosServicio)="catalogos.aplicarPlantillaTurnosServicio($event)"
+      (alternarTurnoEnServicioForm)="catalogos.alternarTurnoEnServicioForm($event)"
+      (actualizarMetaCargoForm)="catalogos.actualizarMetaCargoForm($event.categoriaNombre, $event.campo, $event.valor)"
+      (alternarTurnoEnCargoForm)="catalogos.alternarTurnoEnCargoForm($event.categoriaNombre, $event.codigoTurno)"
+      (guardarServicioAutonomo)="catalogos.guardarServicioAutonomo()"
+      (cancelarEdicionServicio)="catalogos.cancelarEdicionServicio()"
+      (cambiarEnlaceHermanoSrv1)="catalogos.enlaceHermanoSrv1.set($event)"
+      (cambiarEnlaceHermanoSrv2)="catalogos.enlaceHermanoSrv2.set($event)"
+      (guardarEnlaceHermanos)="catalogos.guardarEnlaceHermanos()"
+      (desenlazarServicioHermano)="catalogos.desenlazarServicioHermano($event.srvId, $event.hermanoId)"
       (abrirCuadroServicio)="cambiarServicio($event); vistaActual.set('PLANIFICADOR')"
-      (cargarServicioParaEdicion)="cargarServicioParaEdicion($event)"
-      (eliminarServicioAutonomo)="eliminarServicioAutonomo($event)"
-      (limpiarFormularioTurno)="limpiarFormularioTurno()"
-      (cambiarTurnoFormCodigo)="turnoFormCodigo.set($event)"
-      (cambiarTurnoFormNombre)="turnoFormNombre.set($event)"
-      (cambiarTurnoFormModoJornada)="turnoFormModoJornada.set($event)"
-      (cambiarTurnoFormHoraInicio)="turnoFormHoraInicio.set($event)"
-      (cambiarTurnoFormHoraFin)="turnoFormHoraFin.set($event)"
-      (cambiarTurnoFormMinutosAlmuerzo)="turnoFormMinutosAlmuerzo.set($event)"
-      (cambiarTurnoFormColorKey)="turnoFormColorKey.set($event)"
-      (cambiarTurnoFormNocturnoPesado)="turnoFormNocturnoPesado.set($event)"
-      (cambiarTurnoFormDescuentaBanco)="turnoFormDescuentaBanco.set($event)"
-      (guardarTurnoEnCatalogo)="guardarTurnoEnCatalogo()"
-      (alternarVisibilidadTurnoPaleta)="alternarVisibilidadTurnoPaleta($event)"
-      (cargarTurnoParaEdicion)="cargarTurnoParaEdicion($event)"
-      (eliminarDiaCivico)="eliminarDiaCivico($event)"
-      (cambiarNuevoFestivoFecha)="nuevoFestivoFecha.set($event)"
-      (cambiarNuevoFestivoNombre)="nuevoFestivoNombre.set($event)"
-      (agregarDiaCivico)="agregarDiaCivico()"
+      (cargarServicioParaEdicion)="catalogos.cargarServicioParaEdicion($event)"
+      (eliminarServicioAutonomo)="catalogos.eliminarServicioAutonomo($event)"
+      (limpiarFormularioTurno)="catalogos.limpiarFormularioTurno()"
+      (cambiarTurnoFormCodigo)="catalogos.turnoFormCodigo.set($event)"
+      (cambiarTurnoFormNombre)="catalogos.turnoFormNombre.set($event)"
+      (cambiarTurnoFormModoJornada)="catalogos.turnoFormModoJornada.set($event)"
+      (cambiarTurnoFormHoraInicio)="catalogos.turnoFormHoraInicio.set($event)"
+      (cambiarTurnoFormHoraFin)="catalogos.turnoFormHoraFin.set($event)"
+      (cambiarTurnoFormMinutosAlmuerzo)="catalogos.turnoFormMinutosAlmuerzo.set($event)"
+      (cambiarTurnoFormColorKey)="catalogos.turnoFormColorKey.set($event)"
+      (cambiarTurnoFormNocturnoPesado)="catalogos.turnoFormNocturnoPesado.set($event)"
+      (cambiarTurnoFormDescuentaBanco)="catalogos.turnoFormDescuentaBanco.set($event)"
+      (cambiarTurnoFormHorasAmortizacion)="catalogos.turnoFormHorasAmortizacion.set($event)"
+      (guardarTurnoEnCatalogo)="catalogos.guardarTurnoEnCatalogo()"
+      (alternarVisibilidadTurnoPaleta)="catalogos.alternarVisibilidadTurnoPaleta($event)"
+      (cargarTurnoParaEdicion)="catalogos.cargarTurnoParaEdicion($event)"
+      (cambiarAnio)="cambiarAnio($event)"
+      (eliminarDiaCivico)="catalogos.eliminarDiaCivico($event)"
+      (cambiarNuevoFestivoFecha)="catalogos.nuevoFestivoFecha.set($event)"
+      (cambiarNuevoFestivoNombre)="catalogos.nuevoFestivoNombre.set($event)"
+      (agregarDiaCivico)="catalogos.agregarDiaCivico()"
     />
   }
 
-    <!-- MODAL DE ROTACIÓN / PERSONAL DE APOYO -->
+  <!-- MODAL DE ROTACIÓN / PERSONAL DE APOYO -->
   <app-modal-rotacion
-    [abierto]="modalRotacionAbierto()"
-    [servicioNombre]="servicioActual().nombre"
-    [hermanos]="servicioActual().hermanos || []"
-    [esAdminTh]="esAdminTh()"
-    [candidatos]="candidatosRotacionHomologos()"
-    (cerrar)="modalRotacionAbierto.set(false)"
-    (vincular)="vincularRotacionAlCuadrante($event)"
-    (vincularTodos)="vincularTodoEquipoApoyo()"
+    [abierto]="cuadrante.modalRotacionAbierto()"
+    [servicioNombre]="catalogos.servicioActual().nombre"
+    [hermanos]="catalogos.servicioActual().hermanos || []"
+    [esAdminTh]="catalogos.esAdminTh()"
+    [candidatos]="cuadrante.candidatosRotacionHomologos()"
+    (cerrar)="cuadrante.modalRotacionAbierto.set(false)"
+    (vincular)="cuadrante.vincularRotacionAlCuadrante($event)"
+    (vincularTodos)="cuadrante.vincularTodoEquipoApoyo()"
     (configurarApoyo)="irAConfigurarServiciosApoyo()">
   </app-modal-rotacion>
 
   <!-- MODAL DE VINCULACIÓN CON EL CELULAR (ICAL) -->
   <app-modal-ical
-    [abierto]="modalIcalAbierto()"
-    [empleadoNombre]="enlaceIcalEmpleadoNombre()"
-    [enlaceHttp]="enlaceIcalHttp()"
-    (cerrar)="modalIcalAbierto.set(false)"
-    (copiar)="copiarEnlaceIcal()"
-    (descargar)="descargarArchivoIcal()">
+    [abierto]="portalReportes.modalIcalAbierto()"
+    [empleadoNombre]="portalReportes.enlaceIcalEmpleadoNombre()"
+    [enlaceHttp]="portalReportes.enlaceIcalHttp()"
+    (cerrar)="portalReportes.modalIcalAbierto.set(false)"
+    (copiar)="portalReportes.copiarEnlaceIcal()"
+    (descargar)="portalReportes.descargarArchivoIcal()">
   </app-modal-ical>
 
   <!-- MODAL DE CONFIRMACIÓN CENTRADO (VIEWPORT FIJO) -->
   <app-modal-confirmacion
-    [config]="modalConfirmacion()"
-    (cancelar)="cerrarConfirmacion()"
-    (confirmar)="ejecutarConfirmacion()">
+    [config]="notificacion.modalConfirmacion()"
+    (cancelar)="notificacion.cerrarConfirmacion()"
+    (confirmar)="notificacion.ejecutarConfirmacion()">
   </app-modal-confirmacion>
   </main>
 </div>

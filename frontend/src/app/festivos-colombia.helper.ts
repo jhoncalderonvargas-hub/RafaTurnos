@@ -2,6 +2,7 @@
  * Servicio puro de cálculo de Festivos de Colombia (Algoritmo de Butcher/Meeus + Ley 51 de 1983 / Ley Emiliani).
  * Incluye Caché en Memoria (Map/Set) O(1) y soporte de excepciones/días cívicos institucionales.
  */
+import { esFechaIsoValida } from './shared/liquidacion-horas';
 
 export interface FestivoEntry {
   fecha: string; // YYYY-MM-DD
@@ -33,6 +34,7 @@ export class FestivosColombiaHelper {
    * Consulta en O(1) si una fecha YYYY-MM-DD es festivo en Colombia
    */
   static esFestivo(fechaIso: string): FestivoEntry | undefined {
+    if (!esFechaIsoValida(fechaIso)) return undefined;
     const anio = parseInt(fechaIso.substring(0, 4), 10);
     return this.getFestivosAnio(anio).get(fechaIso);
   }
@@ -40,22 +42,39 @@ export class FestivosColombiaHelper {
   /**
    * Permite a Gestión Humana agregar un Día Cívico o Festivo Institucional y refrescar la caché RAM
    */
-  static agregarFestivoManual(fechaIso: string, nombre: string): void {
+  static agregarFestivoManual(fechaIso: string, nombre: string): boolean {
+    if (!esFechaIsoValida(fechaIso)) return false;
     const anio = parseInt(fechaIso.substring(0, 4), 10);
     const mapa = this.getFestivosAnio(anio);
+    const actual = mapa.get(fechaIso);
+    if (actual?.esOficialLey) {
+      return false; // Nunca sobrescribir un festivo oficial de ley con un día cívico
+    }
     mapa.set(fechaIso, {
       fecha: fechaIso,
       nombre,
       esOficialLey: false,
     });
+    return true;
   }
 
   static eliminarFestivoManual(fechaIso: string): void {
+    if (!esFechaIsoValida(fechaIso)) return;
     const anio = parseInt(fechaIso.substring(0, 4), 10);
     const mapa = this.getFestivosAnio(anio);
     const actual = mapa.get(fechaIso);
     if (actual && !actual.esOficialLey) {
       mapa.delete(fechaIso);
+    }
+  }
+
+  /** Limpia los días cívicos/institucionales en memoria antes de resincronizar desde BD. */
+  static limpiarFestivosManualesAnio(anio: number): void {
+    const mapa = this.getFestivosAnio(anio);
+    for (const [fecha, actual] of Array.from(mapa.entries())) {
+      if (!actual.esOficialLey) {
+        mapa.delete(fecha);
+      }
     }
   }
 
@@ -71,11 +90,11 @@ export class FestivosColombiaHelper {
     };
 
     const addEmiliani = (mes: number, dia: number, nombre: string) => {
-      const d = new Date(anio, mes - 1, dia);
-      const dayOfWeek = d.getDay(); // 0 = Domingo, 1 = Lunes ...
+      const d = new Date(Date.UTC(anio, mes - 1, dia));
+      const dayOfWeek = d.getUTCDay(); // 0 = Domingo, 1 = Lunes ...
       if (dayOfWeek !== 1) {
         const daysToAdd = dayOfWeek === 0 ? 1 : 8 - dayOfWeek;
-        d.setDate(d.getDate() + daysToAdd);
+        d.setUTCDate(d.getUTCDate() + daysToAdd);
       }
       festivos.push({
         fecha: this.formatDate(d),
@@ -106,7 +125,7 @@ export class FestivosColombiaHelper {
 
     const addOffsetPascua = (diasOffset: number, nombre: string) => {
       const d = new Date(pascua.getTime());
-      d.setDate(d.getDate() + diasOffset);
+      d.setUTCDate(d.getUTCDate() + diasOffset);
       festivos.push({
         fecha: this.formatDate(d),
         nombre,
@@ -138,7 +157,7 @@ export class FestivosColombiaHelper {
     const m = Math.floor((a + 11 * h + 22 * l) / 451);
     const mes = Math.floor((h + l - 7 * m + 114) / 31);
     const dia = ((h + l - 7 * m + 114) % 31) + 1;
-    return new Date(anio, mes - 1, dia);
+    return new Date(Date.UTC(anio, mes - 1, dia));
   }
 
   private static formatIso(anio: number, mes: number, dia: number): string {
@@ -148,6 +167,6 @@ export class FestivosColombiaHelper {
   }
 
   private static formatDate(d: Date): string {
-    return this.formatIso(d.getFullYear(), d.getMonth() + 1, d.getDate());
+    return this.formatIso(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
   }
 }

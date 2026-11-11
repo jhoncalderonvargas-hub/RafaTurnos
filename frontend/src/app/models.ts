@@ -4,7 +4,20 @@ export type TipoAsistencia =
   | 'QUIRURGICO'
   | 'HOSPITALIZACION'
   | 'APOYO_DIAGNOSTICO'
-  | 'CONSULTA_EXTERNA';
+  | 'CONSULTA_EXTERNA'
+  | 'ADMINISTRATIVO'
+  | 'APOYO_OPERATIVO';
+
+export interface MacroprocesoInfo {
+  codigo: TipoAsistencia;
+  nombre: string;
+  nombreCorto: string;
+  tipoProceso: 'MISIONAL_ASISTENCIAL' | 'APOYO_ADMINISTRATIVO' | 'APOYO_OPERATIVO';
+  icono: string;
+  orden: number;
+  modalidadSugerida?: ModalidadDiasServicio;
+  plantillaTurnosSugerida?: 'ROTATIVO_8H' | 'GUARDIAS_12_24' | 'ADMINISTRATIVO' | 'TODOS';
+}
 
 interface ServicioHermanoRef {
   id: string;
@@ -24,6 +37,7 @@ export interface DiaColumna {
   letraDia: string;
   esSabado: boolean;
   esDomingo: boolean;
+  esHoy?: boolean;
   festivo?: FestivoEntry;
 }
 
@@ -31,12 +45,10 @@ export interface ReglaCargoServicio {
   categoriaId?: string;
   categoriaNombre: string;
   empleadosCount?: number;
-  reqManana: number;
-  reqTarde: number;
+  reqDia: number;
   reqNoche: number;
-  reqMananaFds: number;
-  reqTardeFds: number;
-  reqNocheFds: number;
+  reqDiaDomFest?: number;
+  reqNocheDomFest?: number;
   turnosHabilitados: string[];
 }
 
@@ -46,13 +58,11 @@ export interface ServicioHospitalario {
   nombre: string;
   tipoAsistencia: TipoAsistencia;
   intranetId?: string;
-  reqManana: number;
-  reqTarde: number;
+  reqDia: number;
   reqNoche: number;
   modalidadDias?: ModalidadDiasServicio;
-  reqMananaFds?: number;
-  reqTardeFds?: number;
-  reqNocheFds?: number;
+  reqDiaDomFest?: number;
+  reqNocheDomFest?: number;
   turnosHabilitados?: string[];
   reglasPorCargo?: ReglaCargoServicio[];
   empleadosCount?: number;
@@ -77,6 +87,8 @@ export interface TipoTurnoConfig {
   esAusencia: boolean;
   esNocturnoPesado: boolean;
   descuentaBancoHoras: boolean;
+  horasAmortizacionBanco?: number | null;
+  modoJornada?: 'HORARIO' | 'GUARDIA_24H' | 'DESCANSO';
   visibleEnPaleta?: boolean;
 }
 
@@ -88,6 +100,7 @@ export interface EmpleadoHospital {
   servicioBaseId: string;
   horasContratoMes: number;
   saldoBancoAnterior: number;
+  saldoBancoOrigen?: { anio: number; mes: number; saldo: number };
   ultimoTurnoMesPrevio: CodigoTurno;
 }
 
@@ -143,54 +156,35 @@ export interface FestivoEntry {
   esOficialLey: boolean;
 }
 
-export interface CalculoBancoHorasInput {
-  empleadoId: string;
-  documento: string;
-  nombre: string;
-  anio: number;
-  mes: number;
-  saldoInicialMesAnterior: number;
-  horasContratoMes: number;
-  horasRealesTrabajadas: number;
-  turnosCompensatoriosTomados: number;
-  hod: number;
-  hon: number;
-  hdfd: number;
-  hdfn: number;
-  domingosHabituales: number;
-}
+export const NOMBRES_MESES: Record<number, string> = {
+  1: 'Enero',
+  2: 'Febrero',
+  3: 'Marzo',
+  4: 'Abril',
+  5: 'Mayo',
+  6: 'Junio',
+  7: 'Julio',
+  8: 'Agosto',
+  9: 'Septiembre',
+  10: 'Octubre',
+  11: 'Noviembre',
+  12: 'Diciembre',
+};
 
-export interface ResultadoBancoYNominaDto {
-  empleadoId: string;
-  documento: string;
-  nombre: string;
-  periodo: string;
-  conceptosNominaMesCorriente: {
-    hod: number;
-    honRecargo35: number;
-    hdfdRecargo75: number;
-    hdfnRecargo110: number;
-    domingosLaborados: number;
-    diasCompensatoriosCausados: number;
-  };
-  bancoDeHoras: {
-    saldoAnterior: number;
-    horasContratadas: number;
-    horasTrabajadas: number;
-    horasAmortizadasPorTurnoComp: number;
-    diferenciaMesActual: number;
-    nuevoSaldoAcumuladoContinuo: number;
-    estadoAlerta: 'EQUILIBRADO' | 'ATENCION_ACUMULACION' | 'CRITICO_SOBREACUMULACION';
-  };
-}
-
-export interface ValidacionTurnoDto {
-  empleadoId: string;
-  fechaIso: string;
-  turnoPrevioDiaAnterior: string;
-  turnoPropuesto: string;
-  tieneAusenciaActiva: boolean;
-}
+export const TODOS_LOS_MESES: Array<{ valor: number; nombre: string }> = [
+  { valor: 1, nombre: 'Enero' },
+  { valor: 2, nombre: 'Febrero' },
+  { valor: 3, nombre: 'Marzo' },
+  { valor: 4, nombre: 'Abril' },
+  { valor: 5, nombre: 'Mayo' },
+  { valor: 6, nombre: 'Junio' },
+  { valor: 7, nombre: 'Julio' },
+  { valor: 8, nombre: 'Agosto' },
+  { valor: 9, nombre: 'Septiembre' },
+  { valor: 10, nombre: 'Octubre' },
+  { valor: 11, nombre: 'Noviembre' },
+  { valor: 12, nombre: 'Diciembre' },
+];
 
 export const CATALOGO_TURNOS: Record<string, TipoTurnoConfig> = {
   M8: { codigo: 'M8', nombre: 'Mañana 8h', horario: '07:00 - 15:00', horaInicio: '07:00', horaFin: '15:00', horasOrdinarias: 8, horasDiurnas: 8, horasNocturnas: 0, bgHex: '#E0F2FE', textHex: '#0369A1', borderHex: '#7DD3FC', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
@@ -217,9 +211,11 @@ export const CATALOGO_TURNOS: Record<string, TipoTurnoConfig> = {
 
   S: { codigo: 'S', nombre: 'Saliente Guardia', horario: 'Descanso Post-Noche', horaInicio: '00:00', horaFin: '00:00', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, bgHex: '#ECFEFF', textHex: '#0E7490', borderHex: '#67E8F9', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
   L: { codigo: 'L', nombre: 'Libre Programado', horario: 'Descanso Legal', horaInicio: '00:00', horaFin: '00:00', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, bgHex: '#FFFFFF', textHex: '#64748B', borderHex: '#E2E8F0', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
-  COMP: { codigo: 'COMP', nombre: 'Compensatorio Banco', horario: 'Amortiza 8h Banco', horaInicio: '00:00', horaFin: '00:00', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, bgHex: '#CCFBF1', textHex: '#0F766E', borderHex: '#5EEAD4', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: true, visibleEnPaleta: true },
+  COMP: { codigo: 'COMP', nombre: 'Compensatorio Banco', horario: 'Amortiza 8h Banco', horaInicio: '00:00', horaFin: '00:00', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, bgHex: '#CCFBF1', textHex: '#0F766E', borderHex: '#5EEAD4', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: true, horasAmortizacionBanco: 8, visibleEnPaleta: true },
   VAC: { codigo: 'VAC', nombre: 'Vacaciones RRHH', horario: 'Bloqueo Intranet', horaInicio: '00:00', horaFin: '00:00', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, bgHex: '#D1FAE5', textHex: '#047857', borderHex: '#6EE7B7', esAusencia: true, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
   INC: { codigo: 'INC', nombre: 'Incapacidad Médica', horario: 'Habeas Data', horaInicio: '00:00', horaFin: '00:00', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, bgHex: '#FCE7F3', textHex: '#BE185D', borderHex: '#F9A8D4', esAusencia: true, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
+  LIC: { codigo: 'LIC', nombre: 'Licencia Remunerada / Calamidad / Luto', horario: 'Bloqueo Intranet', horaInicio: '00:00', horaFin: '23:59', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, bgHex: '#E0E7FF', textHex: '#3730A3', borderHex: '#C7D2FE', esAusencia: true, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
+  FAM: { codigo: 'FAM', nombre: 'Día de la Familia', horario: 'Ley 1857 / Exonerado', horaInicio: '00:00', horaFin: '23:59', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, bgHex: '#FCE7F3', textHex: '#BE185D', borderHex: '#F9A8D4', esAusencia: true, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
 };
 
 export interface ModalConfirmacionConfig {

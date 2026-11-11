@@ -1,0 +1,515 @@
+:host {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.nomina-container {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.nomina-banner {
+  background: #ffffff;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 18px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.nomina-banner h2 {
+  font-size: 16px;
+  margin-bottom: 4px;
+}
+
+.nomina-banner p {
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.portal-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.portal-subtitle {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.periodo-tag-pub {
+  background: #ecfdf5 !important;
+  color: #047857 !important;
+  border-color: #a7f3d0 !important;
+}
+
+.periodo-tag-cerrado {
+  background: #f5f3ff !important;
+  color: #6d28d9 !important;
+  border-color: #ddd6fe !important;
+}
+
+.periodo-tag-borrador {
+  background: #fffbeb !important;
+  color: #b45309 !important;
+  border-color: #fde68a !important;
+}
+
+.periodo-tag-sin {
+  background: #f1f5f9 !important;
+  color: #475569 !important;
+  border-color: #cbd5e1 !important;
+}
+
+/* NAVEGACIÓN Y SELECTOR DE MES EN PORTAL DEL COLABORADOR */
+.portal-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.portal-session-pill {
+  padding: 8px 14px !important;
+  font-size: 13px !important;
+}
+
+.portal-alert-banner {
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.portal-alert-borrador {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
+}
+
+.portal-alert-sin {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+}
+
+.portal-alert-icon {
+  font-size: 20px;
+}
+
+.empty-portal-container {
+  background: white;
+  border: 1.5px dashed #cbd5e1;
+  border-radius: 12px;
+  padding: 56px 24px;
+  text-align: center;
+  margin-top: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.empty-portal-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+
+.empty-portal-title {
+  font-size: 18px;
+  font-weight: 800;
+  color: #1e293b;
+  margin-bottom: 8px;
+}
+
+.empty-portal-desc {
+  font-size: 14px;
+  color: #64748b;
+  max-width: 540px;
+  margin: 0 auto 12px;
+  line-height: 1.5;
+}
+
+.empty-portal-sub {
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.kpi-value-srv {
+  font-size: 20px !important;
+}
+
+.kpi-contract-sub {
+  font-size: 15px;
+  color: #64748b;
+}
+
+.kpi-card-banco {
+  background: #f0f9ff !important;
+  border-color: #bae6fd !important;
+}
+
+.portal-ical-cta {
+  margin: 8px 0;
+}
+
+.portal-cal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.portal-cal-title-cluster {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.pill-month-active {
+  background: #0284c7;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 5px;
+}
+
+/* PORTAL DEL EMPLEADO: CALENDARIO PERSONAL (CUADRÍCULA SEMANAL 7 COLUMNAS) */
+.weekly-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.weekday-header {
+  text-align: center;
+  padding: 8px 6px;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #334155;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+
+.weekday-header.sat-header {
+  background: #e0f2fe;
+  color: #0369a1;
+  border-color: #7dd3fc;
+}
+
+.weekday-header.sun-header {
+  background: #bae6fd;
+  color: #075985;
+  border-color: #38bdf8;
+}
+
+.emp-day-card {
+  background: #ffffff;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  min-height: 92px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 5px;
+  transition: transform 0.1s, box-shadow 0.1s, border-color 0.1s;
+}
+
+.emp-day-card:focus-visible {
+  outline: 2px solid #0284c7;
+  outline-offset: 2px;
+}
+
+.emp-day-card.sat-card {
+  background: linear-gradient(180deg, #f0f9ff 0%, #e0f2fe 100%);
+  border-color: #7dd3fc;
+}
+
+.emp-day-card.sat-card .emp-day-num {
+  color: #0369a1;
+}
+
+.emp-day-card.sun-card {
+  background: linear-gradient(180deg, #e0f2fe 0%, #bae6fd 100%);
+  border-color: #38bdf8;
+}
+
+.emp-day-card.sun-card .emp-day-num {
+  color: #075985;
+}
+
+.emp-day-card.holiday-card {
+  border-color: #f59e0b;
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.25);
+}
+
+.emp-day-card.today-card {
+  border-color: #0284c7;
+  box-shadow: inset 0 3px 0 #0284c7;
+}
+
+.emp-day-card.empty-slot {
+  cursor: default;
+  opacity: 0.45;
+  border-style: dashed;
+  pointer-events: none;
+}
+
+.emp-day-card:not(.empty-slot):hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.08);
+}
+
+.emp-day-card.selected-day {
+  outline: 2px solid #0284c7;
+  box-shadow: 0 0 0 4px rgba(2, 132, 199, 0.2);
+}
+
+.emp-day-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #334155;
+}
+
+.emp-day-num {
+  font-size: 14px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.emp-festivo-tag {
+  font-size: 9.5px;
+  font-weight: 800;
+  background: #fef3c7;
+  color: #b45309;
+  border: 1px solid #fde68a;
+  padding: 1px 5px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.emp-hoy-tag {
+  display: inline-block;
+  margin-left: 5px;
+  font-size: 9.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: #0284c7;
+  color: #ffffff;
+  padding: 1px 6px;
+  border-radius: 999px;
+  vertical-align: middle;
+}
+
+.emp-shift-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1.5px solid transparent;
+}
+
+.emp-shift-unassigned {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 8px 6px;
+  border-radius: 6px;
+  background-color: #f8fafc;
+  border: 1px dashed #cbd5e1;
+}
+
+.unassigned-dash {
+  font-size: 16px;
+  font-weight: 700;
+  color: #94a3b8;
+  line-height: 1;
+}
+
+.unassigned-text {
+  font-size: 10px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.emp-day-code {
+  font-size: 16px;
+  font-weight: 900;
+  line-height: 1.1;
+}
+
+.emp-day-name {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.emp-day-hours {
+  font-size: 10px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.emp-day-card.support-card {
+  border-color: #a78bfa;
+  background: linear-gradient(180deg, #fdf4ff 0%, #ede9fe 100%);
+}
+
+.emp-rot-tag {
+  font-size: 9.5px;
+  font-weight: 800;
+  background: #ede9fe;
+  color: #5b21b6;
+  border: 1px solid #c4b5fd;
+  padding: 1px 5px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.emp-day-service {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #334155;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.emp-day-service .srv-icon {
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.emp-day-service .srv-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.emp-day-service.srv-rotado {
+  background: #ede9fe;
+  color: #5b21b6;
+  border-color: #c4b5fd;
+  font-weight: 800;
+}
+
+.badge-srv-panel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+}
+
+.badge-srv-panel.badge-srv-rot {
+  background: #ede9fe;
+  color: #5b21b6;
+  border-color: #a78bfa;
+  font-weight: 800;
+}
+
+.badge-srv-unassigned {
+  background: #f1f5f9;
+  color: #64748b;
+  border: 1px dashed #cbd5e1;
+}
+
+.portal-permutas-incoming-list {
+  margin-top: 8px;
+}
+
+.portal-turno-dia-desc {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.portal-notice-box {
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.portal-notice-danger {
+  background: #fef2f2;
+  border: 1px dashed #fca5a5;
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 13px;
+  color: #991b1b;
+  line-height: 1.5;
+}
+
+.portal-par-select {
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  font-weight: 600;
+}
+
+.portal-no-pares {
+  padding: 8px;
+  font-style: italic;
+}
+
+.portal-sent-section {
+  margin-top: 20px;
+}
+
+.portal-sent-heading {
+  margin-bottom: 8px;
+  font-size: 12.5px;
+  color: #334155;
+}

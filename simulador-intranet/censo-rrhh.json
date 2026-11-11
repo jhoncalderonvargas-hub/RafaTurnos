@@ -1,0 +1,1486 @@
+{
+  "fuente": "Sistema Maestro RRHH y Mapa de Procesos — Intranet Hospitalaria",
+  "ultimaActualizacion": "2026-11-10",
+  "macroprocesos": [
+    {
+      "codigo": "URGENCIAS",
+      "nombre": "Atención de Urgencias y Emergencias",
+      "nombreCorto": "Urgencias y Emergencias",
+      "tipoProceso": "MISIONAL_ASISTENCIAL",
+      "icono": "🚨",
+      "orden": 1,
+      "modalidadSugerida": "TODOS_24_7",
+      "plantillaTurnosSugerida": "ROTATIVO_8H"
+    },
+    {
+      "codigo": "CUIDADOS_INTENSIVOS",
+      "nombre": "Cuidado Crítico e Intensivo (UCI / UCIM)",
+      "nombreCorto": "Cuidado Crítico (UCI)",
+      "tipoProceso": "MISIONAL_ASISTENCIAL",
+      "icono": "💓",
+      "orden": 2,
+      "modalidadSugerida": "TODOS_24_7",
+      "plantillaTurnosSugerida": "GUARDIAS_12_24"
+    },
+    {
+      "codigo": "HOSPITALIZACION",
+      "nombre": "Hospitalización e Internación",
+      "nombreCorto": "Hospitalización",
+      "tipoProceso": "MISIONAL_ASISTENCIAL",
+      "icono": "🛏️",
+      "orden": 3,
+      "modalidadSugerida": "TODOS_24_7",
+      "plantillaTurnosSugerida": "ROTATIVO_8H"
+    },
+    {
+      "codigo": "QUIRURGICO",
+      "nombre": "Atención Quirúrgica y Esterilización",
+      "nombreCorto": "Quirúrgico y Cirugía",
+      "tipoProceso": "MISIONAL_ASISTENCIAL",
+      "icono": "🔪",
+      "orden": 4,
+      "modalidadSugerida": "TODOS_GUARDIA_FDS",
+      "plantillaTurnosSugerida": "GUARDIAS_12_24"
+    },
+    {
+      "codigo": "APOYO_DIAGNOSTICO",
+      "nombre": "Apoyo Diagnóstico y Terapéutico",
+      "nombreCorto": "Apoyo Diagnóstico",
+      "tipoProceso": "MISIONAL_ASISTENCIAL",
+      "icono": "🔬",
+      "orden": 5,
+      "modalidadSugerida": "TODOS_GUARDIA_FDS",
+      "plantillaTurnosSugerida": "ROTATIVO_8H"
+    },
+    {
+      "codigo": "CONSULTA_EXTERNA",
+      "nombre": "Consulta Externa y Ambulatoria",
+      "nombreCorto": "Consulta Externa",
+      "tipoProceso": "MISIONAL_ASISTENCIAL",
+      "icono": "🩺",
+      "orden": 6,
+      "modalidadSugerida": "LUN_SAB_SIN_FESTIVOS",
+      "plantillaTurnosSugerida": "ADMINISTRATIVO"
+    },
+    {
+      "codigo": "ADMINISTRATIVO",
+      "nombre": "Gestión Financiera, Facturación y Admisiones",
+      "nombreCorto": "Administrativo y Admisiones",
+      "tipoProceso": "APOYO_ADMINISTRATIVO",
+      "icono": "🏛️",
+      "orden": 7,
+      "modalidadSugerida": "LUN_VIE_HABILES",
+      "plantillaTurnosSugerida": "ADMINISTRATIVO"
+    },
+    {
+      "codigo": "APOYO_OPERATIVO",
+      "nombre": "Apoyo Operativo, Logística y Mantenimiento",
+      "nombreCorto": "Apoyo Operativo y Logística",
+      "tipoProceso": "APOYO_OPERATIVO",
+      "icono": "🛠️",
+      "orden": 8,
+      "modalidadSugerida": "TODOS_GUARDIA_FDS",
+      "plantillaTurnosSugerida": "ROTATIVO_8H"
+    }
+  ],
+  "empleados": [
+    {
+      "documento": "1010001137",
+      "nombre": "Adriana Aguilar Botero",
+      "correo": "adriana.aguilar105@hospital.gov.co",
+      "cargoNombre": "Operario de Oficios Varios / Aseo",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "OF-VAR"
+    },
+    {
+      "documento": "1010001122",
+      "nombre": "Adriana Valencia Guerrero",
+      "correo": "adriana.valencia25@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Facturación y Admisiones",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "FACT-CEN"
+    },
+    {
+      "documento": "1010001036",
+      "nombre": "Alejandro Muñoz Montoya",
+      "correo": "alejandro.munoz10@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "CIR"
+    },
+    {
+      "documento": "1010001022",
+      "nombre": "Alfonso Mora Pineda",
+      "correo": "alfonso.mora142@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "URG"
+    },
+    {
+      "documento": "1010001102",
+      "nombre": "Alfonso Sánchez Castro",
+      "correo": "alfonso.sanchez62@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Laboratorio Clínico",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "LAB-IMG"
+    },
+    {
+      "documento": "1010001108",
+      "nombre": "Álvaro Duque Quintero",
+      "correo": "alvaro.duque40@hospital.gov.co",
+      "cargoNombre": "Químico Farmacéutico / Regente de Farmacia",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "FARM"
+    },
+    {
+      "documento": "1010001074",
+      "nombre": "Álvaro Guerrero Marín",
+      "correo": "alvaro.guerrero120@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "PED"
+    },
+    {
+      "documento": "1010001138",
+      "nombre": "Andrea López Cárdenas",
+      "correo": "andrea.lopez111@hospital.gov.co",
+      "cargoNombre": "Operario de Oficios Varios / Aseo",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "OF-VAR"
+    },
+    {
+      "documento": "1010001118",
+      "nombre": "Andrea Torres Duque",
+      "correo": "andrea.torres31@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Facturación y Admisiones",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "FACT-URG"
+    },
+    {
+      "documento": "1010001066",
+      "nombre": "Andrés Restrepo Herrera",
+      "correo": "andres.restrepo84@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MAT"
+    },
+    {
+      "documento": "1010001018",
+      "nombre": "Bernardo Castro Zapata",
+      "correo": "bernardo.castro144@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "URG"
+    },
+    {
+      "documento": "1010001103",
+      "nombre": "Bernardo López Herrera",
+      "correo": "bernardo.lopez64@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Laboratorio Clínico",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "LAB-IMG"
+    },
+    {
+      "documento": "1010001139",
+      "nombre": "Camila Mejía Henao",
+      "correo": "camila.mejia113@hospital.gov.co",
+      "cargoNombre": "Operario de Oficios Varios / Aseo",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "OF-VAR"
+    },
+    {
+      "documento": "1010001115",
+      "nombre": "Camila Ruiz Londoño",
+      "correo": "camila.ruiz33@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Facturación y Admisiones",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "FACT-URG"
+    },
+    {
+      "documento": "1010001125",
+      "nombre": "Camilo Cárdenas Gutiérrez",
+      "correo": "camilo.cardenas24@hospital.gov.co",
+      "cargoNombre": "Conductor de Ambulancia",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "COND"
+    },
+    {
+      "documento": "1010001088",
+      "nombre": "Camilo Muñoz Zapata",
+      "correo": "camilo.munoz104@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MED-INT"
+    },
+    {
+      "documento": "1010001063",
+      "nombre": "Carlos Ríos Castro",
+      "correo": "carlos.rios82@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MAT"
+    },
+    {
+      "documento": "1010001009",
+      "nombre": "Carmen Vargas Mendoza",
+      "correo": "carmen.vargas143@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "URG"
+    },
+    {
+      "documento": "1010001105",
+      "nombre": "Carmen Vélez Patiño",
+      "correo": "carmen.velez63@hospital.gov.co",
+      "cargoNombre": "Tecnólogo(a) en Imágenes Diagnósticas",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "LAB-IMG"
+    },
+    {
+      "documento": "1010001083",
+      "nombre": "Carolina Mora Vargas",
+      "correo": "carolina.mora95@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MED-INT"
+    },
+    {
+      "documento": "1010001031",
+      "nombre": "Carolina Sánchez Pineda",
+      "correo": "carolina.sanchez15@hospital.gov.co",
+      "cargoNombre": "Instrumentador(a) Quirúrgico(a)",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "CIR"
+    },
+    {
+      "documento": "1010001099",
+      "nombre": "César Mejía Echeverri",
+      "correo": "cesar.mejia66@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Laboratorio Clínico",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "LAB-IMG"
+    },
+    {
+      "documento": "1010001019",
+      "nombre": "César Mendoza Castillo",
+      "correo": "cesar.mendoza146@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "URG"
+    },
+    {
+      "documento": "1010001011",
+      "nombre": "Clara Aristizábal Botero",
+      "correo": "clara.aristizabal145@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "URG"
+    },
+    {
+      "documento": "1010001097",
+      "nombre": "Clara Gómez Muñoz",
+      "correo": "clara.gomez65@hospital.gov.co",
+      "cargoNombre": "Bacteriólogo(a)",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "LAB-IMG"
+    },
+    {
+      "documento": "1010001087",
+      "nombre": "Claudia Giraldo Vélez",
+      "correo": "claudia.giraldo101@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MED-INT"
+    },
+    {
+      "documento": "1010001124",
+      "nombre": "Claudia Patiño Mora",
+      "correo": "claudia.patino21@hospital.gov.co",
+      "cargoNombre": "Conductor de Ambulancia",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "COND"
+    },
+    {
+      "documento": "1010001104",
+      "nombre": "Consuelo Jiménez Ramírez",
+      "correo": "consuelo.jimenez67@hospital.gov.co",
+      "cargoNombre": "Tecnólogo(a) en Imágenes Diagnósticas",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "LAB-IMG"
+    },
+    {
+      "documento": "1010001010",
+      "nombre": "Consuelo Ospina Quintero",
+      "correo": "consuelo.ospina147@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "URG"
+    },
+    {
+      "documento": "1010001086",
+      "nombre": "Daniela Castro Montoya",
+      "correo": "daniela.castro97@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MED-INT"
+    },
+    {
+      "documento": "1010001129",
+      "nombre": "Daniela López Zapata",
+      "correo": "daniela.lopez17@hospital.gov.co",
+      "cargoNombre": "Conductor de Ambulancia",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "COND"
+    },
+    {
+      "documento": "1010001126",
+      "nombre": "Daniel Cardona Mejía",
+      "correo": "daniel.cardona22@hospital.gov.co",
+      "cargoNombre": "Conductor de Ambulancia",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "COND"
+    },
+    {
+      "documento": "1010001085",
+      "nombre": "Daniel Gutiérrez Pineda",
+      "correo": "daniel.gutierrez102@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MED-INT"
+    },
+    {
+      "documento": "1010001127",
+      "nombre": "David Gómez Botero",
+      "correo": "david.gomez18@hospital.gov.co",
+      "cargoNombre": "Conductor de Ambulancia",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "COND"
+    },
+    {
+      "documento": "1010001114",
+      "nombre": "Diego Montoya Botero",
+      "correo": "diego.montoya38@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Farmacia",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "FARM"
+    },
+    {
+      "documento": "1037645181",
+      "nombre": "Dra. Beatriz Ocampo Villegas",
+      "correo": "beatriz.ocampo61@hospital.gov.co",
+      "cargoNombre": "Médico Especialista (Pediatra/Ginecólogo/Internista)",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "LAB-IMG"
+    },
+    {
+      "documento": "1010001003",
+      "nombre": "Dra. Beatriz Uribe Vélez",
+      "correo": "beatriz.uribe141@hospital.gov.co",
+      "cargoNombre": "Médico General",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "URG"
+    },
+    {
+      "documento": "1010001024",
+      "nombre": "Dra. Diana Mora López",
+      "correo": "diana.mora1@hospital.gov.co",
+      "cargoNombre": "Médico Cirujano (Especialista)",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "CIR"
+    },
+    {
+      "documento": "1010001057",
+      "nombre": "Dra. Diana Pineda Villegas",
+      "correo": "diana.pineda81@hospital.gov.co",
+      "cargoNombre": "Médico Especialista (Pediatra/Ginecólogo/Internista)",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MAT"
+    },
+    {
+      "documento": "1010001071",
+      "nombre": "Dra. Isabel Bedoya Vélez",
+      "correo": "isabel.bedoya121@hospital.gov.co",
+      "cargoNombre": "Médico Especialista (Pediatra/Ginecólogo/Internista)",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "PED"
+    },
+    {
+      "documento": "1010001090",
+      "nombre": "Dr. Alejandro Buitrago Ospina",
+      "correo": "alejandro.buitrago90@hospital.gov.co",
+      "cargoNombre": "Médico General",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MED-GRAL"
+    },
+    {
+      "documento": "1010001092",
+      "nombre": "Dra. Marcela Ramírez Henao",
+      "correo": "marcela.ramirez93@hospital.gov.co",
+      "cargoNombre": "Médico General",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MED-GRAL"
+    },
+    {
+      "documento": "1010001025",
+      "nombre": "Dra. Natalia Aguilar Flórez",
+      "correo": "natalia.aguilar11@hospital.gov.co",
+      "cargoNombre": "Médico Cirujano (Especialista)",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "CIR"
+    },
+    {
+      "documento": "1010001093",
+      "nombre": "Dra. Natalia Franco Cárdenas",
+      "correo": "natalia.franco91@hospital.gov.co",
+      "cargoNombre": "Médico General",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MED-GRAL"
+    },
+    {
+      "documento": "1010001026",
+      "nombre": "Dr. Andrés Aristizábal Cárdenas",
+      "correo": "andres.aristizabal4@hospital.gov.co",
+      "cargoNombre": "Médico Anestesiólogo",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "CIR"
+    },
+    {
+      "documento": "1010001058",
+      "nombre": "Dra. Paola Montoya Muñoz",
+      "correo": "paola.montoya85@hospital.gov.co",
+      "cargoNombre": "Médico Especialista (Pediatra/Ginecólogo/Internista)",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MAT"
+    },
+    {
+      "documento": "1010001039",
+      "nombre": "Dra. Rosa Ospina Londoño",
+      "correo": "rosa.ospina53@hospital.gov.co",
+      "cargoNombre": "Médico General",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "HOSP"
+    },
+    {
+      "documento": "1010001080",
+      "nombre": "Dra. Sandra Flórez Mendoza",
+      "correo": "sandra.florez103@hospital.gov.co",
+      "cargoNombre": "Médico Especialista (Pediatra/Ginecólogo/Internista)",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MED-INT"
+    },
+    {
+      "documento": "1010001091",
+      "nombre": "Dra. Sofía Navarro Ríos",
+      "correo": "sofia.navarro89@hospital.gov.co",
+      "cargoNombre": "Médico General",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MED-GRAL"
+    },
+    {
+      "documento": "1099887766",
+      "nombre": "Dra. Valentina Castro Mendoza",
+      "correo": "valentina.castro@hospital.gov.co",
+      "cargoNombre": "Médico General",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "URG"
+    },
+    {
+      "documento": "1010001028",
+      "nombre": "Dra. Valentina Giraldo Torres",
+      "correo": "valentina.giraldo7@hospital.gov.co",
+      "cargoNombre": "Médico Anestesiólogo",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "CIR"
+    },
+    {
+      "documento": "1010001023",
+      "nombre": "Dr. Carlos Vargas Ríos",
+      "correo": "carlos.vargas2@hospital.gov.co",
+      "cargoNombre": "Médico Cirujano (Especialista)",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "CIR"
+    },
+    {
+      "documento": "1010001070",
+      "nombre": "Dr. Diego Cárdenas Flórez",
+      "correo": "diego.cardenas118@hospital.gov.co",
+      "cargoNombre": "Médico Especialista (Pediatra/Ginecólogo/Internista)",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "PED"
+    },
+    {
+      "documento": "1010001004",
+      "nombre": "Dr. Edgar Giraldo Mora",
+      "correo": "edgar.giraldo148@hospital.gov.co",
+      "cargoNombre": "Médico General",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "URG"
+    },
+    {
+      "documento": "1010001027",
+      "nombre": "Dr. Felipe Ocampo Vélez",
+      "correo": "felipe.ocampo14@hospital.gov.co",
+      "cargoNombre": "Médico Anestesiólogo",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "CIR"
+    },
+    {
+      "documento": "1010001094",
+      "nombre": "Dr. Felipe Uribe Torres",
+      "correo": "felipe.uribe94@hospital.gov.co",
+      "cargoNombre": "Médico General",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MED-GRAL"
+    },
+    {
+      "documento": "1010001079",
+      "nombre": "Dr. Gabriel Ospina Marín",
+      "correo": "gabriel.ospina100@hospital.gov.co",
+      "cargoNombre": "Médico Especialista (Pediatra/Ginecólogo/Internista)",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MED-INT"
+    },
+    {
+      "documento": "1010001040",
+      "nombre": "Dr. Héctor Ramírez Franco",
+      "correo": "hector.ramirez46@hospital.gov.co",
+      "cargoNombre": "Médico General",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "HOSP"
+    },
+    {
+      "documento": "1010001069",
+      "nombre": "Dr. Héctor Villegas Castillo",
+      "correo": "hector.villegas126@hospital.gov.co",
+      "cargoNombre": "Médico Especialista (Pediatra/Ginecólogo/Internista)",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "PED"
+    },
+    {
+      "documento": "1010001089",
+      "nombre": "Dr. Julián Marín Navarro",
+      "correo": "julian.marin92@hospital.gov.co",
+      "cargoNombre": "Médico General",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MED-GRAL"
+    },
+    {
+      "documento": "1010001059",
+      "nombre": "Dr. Mateo Botero López",
+      "correo": "mateo.botero88@hospital.gov.co",
+      "cargoNombre": "Médico Especialista (Pediatra/Ginecólogo/Internista)",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MAT"
+    },
+    {
+      "documento": "1010001041",
+      "nombre": "Dr. Óscar Flórez Salazar",
+      "correo": "oscar.florez56@hospital.gov.co",
+      "cargoNombre": "Médico General",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "HOSP"
+    },
+    {
+      "documento": "1010001001",
+      "nombre": "Dr. Pablo Franco Duque",
+      "correo": "pablo.franco138@hospital.gov.co",
+      "cargoNombre": "Médico General",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "URG"
+    },
+    {
+      "documento": "1010001002",
+      "nombre": "Dr. Raúl Ramírez Londoño",
+      "correo": "raul.ramirez140@hospital.gov.co",
+      "cargoNombre": "Médico General",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "URG"
+    },
+    {
+      "documento": "1010001096",
+      "nombre": "Edgar Patiño López",
+      "correo": "edgar.patino68@hospital.gov.co",
+      "cargoNombre": "Bacteriólogo(a)",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "LAB-IMG"
+    },
+    {
+      "documento": "1010001101",
+      "nombre": "Elena Cardona Ríos",
+      "correo": "elena.cardona69@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Laboratorio Clínico",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "LAB-IMG"
+    },
+    {
+      "documento": "1010001082",
+      "nombre": "Enf. David Aristizábal Flórez",
+      "correo": "david.aristizabal98@hospital.gov.co",
+      "cargoNombre": "Enfermero(a) Jefe",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MED-INT"
+    },
+    {
+      "documento": "1010001072",
+      "nombre": "Enf. Gloria Zapata Montoya",
+      "correo": "gloria.zapata117@hospital.gov.co",
+      "cargoNombre": "Enfermero(a) Jefe",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "PED"
+    },
+    {
+      "documento": "1010001005",
+      "nombre": "Enf. Iván Pineda Mora",
+      "correo": "ivan.pineda128@hospital.gov.co",
+      "cargoNombre": "Enfermero(a) Jefe",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "URG"
+    },
+    {
+      "documento": "1010001042",
+      "nombre": "Enf. Javier Castro Cardona",
+      "correo": "javier.castro50@hospital.gov.co",
+      "cargoNombre": "Enfermero(a) Jefe",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "HOSP"
+    },
+    {
+      "documento": "1010001033",
+      "nombre": "Enf. Jorge Ospina Henao",
+      "correo": "jorge.ospina6@hospital.gov.co",
+      "cargoNombre": "Enfermero(a) Jefe",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "CIR"
+    },
+    {
+      "documento": "1010001062",
+      "nombre": "Enf. Laura Salazar Patiño",
+      "correo": "laura.salazar83@hospital.gov.co",
+      "cargoNombre": "Enfermero(a) Jefe",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MAT"
+    },
+    {
+      "documento": "1010001006",
+      "nombre": "Enf. Leonardo Montoya Guerrero",
+      "correo": "leonardo.montoya132@hospital.gov.co",
+      "cargoNombre": "Enfermero(a) Jefe",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "URG"
+    },
+    {
+      "documento": "1010001073",
+      "nombre": "Enf. Lina Torres Botero",
+      "correo": "lina.torres125@hospital.gov.co",
+      "cargoNombre": "Enfermero(a) Jefe",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "PED"
+    },
+    {
+      "documento": "1010001034",
+      "nombre": "Enf. Marcela Henao Marín",
+      "correo": "marcela.henao13@hospital.gov.co",
+      "cargoNombre": "Enfermero(a) Jefe",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "CIR"
+    },
+    {
+      "documento": "1010001061",
+      "nombre": "Enf. Mario Torres Valencia",
+      "correo": "mario.torres78@hospital.gov.co",
+      "cargoNombre": "Enfermero(a) Jefe",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MAT"
+    },
+    {
+      "documento": "1010001043",
+      "nombre": "Enf. Mónica Uribe Sánchez",
+      "correo": "monica.uribe47@hospital.gov.co",
+      "cargoNombre": "Enfermero(a) Jefe",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "HOSP"
+    },
+    {
+      "documento": "1010001045",
+      "nombre": "Enf. Olga Vargas Aristizábal",
+      "correo": "olga.vargas49@hospital.gov.co",
+      "cargoNombre": "Enfermero(a) Jefe",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "HOSP"
+    },
+    {
+      "documento": "1010001060",
+      "nombre": "Enf. Orlando Ruiz Ocampo",
+      "correo": "orlando.ruiz80@hospital.gov.co",
+      "cargoNombre": "Enfermero(a) Jefe",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MAT"
+    },
+    {
+      "documento": "1010001081",
+      "nombre": "Enf. Santiago Vargas Jiménez",
+      "correo": "santiago.vargas96@hospital.gov.co",
+      "cargoNombre": "Enfermero(a) Jefe",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MED-INT"
+    },
+    {
+      "documento": "1010001008",
+      "nombre": "Enf. Silvia Botero Ruiz",
+      "correo": "silvia.botero135@hospital.gov.co",
+      "cargoNombre": "Enfermero(a) Jefe",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "URG"
+    },
+    {
+      "documento": "1010001044",
+      "nombre": "Enf. Teresa Muñoz Giraldo",
+      "correo": "teresa.munoz57@hospital.gov.co",
+      "cargoNombre": "Enfermero(a) Jefe",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "HOSP"
+    },
+    {
+      "documento": "1010001007",
+      "nombre": "Enf. Yolanda Marín Aguilar",
+      "correo": "yolanda.marin139@hospital.gov.co",
+      "cargoNombre": "Enfermero(a) Jefe",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "URG"
+    },
+    {
+      "documento": "1010001132",
+      "nombre": "Esperanza Patiño Vargas",
+      "correo": "esperanza.patino115@hospital.gov.co",
+      "cargoNombre": "Operario de Oficios Varios / Aseo",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "OF-VAR"
+    },
+    {
+      "documento": "1010001111",
+      "nombre": "Esperanza Ríos Gómez",
+      "correo": "esperanza.rios35@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Farmacia",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "FARM"
+    },
+    {
+      "documento": "1010001135",
+      "nombre": "Esteban Gómez Navarro",
+      "correo": "esteban.gomez112@hospital.gov.co",
+      "cargoNombre": "Operario de Oficios Varios / Aseo",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "OF-VAR"
+    },
+    {
+      "documento": "1010001117",
+      "nombre": "Esteban Villegas Aguilar",
+      "correo": "esteban.villegas32@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Facturación y Admisiones",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "FACT-URG"
+    },
+    {
+      "documento": "1010001106",
+      "nombre": "Fabio Zapata Ospina",
+      "correo": "fabio.zapata70@hospital.gov.co",
+      "cargoNombre": "Tecnólogo(a) en Imágenes Diagnósticas",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "LAB-IMG"
+    },
+    {
+      "documento": "1010001121",
+      "nombre": "Fernando Echeverri Ruiz",
+      "correo": "fernando.echeverri28@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Facturación y Admisiones",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "FACT-CEN"
+    },
+    {
+      "documento": "1010001141",
+      "nombre": "Fernando Ocampo López",
+      "correo": "fernando.ocampo108@hospital.gov.co",
+      "cargoNombre": "Operario de Oficios Varios / Aseo",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "OF-VAR"
+    },
+    {
+      "documento": "1010001128",
+      "nombre": "Gabriel Jiménez Quintero",
+      "correo": "gabriel.jimenez20@hospital.gov.co",
+      "cargoNombre": "Conductor de Ambulancia",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "COND"
+    },
+    {
+      "documento": "1010001098",
+      "nombre": "Germán Valencia Aguilar",
+      "correo": "german.valencia72@hospital.gov.co",
+      "cargoNombre": "Bacteriólogo(a)",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "LAB-IMG"
+    },
+    {
+      "documento": "1010001107",
+      "nombre": "Gloria Restrepo Zapata",
+      "correo": "gloria.restrepo37@hospital.gov.co",
+      "cargoNombre": "Químico Farmacéutico / Regente de Farmacia",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "FARM"
+    },
+    {
+      "documento": "1010001053",
+      "nombre": "Gustavo Franco Gutiérrez",
+      "correo": "gustavo.franco44@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "HOSP"
+    },
+    {
+      "documento": "1010001076",
+      "nombre": "Gustavo Quintero Zapata",
+      "correo": "gustavo.quintero124@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "PED"
+    },
+    {
+      "documento": "1010001113",
+      "nombre": "Helena Herrera Castillo",
+      "correo": "helena.herrera39@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Farmacia",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "FARM"
+    },
+    {
+      "documento": "1010001075",
+      "nombre": "Helena Valencia Bedoya",
+      "correo": "helena.valencia119@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "PED"
+    },
+    {
+      "documento": "1010001147",
+      "nombre": "Hugo Bedoya Uribe",
+      "correo": "hugo.bedoya74@hospital.gov.co",
+      "cargoNombre": "Técnico de Mantenimiento",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MANT"
+    },
+    {
+      "documento": "1010001095",
+      "nombre": "Inés Cárdenas Duque",
+      "correo": "ines.cardenas71@hospital.gov.co",
+      "cargoNombre": "Bacteriólogo(a)",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "LAB-IMG"
+    },
+    {
+      "documento": "1010001110",
+      "nombre": "Isabel Botero Mora",
+      "correo": "isabel.botero41@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Farmacia",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "FARM"
+    },
+    {
+      "documento": "1010001051",
+      "nombre": "Iván Mora Ruiz",
+      "correo": "ivan.mora48@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "HOSP"
+    },
+    {
+      "documento": "1010001144",
+      "nombre": "Jaime Londoño Salazar",
+      "correo": "jaime.londono76@hospital.gov.co",
+      "cargoNombre": "Técnico de Mantenimiento",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MANT"
+    },
+    {
+      "documento": "1010001021",
+      "nombre": "Javier Salazar Restrepo",
+      "correo": "javier.salazar130@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "URG"
+    },
+    {
+      "documento": "1037645182",
+      "nombre": "Jhon Alexander Calderon",
+      "correo": "jhon.alex@hospital.gov.co",
+      "cargoNombre": "Técnico de Mantenimiento",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MANT"
+    },
+    {
+      "documento": "1010001068",
+      "nombre": "Jorge Herrera Echeverri",
+      "correo": "jorge.herrera86@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MAT"
+    },
+    {
+      "documento": "1010001050",
+      "nombre": "Juana Buitrago Restrepo",
+      "correo": "juana.buitrago43@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "HOSP"
+    },
+    {
+      "documento": "1010001077",
+      "nombre": "Juana Londoño Mendoza",
+      "correo": "juana.londono123@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "PED"
+    },
+    {
+      "documento": "1010001029",
+      "nombre": "Julián Castillo Bedoya",
+      "correo": "julian.castillo12@hospital.gov.co",
+      "cargoNombre": "Instrumentador(a) Quirúrgico(a)",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "CIR"
+    },
+    {
+      "documento": "1010001037",
+      "nombre": "Laura Castro Ospina",
+      "correo": "laura.castro3@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "CIR"
+    },
+    {
+      "documento": "1010001056",
+      "nombre": "Leonardo Mendoza Aguilar",
+      "correo": "leonardo.mendoza52@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "HOSP"
+    },
+    {
+      "documento": "1010001145",
+      "nombre": "Ligia Guerrero Londoño",
+      "correo": "ligia.guerrero73@hospital.gov.co",
+      "cargoNombre": "Técnico de Mantenimiento",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MANT"
+    },
+    {
+      "documento": "1010001054",
+      "nombre": "Lina Marín Guerrero",
+      "correo": "lina.marin45@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "HOSP"
+    },
+    {
+      "documento": "1010001123",
+      "nombre": "Lucía Bedoya Sánchez",
+      "correo": "lucia.bedoya27@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Facturación y Admisiones",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "FACT-CEN"
+    },
+    {
+      "documento": "1010001136",
+      "nombre": "Lucía Henao Ramírez",
+      "correo": "lucia.henao107@hospital.gov.co",
+      "cargoNombre": "Operario de Oficios Varios / Aseo",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "OF-VAR"
+    },
+    {
+      "documento": "1010001146",
+      "nombre": "Luz Echeverri Gómez",
+      "correo": "luz.echeverri75@hospital.gov.co",
+      "cargoNombre": "Técnico de Mantenimiento",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MANT"
+    },
+    {
+      "documento": "1010001020",
+      "nombre": "Manuel Duque Sánchez",
+      "correo": "manuel.duque134@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "URG"
+    },
+    {
+      "documento": "1010001046",
+      "nombre": "Manuel Giraldo Uribe",
+      "correo": "manuel.giraldo54@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "HOSP"
+    },
+    {
+      "documento": "1010001130",
+      "nombre": "Mariana Mejía Castillo",
+      "correo": "mariana.mejia19@hospital.gov.co",
+      "cargoNombre": "Conductor de Ambulancia",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "COND"
+    },
+    {
+      "documento": "1010001084",
+      "nombre": "Mariana Mendoza Bedoya",
+      "correo": "mariana.mendoza99@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MED-INT"
+    },
+    {
+      "documento": "1010001030",
+      "nombre": "Mateo Gutiérrez Vargas",
+      "correo": "mateo.gutierrez8@hospital.gov.co",
+      "cargoNombre": "Instrumentador(a) Quirúrgico(a)",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "CIR"
+    },
+    {
+      "documento": "1010001134",
+      "nombre": "Mauricio Castillo Echeverri",
+      "correo": "mauricio.castillo106@hospital.gov.co",
+      "cargoNombre": "Operario de Oficios Varios / Aseo",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "OF-VAR"
+    },
+    {
+      "documento": "1010001120",
+      "nombre": "Mauricio Guerrero Franco",
+      "correo": "mauricio.guerrero26@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Facturación y Admisiones",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "FACT-CEN"
+    },
+    {
+      "documento": "1010001067",
+      "nombre": "Mercedes Quintero Giraldo",
+      "correo": "mercedes.quintero77@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MAT"
+    },
+    {
+      "documento": "1010001016",
+      "nombre": "Mónica Ruiz Quintero",
+      "correo": "monica.ruiz127@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "URG"
+    },
+    {
+      "documento": "1010001143",
+      "nombre": "Nicolás Cardona Jiménez",
+      "correo": "nicolas.cardona116@hospital.gov.co",
+      "cargoNombre": "Operario de Oficios Varios / Aseo",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "OF-VAR"
+    },
+    {
+      "documento": "1010001112",
+      "nombre": "Nicolás Salazar Mendoza",
+      "correo": "nicolas.salazar36@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Farmacia",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "FARM"
+    },
+    {
+      "documento": "1010001015",
+      "nombre": "Olga Ríos Mejía",
+      "correo": "olga.rios129@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "URG"
+    },
+    {
+      "documento": "1010001017",
+      "nombre": "Óscar Navarro Aristizábal",
+      "correo": "oscar.navarro136@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "URG"
+    },
+    {
+      "documento": "1010001052",
+      "nombre": "Pablo Aguilar Valencia",
+      "correo": "pablo.aguilar58@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "HOSP"
+    },
+    {
+      "documento": "1010001032",
+      "nombre": "Paola Mendoza Navarro",
+      "correo": "paola.mendoza5@hospital.gov.co",
+      "cargoNombre": "Instrumentador(a) Quirúrgico(a)",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "CIR"
+    },
+    {
+      "documento": "1010001119",
+      "nombre": "Patricia Londoño Aristizábal",
+      "correo": "patricia.londono29@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Facturación y Admisiones",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "FACT-URG"
+    },
+    {
+      "documento": "1010001133",
+      "nombre": "Patricia Sánchez Ríos",
+      "correo": "patricia.sanchez109@hospital.gov.co",
+      "cargoNombre": "Operario de Oficios Varios / Aseo",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "OF-VAR"
+    },
+    {
+      "documento": "1010001047",
+      "nombre": "Pilar Aristizábal Duque",
+      "correo": "pilar.aristizabal51@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "HOSP"
+    },
+    {
+      "documento": "1010001013",
+      "nombre": "Pilar Restrepo Gutiérrez",
+      "correo": "pilar.restrepo131@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "URG"
+    },
+    {
+      "documento": "1010001100",
+      "nombre": "Raúl Henao Ocampo",
+      "correo": "raul.henao60@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Laboratorio Clínico",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "LAB-IMG"
+    },
+    {
+      "documento": "1010001116",
+      "nombre": "Ricardo Quintero Cardona",
+      "correo": "ricardo.quintero30@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Facturación y Admisiones",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "FACT-URG"
+    },
+    {
+      "documento": "1010001142",
+      "nombre": "Ricardo Vélez Ospina",
+      "correo": "ricardo.velez110@hospital.gov.co",
+      "cargoNombre": "Operario de Oficios Varios / Aseo",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "OF-VAR"
+    },
+    {
+      "documento": "1010001064",
+      "nombre": "Rocío Villegas Buitrago",
+      "correo": "rocio.villegas79@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MAT"
+    },
+    {
+      "documento": "1010001078",
+      "nombre": "Rodrigo Echeverri Pineda",
+      "correo": "rodrigo.echeverri122@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "PED"
+    },
+    {
+      "documento": "1010001055",
+      "nombre": "Rodrigo Navarro Mejía",
+      "correo": "rodrigo.navarro42@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "HOSP"
+    },
+    {
+      "documento": "1010001014",
+      "nombre": "Rosa Herrera Franco",
+      "correo": "rosa.herrera133@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "URG"
+    },
+    {
+      "documento": "1010001131",
+      "nombre": "Sandra Zapata Restrepo",
+      "correo": "sandra.zapata23@hospital.gov.co",
+      "cargoNombre": "Conductor de Ambulancia",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "COND"
+    },
+    {
+      "documento": "1010001035",
+      "nombre": "Santiago Vélez Mendoza",
+      "correo": "santiago.velez16@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "CIR"
+    },
+    {
+      "documento": "1010001140",
+      "nombre": "Sebastián Jiménez Torres",
+      "correo": "sebastian.jimenez114@hospital.gov.co",
+      "cargoNombre": "Operario de Oficios Varios / Aseo",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "OF-VAR"
+    },
+    {
+      "documento": "1010001109",
+      "nombre": "Sebastián Pineda Uribe",
+      "correo": "sebastian.pineda34@hospital.gov.co",
+      "cargoNombre": "Químico Farmacéutico / Regente de Farmacia",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "FARM"
+    },
+    {
+      "documento": "1010001049",
+      "nombre": "Silvia Gutiérrez Gómez",
+      "correo": "silvia.gutierrez55@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "HOSP"
+    },
+    {
+      "documento": "1010001038",
+      "nombre": "Sofía Flórez Jiménez",
+      "correo": "sofia.florez9@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "CIR"
+    },
+    {
+      "documento": "1010001012",
+      "nombre": "Teresa Buitrago Cardona",
+      "correo": "teresa.buitrago137@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "URG"
+    },
+    {
+      "documento": "1037645123",
+      "nombre": "Tomas grajales frias",
+      "correo": "tomas.grajales@hospital.gov.co",
+      "cargoNombre": "Tecnólogo(a) en Imágenes Diagnósticas",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "LAB-IMG"
+    },
+    {
+      "documento": "1010001065",
+      "nombre": "Valentina Duque Ramírez",
+      "correo": "valentina.duque87@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "MAT"
+    },
+    {
+      "documento": "1010001048",
+      "nombre": "Yolanda Castillo Buitrago",
+      "correo": "yolanda.castillo59@hospital.gov.co",
+      "cargoNombre": "Auxiliar de Enfermería",
+      "horasContratoMes": 168,
+      "estadoContrato": "ACTIVO",
+      "servicioCodigo": "HOSP"
+    }
+  ],
+  "novedades": [
+    {
+      "empleadoDocumento": "1010001016",
+      "empleadoNombre": "Mónica Ruiz Quintero",
+      "cargo": "Auxiliar de Enfermería",
+      "tipoNovedad": "VAC",
+      "fechaInicio": "2026-11-10",
+      "fechaFin": "2026-11-18",
+      "diasHabiles": 9,
+      "estado": "APROBADA",
+      "resolucion": "RES-GH-2026-849",
+      "observaciones": "Vacaciones reglamentarias aprobadas por Gestión Humana"
+    },
+    {
+      "empleadoDocumento": "1010001001",
+      "empleadoNombre": "Dr. Pablo Franco Duque",
+      "cargo": "Médico General",
+      "tipoNovedad": "INC",
+      "fechaInicio": "2026-11-03",
+      "fechaFin": "2026-11-05",
+      "diasHabiles": 3,
+      "estado": "APROBADA",
+      "codigoCie10": "J06.9",
+      "entidad": "EPS Sanitas",
+      "observaciones": "Incapacidad médica por enfermedad respiratoria"
+    },
+    {
+      "empleadoDocumento": "1010001005",
+      "empleadoNombre": "Enf. Iván Pineda Mora",
+      "cargo": "Enfermero(a) Jefe",
+      "tipoNovedad": "LIC",
+      "fechaInicio": "2026-11-24",
+      "fechaFin": "2026-11-26",
+      "diasHabiles": 3,
+      "estado": "APROBADA",
+      "resolucion": "LIC-CAL-2026-112",
+      "observaciones": "Licencia remunerada por calamidad / luto familiar"
+    }
+  ]
+}

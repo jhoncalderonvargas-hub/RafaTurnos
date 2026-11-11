@@ -17,7 +17,7 @@ RUN npx prisma generate
 RUN npm run build
 
 # ========================================================
-# ETAPA 2: Imagen de Ejecución con auto-sincronización de BD
+# ETAPA 2: Imagen de Ejecución sin devDependencies
 # ========================================================
 FROM node:20-alpine AS runner
 WORKDIR /app
@@ -28,13 +28,16 @@ RUN apk add --no-cache openssl
 COPY package*.json ./
 COPY prisma ./prisma/
 
-RUN npm ci && npx prisma generate
+RUN npm ci --omit=dev
 
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
+COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
 COPY --from=builder /app/dist ./dist
 
 EXPOSE 3000
 
 # Al iniciar el contenedor:
-# 1. Aplica el esquema e índices en PostgreSQL (npx prisma db push)
+# 1. Aplica migraciones pendientes en PostgreSQL (prisma migrate deploy)
 # 2. Inicia el servidor NestJS de producción (dist/src/main.js)
-CMD ["sh", "-c", "npx prisma db push --skip-generate && node dist/src/main.js"]
+CMD ["sh", "-c", "node node_modules/prisma/build/index.js migrate deploy && node dist/src/main.js"]

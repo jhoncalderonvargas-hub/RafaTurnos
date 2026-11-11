@@ -2,17 +2,15 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import {
-  CalculoBancoHorasInput,
   EmpleadoHospital,
   FestivoEntry,
   PermutaItem,
   RegistroAuditoria,
-  ResultadoBancoYNominaDto,
   ServicioHospitalario,
   SesionUsuarioSso,
   TipoTurnoConfig,
-  ValidacionTurnoDto,
 } from './models';
+import { hoyColombiaIso } from './shared/liquidacion-horas';
 
 @Injectable({
   providedIn: 'root',
@@ -32,7 +30,11 @@ export class TurnosApiService {
 
   constructor(private readonly http: HttpClient) {}
 
-  // 1. Servicios Asistenciales y Hermanos
+  // 1. Servicios Asistenciales, Macroprocesos y Hermanos
+  getMacroprocesos(): Observable<any[]> {
+    return this.http.get<any[]>(`${this.baseUrl}/servicios-admin/macroprocesos`);
+  }
+
   getServicios(): Observable<ServicioHospitalario[]> {
     return this.http.get<ServicioHospitalario[]>(`${this.baseUrl}/servicios-admin`);
   }
@@ -42,13 +44,11 @@ export class TurnosApiService {
     nombre: string;
     tipoAsistencia: string;
     intranetId?: string;
-    reqManana?: number;
-    reqTarde?: number;
+    reqDia?: number;
     reqNoche?: number;
     modalidadDias?: string;
-    reqMananaFds?: number;
-    reqTardeFds?: number;
-    reqNocheFds?: number;
+    reqDiaDomFest?: number;
+    reqNocheDomFest?: number;
     turnosHabilitados?: string[];
     reglasPorCargo?: any[];
   }): Observable<any> {
@@ -59,13 +59,11 @@ export class TurnosApiService {
     codigo: string;
     nombre: string;
     tipoAsistencia: string;
-    reqManana?: number;
-    reqTarde?: number;
+    reqDia?: number;
     reqNoche?: number;
     modalidadDias?: string;
-    reqMananaFds?: number;
-    reqTardeFds?: number;
-    reqNocheFds?: number;
+    reqDiaDomFest?: number;
+    reqNocheDomFest?: number;
     turnosHabilitados?: string[];
     reglasPorCargo?: any[];
   }): Observable<any> {
@@ -87,13 +85,6 @@ export class TurnosApiService {
     return this.http.delete(
       `${this.baseUrl}/servicios-admin/${servicioId}/enlace-hermano/${hermanoId}`
     );
-  }
-
-  adscribirEmpleadoAServicio(empleadoId: string, servicioBaseId: string): Observable<any> {
-    return this.http.put(`${this.baseUrl}/servicios-admin/adscribir-empleado`, {
-      empleadoId,
-      servicioBaseId,
-    });
   }
 
   // 1.2 Listado Maestro de Empleados Asistenciales (PostgreSQL)
@@ -127,6 +118,8 @@ export class TurnosApiService {
     minutosAlmuerzo?: number;
     colorHex: string;
     descuentaBancoHoras: boolean;
+    horasAmortizacionBanco?: number | null;
+    modoJornada?: 'HORARIO' | 'GUARDIA_24H' | 'DESCANSO';
     esNocturnoPesado: boolean;
     visibleEnPaleta?: boolean;
   }): Observable<any> {
@@ -148,15 +141,7 @@ export class TurnosApiService {
     return this.http.delete(`${this.baseUrl}/festivos/dia-civico/${fechaIso}`);
   }
 
-  // 3. Simulación de Cierre y Banco de Horas Continuo
-  simularCierreBancoHoras(input: CalculoBancoHorasInput): Observable<ResultadoBancoYNominaDto> {
-    return this.http.post<ResultadoBancoYNominaDto>(
-      `${this.baseUrl}/banco-horas-nomina/simular-cierre`,
-      input
-    );
-  }
-
-  // 4. Persistencia y Validación de Cuadrantes en PostgreSQL
+  // 3. Persistencia y Validación de Cuadrantes en PostgreSQL
   getEstadoGlobalCuadrantes(anio: number): Observable<{
     anio: number;
     estados: Record<string, 'BORRADOR' | 'PUBLICADO' | 'CERRADO_NOMINA'>;
@@ -227,11 +212,7 @@ export class TurnosApiService {
     return this.http.put(`${this.baseUrl}/cuadrantes/lote`, payload);
   }
 
-  validarCeldaReglas(dto: ValidacionTurnoDto): Observable<any> {
-    return this.http.post(`${this.baseUrl}/cuadrantes/validar-celda`, dto);
-  }
-
-  // 5. Permutas 1-a-1 en PostgreSQL
+  // 4. Permutas 1-a-1 en PostgreSQL
   getPermutas(): Observable<PermutaItem[]> {
     return this.http.get<PermutaItem[]>(`${this.baseUrl}/permutas`);
   }
@@ -267,13 +248,12 @@ export class TurnosApiService {
     return this.http.patch(`${this.baseUrl}/permutas/${id}/rechazar`, { motivo });
   }
 
-  simularPermuta(dto: any): Observable<any> {
-    return this.http.post(`${this.baseUrl}/permutas/simular`, dto);
-  }
-
-  // 6. Novedades y Ausencias Oficiales (Intranet Hospitalaria)
+  // 5. Novedades y Ausencias Oficiales (Intranet Hospitalaria)
   getNovedades(anio?: number, mes?: number): Observable<any[]> {
-    return this.http.get<any[]>(`${this.baseUrl}/cuadrantes/novedades?anio=${anio || 2026}&mes=${mes || 11}`);
+    const [anioHoy, mesHoy] = hoyColombiaIso().split('-').map(Number);
+    const a = anio || anioHoy;
+    const m = mes || mesHoy;
+    return this.http.get<any[]>(`${this.baseUrl}/cuadrantes/novedades?anio=${a}&mes=${m}`);
   }
 
   sincronizarNovedadesIntranet(anio: number, mes: number): Observable<{

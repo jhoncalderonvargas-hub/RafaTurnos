@@ -47,10 +47,10 @@ export const ssoAuthInterceptor: HttpInterceptorFn = (req, next) => {
       ) {
         try {
           sessionStorage.removeItem(STORAGE_KEY_TOKEN);
-          const destino =
-            sessionStorage.getItem(STORAGE_KEY_INTRANET_URL) ||
-            'http://localhost:4300';
-          window.location.href = destino;
+          const destino = (sessionStorage.getItem(STORAGE_KEY_INTRANET_URL) || '').trim();
+          if (destino && destino !== window.location.href) {
+            window.location.href = destino;
+          }
         } catch {}
       }
       return throwError(() => error);

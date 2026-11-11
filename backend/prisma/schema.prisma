@@ -7,15 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum TipoAsistencia {
-  CUIDADOS_INTENSIVOS
-  URGENCIAS
-  QUIRURGICO
-  HOSPITALIZACION
-  APOYO_DIAGNOSTICO
-  CONSULTA_EXTERNA
-}
-
 enum EstadoCuadrante {
   BORRADOR
   VALIDADO
@@ -30,20 +21,34 @@ enum EstadoPermuta {
   RECHAZADA
 }
 
+model Macroproceso {
+  id                      String     @id @default(uuid())
+  codigo                  String     @unique
+  nombre                  String
+  nombreCorto             String
+  tipoProceso             String     @default("MISIONAL_ASISTENCIAL")
+  icono                   String     @default("🏥")
+  orden                   Int        @default(1)
+  modalidadSugerida       String     @default("TODOS_24_7")
+  plantillaTurnosSugerida String     @default("ROTATIVO_8H")
+  servicios               Servicio[]
+
+  @@map("macroprocesos")
+}
+
 model Servicio {
   id                     String                   @id @default(uuid())
   intranetId             String?                  @unique
   codigo                 String                   @unique
   nombre                 String
-  tipoAsistencia         TipoAsistencia
-  reqManana              Int                      @default(4)
-  reqTarde               Int                      @default(4)
+  macroprocesoId         String
+  macroproceso           Macroproceso             @relation(fields: [macroprocesoId], references: [id])
+  reqDia                 Int                      @default(4)
   reqNoche               Int                      @default(2)
   modalidadDias          String                   @default("TODOS_24_7")
-  reqMananaFds           Int                      @default(4)
-  reqTardeFds            Int                      @default(4)
-  reqNocheFds            Int                      @default(2)
-  turnosHabilitadosCodigos String[]               @default(["M8", "T8", "N8", "M6", "T6", "N12", "D12", "G24", "ADM", "MD", "AP", "DISP", "S", "L", "COMP", "VAC", "INC"])
+  reqDiaDomFest          Int                      @default(2)
+  reqNocheDomFest        Int                      @default(1)
+  turnosHabilitadosCodigos String[]               @default(["M8", "T8", "N8", "M6", "T6", "N12", "D12", "G24", "ADM", "MD", "AP", "DISP", "S", "L", "COMP", "FAM", "VAC", "INC", "LIC"])
   empleadosBase          Empleado[]               @relation("ServicioBase")
   cuadrantes             Cuadrante[]
   asignacionesEjecutadas AsignacionTurno[]        @relation("ServicioEjecutor")
@@ -56,6 +61,7 @@ model Servicio {
   serviciosHermanosOrigen ServicioHermano[]       @relation("ServicioOrigen")
   serviciosHermanosDestino ServicioHermano[]      @relation("ServicioHermano")
 
+  @@index([macroprocesoId])
   @@map("servicios")
 }
 
@@ -120,42 +126,36 @@ model Empleado {
 }
 
 model TipoTurno {
-  id                  String                    @id @default(uuid())
-  codigo              String                    @unique // M8, T8, N8, M6, T6, N12, D12, G24, ADM, COMP, etc.
-  nombre              String
-  horaInicio          String
-  horaFin             String
-  horasOrdinarias     Float
-  horasDiurnas        Float
-  horasNocturnas      Float
-  minutosAlmuerzo     Int                       @default(0) // Minutos de almuerzo no computables (Art. 167 CST)
-  colorHex            String
-  descuentaBancoHoras Boolean                   @default(false)
-  esNocturnoPesado    Boolean                   @default(false) // Obliga a S o L al día siguiente
-  visibleEnPaleta     Boolean                   @default(true)
-  asignaciones        AsignacionTurno[]
-  coberturas          RequerimientoCobertura[]
-  turnosHabilitados   ServicioTurnoHabilitado[]
+  id                     String                    @id @default(uuid())
+  codigo                 String                    @unique // M8, T8, N8, M6, T6, N12, D12, G24, ADM, COMP, etc.
+  nombre                 String
+  horaInicio             String
+  horaFin                String
+  horasOrdinarias        Float
+  horasDiurnas           Float
+  horasNocturnas         Float
+  minutosAlmuerzo        Int                       @default(0) // Minutos de almuerzo no computables (Art. 167 CST)
+  colorHex               String
+  descuentaBancoHoras    Boolean                   @default(false)
+  horasAmortizacionBanco Float                     @default(8) // Horas que amortiza en Banco de Horas si descuentaBancoHoras = true
+  esNocturnoPesado       Boolean                   @default(false) // Obliga a S o L al día siguiente
+  visibleEnPaleta        Boolean                   @default(true)
+  asignaciones           AsignacionTurno[]
+  turnosHabilitados      ServicioTurnoHabilitado[]
 
   @@map("tipos_turno")
 }
 
 model RequerimientoCobertura {
-  id               String               @id @default(uuid())
-  servicioId       String
-  servicio         Servicio             @relation(fields: [servicioId], references: [id], onDelete: Cascade)
-  categoriaId      String
-  categoria        CategoriaProfesional @relation(fields: [categoriaId], references: [id], onDelete: Cascade)
-  tipoTurnoId      String?
-  tipoTurno        TipoTurno?           @relation(fields: [tipoTurnoId], references: [id], onDelete: SetNull)
-  cantidadMinima   Int                  @default(1)
-  aplicaFestivoDom Boolean              @default(false)
-  reqManana        Int                  @default(1)
-  reqTarde         Int                  @default(1)
-  reqNoche         Int                  @default(1)
-  reqMananaFds     Int                  @default(1)
-  reqTardeFds      Int                  @default(1)
-  reqNocheFds      Int                  @default(1)
+  id              String               @id @default(uuid())
+  servicioId      String
+  servicio        Servicio             @relation(fields: [servicioId], references: [id], onDelete: Cascade)
+  categoriaId     String
+  categoria       CategoriaProfesional @relation(fields: [categoriaId], references: [id], onDelete: Cascade)
+  reqDia          Int                  @default(1)
+  reqNoche        Int                  @default(0)
+  reqDiaDomFest   Int                  @default(1)
+  reqNocheDomFest Int                  @default(0)
 
   @@unique([servicioId, categoriaId])
   @@map("requerimientos_cobertura")
@@ -198,6 +198,7 @@ model AsignacionTurno {
   @@unique([empleadoId, fecha])
   @@index([cuadranteId, fecha])
   @@index([servicioEjecutorId])
+  @@index([tipoTurnoId])
   @@index([fecha])
   @@map("asignaciones_turno")
 }
@@ -217,6 +218,7 @@ model BancoHorasSaldo {
   actualizadoEn       DateTime @updatedAt
 
   @@unique([empleadoId, anio, mes])
+  @@index([anio, mes])
   @@map("banco_horas_saldos")
 }
 
@@ -257,7 +259,6 @@ model AuditoriaCambio {
   empleadoId        String?
   empleado          Empleado?        @relation("AuditoriasEmpleado", fields: [empleadoId], references: [id], onDelete: SetNull)
   actorId           String
-  ipAddress         String?
   tipoAccion        String           @default("EDICION_TURNO")
   turnoAnterior     String?
   turnoNuevo        String?
@@ -269,6 +270,7 @@ model AuditoriaCambio {
   @@index([empleadoId])
   @@index([tipoAccion])
   @@index([timestamp])
+  @@index([servicioId, timestamp])
   @@map("auditorias_cambio")
 }
 
@@ -293,8 +295,8 @@ model SolicitudPermuta {
   receptor         Empleado      @relation("PermutasRecibidas", fields: [receptorId], references: [id])
   servicioId       String
   servicio         Servicio      @relation(fields: [servicioId], references: [id])
-  anio             Int?          // Periodo del cuadrante sobre el que se solicita el cambio
-  mes              Int?
+  anio             Int           // Periodo obligatorio del cuadrante sobre el que se solicita el cambio
+  mes              Int
   diaOrigen        Int
   turnoOrigen      String
   diaDestino       Int
@@ -309,5 +311,6 @@ model SolicitudPermuta {
   @@index([solicitanteId])
   @@index([receptorId])
   @@index([estado])
+  @@index([anio, mes])
   @@map("solicitudes_permuta")
 }

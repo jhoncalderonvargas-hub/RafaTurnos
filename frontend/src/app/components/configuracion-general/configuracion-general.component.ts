@@ -1,9 +1,10 @@
-import { Component, EventEmitter, Input, Output, ViewEncapsulation } from '@angular/core';
+import { Component, EventEmitter, Input, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
   EmpleadoHospital,
   FestivoEntry,
+  MacroprocesoInfo,
   ModalidadDiasServicio,
   ReglaCargoServicio,
   ServicioHospitalario,
@@ -17,6 +18,7 @@ import {
   TemaColorTurno,
 } from '../configuracion-catalogo-turnos/configuracion-catalogo-turnos.component';
 import { ConfiguracionFestivosComponent } from '../configuracion-festivos/configuracion-festivos.component';
+import { hoyColombiaIso } from '../../shared/liquidacion-horas';
 
 export type SubVistaConfiguracion = 'SERVICIOS' | 'CATALOGO_TURNOS' | 'FESTIVOS';
 
@@ -30,14 +32,14 @@ export type SubVistaConfiguracion = 'SERVICIOS' | 'CATALOGO_TURNOS' | 'FESTIVOS'
     ConfiguracionCatalogoTurnosComponent,
     ConfiguracionFestivosComponent,
   ],
-  encapsulation: ViewEncapsulation.None,
+  styleUrl: './configuracion-general.component.css',
   template: `
     <div class="view-container">
       <!-- Cabecero Principal Unificado de Configuración -->
       <div class="config-hero-card">
         <div class="config-hero-main">
           <div class="config-hero-brand">
-            <div class="config-icon-badge">⚙️</div>
+            <div class="config-icon-badge" aria-hidden="true">⚙️</div>
             <div class="config-hero-titles">
               <div class="config-title-row">
                 <h2>Configuración del Sistema</h2>
@@ -55,8 +57,9 @@ export type SubVistaConfiguracion = 'SERVICIOS' | 'CATALOGO_TURNOS' | 'FESTIVOS'
             type="button"
             class="config-tab-btn"
             [class.active]="subVistaConfig === 'SERVICIOS'"
+            [attr.aria-pressed]="subVistaConfig === 'SERVICIOS'"
             (click)="cambiarSubVista.emit('SERVICIOS')">
-            <span class="tab-icon">🏥</span>
+            <span class="tab-icon" aria-hidden="true">🏥</span>
             <span class="tab-text">Servicios y Apoyo</span>
             <span class="tab-count-badge">{{ servicios.length }}</span>
           </button>
@@ -64,8 +67,9 @@ export type SubVistaConfiguracion = 'SERVICIOS' | 'CATALOGO_TURNOS' | 'FESTIVOS'
             type="button"
             class="config-tab-btn"
             [class.active]="subVistaConfig === 'CATALOGO_TURNOS'"
+            [attr.aria-pressed]="subVistaConfig === 'CATALOGO_TURNOS'"
             (click)="cambiarSubVista.emit('CATALOGO_TURNOS')">
-            <span class="tab-icon">🎨</span>
+            <span class="tab-icon" aria-hidden="true">🎨</span>
             <span class="tab-text">Catálogo de Turnos</span>
             <span class="tab-count-badge">{{ listaTurnosCatalogo.length }}</span>
           </button>
@@ -73,8 +77,9 @@ export type SubVistaConfiguracion = 'SERVICIOS' | 'CATALOGO_TURNOS' | 'FESTIVOS'
             type="button"
             class="config-tab-btn"
             [class.active]="subVistaConfig === 'FESTIVOS'"
+            [attr.aria-pressed]="subVistaConfig === 'FESTIVOS'"
             (click)="cambiarSubVista.emit('FESTIVOS')">
-            <span class="tab-icon">🇨🇴</span>
+            <span class="tab-icon" aria-hidden="true">🇨🇴</span>
             <span class="tab-text">Calendario de Festivos</span>
             <span class="tab-count-badge">{{ listaFestivosAnio.length }}</span>
           </button>
@@ -84,6 +89,7 @@ export type SubVistaConfiguracion = 'SERVICIOS' | 'CATALOGO_TURNOS' | 'FESTIVOS'
       <!-- SUB-VISTA A: SERVICIOS Y APOYO -->
       @if (subVistaConfig === 'SERVICIOS') {
         <app-configuracion-servicios
+          [macroprocesos]="macroprocesos"
           [servicios]="servicios"
           [empleados]="empleados"
           [totalCategoriasUnicas]="totalCategoriasUnicas"
@@ -93,12 +99,10 @@ export type SubVistaConfiguracion = 'SERVICIOS' | 'CATALOGO_TURNOS' | 'FESTIVOS'
           [nuevoServicioNombre]="nuevoServicioNombre"
           [nuevoServicioTipoAsistencia]="nuevoServicioTipoAsistencia"
           [nuevoServicioModalidadDias]="nuevoServicioModalidadDias"
-          [nuevoServicioReqManana]="nuevoServicioReqManana"
-          [nuevoServicioReqTarde]="nuevoServicioReqTarde"
+          [nuevoServicioReqDia]="nuevoServicioReqDia"
           [nuevoServicioReqNoche]="nuevoServicioReqNoche"
-          [nuevoServicioReqMananaFds]="nuevoServicioReqMananaFds"
-          [nuevoServicioReqTardeFds]="nuevoServicioReqTardeFds"
-          [nuevoServicioReqNocheFds]="nuevoServicioReqNocheFds"
+          [nuevoServicioReqDiaDomFest]="nuevoServicioReqDiaDomFest"
+          [nuevoServicioReqNocheDomFest]="nuevoServicioReqNocheDomFest"
           [listaTurnosCatalogo]="listaTurnosCatalogo"
           [nuevoServicioTurnosHabilitados]="nuevoServicioTurnosHabilitados"
           [nuevoServicioReglasPorCargo]="nuevoServicioReglasPorCargo"
@@ -110,12 +114,10 @@ export type SubVistaConfiguracion = 'SERVICIOS' | 'CATALOGO_TURNOS' | 'FESTIVOS'
           (cambiarNuevoServicioNombre)="cambiarNuevoServicioNombre.emit($event)"
           (cambiarNuevoServicioTipoAsistencia)="cambiarNuevoServicioTipoAsistencia.emit($event)"
           (cambiarNuevoServicioModalidadDias)="cambiarNuevoServicioModalidadDias.emit($event)"
-          (cambiarNuevoServicioReqManana)="cambiarNuevoServicioReqManana.emit($event)"
-          (cambiarNuevoServicioReqTarde)="cambiarNuevoServicioReqTarde.emit($event)"
+          (cambiarNuevoServicioReqDia)="cambiarNuevoServicioReqDia.emit($event)"
           (cambiarNuevoServicioReqNoche)="cambiarNuevoServicioReqNoche.emit($event)"
-          (cambiarNuevoServicioReqMananaFds)="cambiarNuevoServicioReqMananaFds.emit($event)"
-          (cambiarNuevoServicioReqTardeFds)="cambiarNuevoServicioReqTardeFds.emit($event)"
-          (cambiarNuevoServicioReqNocheFds)="cambiarNuevoServicioReqNocheFds.emit($event)"
+          (cambiarNuevoServicioReqDiaDomFest)="cambiarNuevoServicioReqDiaDomFest.emit($event)"
+          (cambiarNuevoServicioReqNocheDomFest)="cambiarNuevoServicioReqNocheDomFest.emit($event)"
           (aplicarPlantillaTurnosServicio)="aplicarPlantillaTurnosServicio.emit($event)"
           (alternarTurnoEnServicioForm)="alternarTurnoEnServicioForm.emit($event)"
           (actualizarMetaCargoForm)="actualizarMetaCargoForm.emit($event)"
@@ -147,6 +149,7 @@ export type SubVistaConfiguracion = 'SERVICIOS' | 'CATALOGO_TURNOS' | 'FESTIVOS'
           [turnoFormColorKey]="turnoFormColorKey"
           [turnoFormNocturnoPesado]="turnoFormNocturnoPesado"
           [turnoFormDescuentaBanco]="turnoFormDescuentaBanco"
+          [turnoFormHorasAmortizacion]="turnoFormHorasAmortizacion"
           [listaTurnosCatalogo]="listaTurnosCatalogo"
           (limpiarFormularioTurno)="limpiarFormularioTurno.emit()"
           (cambiarTurnoFormCodigo)="cambiarTurnoFormCodigo.emit($event)"
@@ -158,6 +161,7 @@ export type SubVistaConfiguracion = 'SERVICIOS' | 'CATALOGO_TURNOS' | 'FESTIVOS'
           (cambiarTurnoFormColorKey)="cambiarTurnoFormColorKey.emit($event)"
           (cambiarTurnoFormNocturnoPesado)="cambiarTurnoFormNocturnoPesado.emit($event)"
           (cambiarTurnoFormDescuentaBanco)="cambiarTurnoFormDescuentaBanco.emit($event)"
+          (cambiarTurnoFormHorasAmortizacion)="cambiarTurnoFormHorasAmortizacion.emit($event)"
           (guardarTurnoEnCatalogo)="guardarTurnoEnCatalogo.emit()"
           (alternarVisibilidadTurnoPaleta)="alternarVisibilidadTurnoPaleta.emit($event)"
           (cargarTurnoParaEdicion)="cargarTurnoParaEdicion.emit($event)"
@@ -168,9 +172,11 @@ export type SubVistaConfiguracion = 'SERVICIOS' | 'CATALOGO_TURNOS' | 'FESTIVOS'
       @if (subVistaConfig === 'FESTIVOS') {
         <app-configuracion-festivos
           [anioSeleccionado]="anioSeleccionado"
+          [aniosDisponibles]="aniosDisponibles"
           [listaFestivosAnio]="listaFestivosAnio"
           [nuevoFestivoFecha]="nuevoFestivoFecha"
           [nuevoFestivoNombre]="nuevoFestivoNombre"
+          (cambiarAnio)="cambiarAnio.emit($event)"
           (eliminarDiaCivico)="eliminarDiaCivico.emit($event)"
           (cambiarNuevoFestivoFecha)="cambiarNuevoFestivoFecha.emit($event)"
           (cambiarNuevoFestivoNombre)="cambiarNuevoFestivoNombre.emit($event)"
@@ -182,6 +188,7 @@ export type SubVistaConfiguracion = 'SERVICIOS' | 'CATALOGO_TURNOS' | 'FESTIVOS'
 })
 export class ConfiguracionGeneralComponent {
   @Input() subVistaConfig: SubVistaConfiguracion = 'SERVICIOS';
+  @Input() macroprocesos: MacroprocesoInfo[] = [];
   @Input() servicios: ServicioHospitalario[] = [];
   @Input() empleados: EmpleadoHospital[] = [];
   @Input() totalCategoriasUnicas = 0;
@@ -191,12 +198,10 @@ export class ConfiguracionGeneralComponent {
   @Input() nuevoServicioNombre = '';
   @Input() nuevoServicioTipoAsistencia: any = 'URGENCIAS';
   @Input() nuevoServicioModalidadDias: any = 'TODOS_24_7';
-  @Input() nuevoServicioReqManana = 4;
-  @Input() nuevoServicioReqTarde = 4;
+  @Input() nuevoServicioReqDia = 4;
   @Input() nuevoServicioReqNoche = 2;
-  @Input() nuevoServicioReqMananaFds = 4;
-  @Input() nuevoServicioReqTardeFds = 4;
-  @Input() nuevoServicioReqNocheFds = 2;
+  @Input() nuevoServicioReqDiaDomFest = 2;
+  @Input() nuevoServicioReqNocheDomFest = 1;
   @Input() listaTurnosCatalogo: TipoTurnoConfig[] = [];
   @Input() nuevoServicioTurnosHabilitados: string[] = [];
   @Input() nuevoServicioReglasPorCargo: ReglaCargoServicio[] = [];
@@ -217,8 +222,10 @@ export class ConfiguracionGeneralComponent {
   @Input() turnoFormColorKey = 'AZUL_CIELO';
   @Input() turnoFormNocturnoPesado = false;
   @Input() turnoFormDescuentaBanco = false;
+  @Input() turnoFormHorasAmortizacion = 8;
 
-  @Input() anioSeleccionado = 2026;
+  @Input() anioSeleccionado = Number(hoyColombiaIso().substring(0, 4));
+  @Input() aniosDisponibles: number[] = [];
   @Input() listaFestivosAnio: FestivoEntry[] = [];
   @Input() nuevoFestivoFecha = '';
   @Input() nuevoFestivoNombre = '';
@@ -228,15 +235,13 @@ export class ConfiguracionGeneralComponent {
   @Output() cambiarNuevoServicioNombre = new EventEmitter<string>();
   @Output() cambiarNuevoServicioTipoAsistencia = new EventEmitter<any>();
   @Output() cambiarNuevoServicioModalidadDias = new EventEmitter<any>();
-  @Output() cambiarNuevoServicioReqManana = new EventEmitter<number>();
-  @Output() cambiarNuevoServicioReqTarde = new EventEmitter<number>();
+  @Output() cambiarNuevoServicioReqDia = new EventEmitter<number>();
   @Output() cambiarNuevoServicioReqNoche = new EventEmitter<number>();
-  @Output() cambiarNuevoServicioReqMananaFds = new EventEmitter<number>();
-  @Output() cambiarNuevoServicioReqTardeFds = new EventEmitter<number>();
-  @Output() cambiarNuevoServicioReqNocheFds = new EventEmitter<number>();
+  @Output() cambiarNuevoServicioReqDiaDomFest = new EventEmitter<number>();
+  @Output() cambiarNuevoServicioReqNocheDomFest = new EventEmitter<number>();
   @Output() aplicarPlantillaTurnosServicio = new EventEmitter<'ROTATIVO_8H' | 'GUARDIAS_12_24' | 'ADMINISTRATIVO' | 'TODOS'>();
   @Output() alternarTurnoEnServicioForm = new EventEmitter<string>();
-  @Output() actualizarMetaCargoForm = new EventEmitter<{ categoriaNombre: string; campo: 'reqManana' | 'reqTarde' | 'reqNoche' | 'reqMananaFds' | 'reqTardeFds' | 'reqNocheFds'; valor: number }>();
+  @Output() actualizarMetaCargoForm = new EventEmitter<{ categoriaNombre: string; campo: 'reqDia' | 'reqNoche' | 'reqDiaDomFest' | 'reqNocheDomFest'; valor: number }>();
   @Output() alternarTurnoEnCargoForm = new EventEmitter<{ categoriaNombre: string; codigoTurno: string }>();
   @Output() guardarServicioAutonomo = new EventEmitter<void>();
   @Output() cancelarEdicionServicio = new EventEmitter<void>();
@@ -258,10 +263,12 @@ export class ConfiguracionGeneralComponent {
   @Output() cambiarTurnoFormColorKey = new EventEmitter<string>();
   @Output() cambiarTurnoFormNocturnoPesado = new EventEmitter<boolean>();
   @Output() cambiarTurnoFormDescuentaBanco = new EventEmitter<boolean>();
+  @Output() cambiarTurnoFormHorasAmortizacion = new EventEmitter<number>();
   @Output() guardarTurnoEnCatalogo = new EventEmitter<void>();
   @Output() alternarVisibilidadTurnoPaleta = new EventEmitter<string>();
   @Output() cargarTurnoParaEdicion = new EventEmitter<TipoTurnoConfig>();
 
+  @Output() cambiarAnio = new EventEmitter<number>();
   @Output() eliminarDiaCivico = new EventEmitter<string>();
   @Output() cambiarNuevoFestivoFecha = new EventEmitter<string>();
   @Output() cambiarNuevoFestivoNombre = new EventEmitter<string>();

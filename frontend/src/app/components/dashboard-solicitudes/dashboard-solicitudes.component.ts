@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output, ViewEncapsulation } from '@angular/core';
+import { Component, EventEmitter, HostListener, Input, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { PermutaItem, RegistroAuditoria, ServicioHospitalario, SesionUsuarioSso } from '../../models';
@@ -7,7 +7,7 @@ import { PermutaItem, RegistroAuditoria, ServicioHospitalario, SesionUsuarioSso 
   selector: 'app-dashboard-solicitudes',
   standalone: true,
   imports: [CommonModule, FormsModule],
-  encapsulation: ViewEncapsulation.None,
+  styleUrl: './dashboard-solicitudes.component.css',
   template: `
     <div class="dashboard-layout">
       <!-- CABECERA DEL DASHBOARD -->
@@ -20,11 +20,12 @@ import { PermutaItem, RegistroAuditoria, ServicioHospitalario, SesionUsuarioSso 
         </div>
         <div class="dashboard-header-actions">
           @if (!esColaborador && serviciosVisibles.length > 1) {
-            <div class="control-item" style="display: flex; align-items: center; gap: 8px; background: #f8fafc; border: 1px solid #cbd5e1; padding: 5px 12px; border-radius: 999px;">
-              <span style="font-size: 13px;">🏥</span>
-              <label style="font-size: 12px; font-weight: 700; color: #475569; margin: 0;">Servicio:</label>
+            <div class="control-item dash-service-filter">
+              <span class="dash-service-icon" aria-hidden="true">🏥</span>
+              <label for="dash-servicio-select" class="dash-service-label">Servicio:</label>
               <select
-                style="border: none; background: transparent; font-weight: 700; font-size: 13px; color: #0f172a; cursor: pointer; outline: none;"
+                id="dash-servicio-select"
+                class="dash-service-select"
                 [ngModel]="servicioSeleccionadoId"
                 (ngModelChange)="cambiarServicio.emit($event)">
                 @for (srv of serviciosVisibles; track srv.id) {
@@ -35,7 +36,11 @@ import { PermutaItem, RegistroAuditoria, ServicioHospitalario, SesionUsuarioSso 
           } @else {
             <span class="badge-service-pill">🏥 {{ servicioNombre || 'Hospital' }}</span>
           }
-          <button class="btn-outline-refresh" (click)="refrescarDatos.emit()" title="Actualizar datos desde el servidor">
+          <button
+            type="button"
+            class="btn-outline-refresh"
+            (click)="refrescarDatos.emit()"
+            title="Actualizar datos desde el servidor">
             🔄 Actualizar
           </button>
         </div>
@@ -43,27 +48,29 @@ import { PermutaItem, RegistroAuditoria, ServicioHospitalario, SesionUsuarioSso 
 
       <!-- TARJETAS DE INDICADORES KPI -->
       <div class="kpi-grid">
-        <div class="kpi-card">
-          <div class="kpi-label">Cobertura del Servicio</div>
-          <div class="kpi-value" [class.text-pos]="porcentajeCobertura >= 95" [class.text-neg]="porcentajeCobertura < 80">
-            {{ porcentajeCobertura }}%
+        @if (!esColaborador) {
+          <div class="kpi-card">
+            <div class="kpi-label">Cobertura del Servicio</div>
+            <div class="kpi-value" [class.text-pos]="porcentajeCobertura >= 95" [class.text-neg]="porcentajeCobertura < 80">
+              {{ porcentajeCobertura }}%
+            </div>
+            <div class="kpi-sub">{{ servicioNombre }}</div>
           </div>
-          <div class="kpi-sub">{{ servicioNombre }}</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-label">Alertas de Descanso</div>
-          <div class="kpi-value" [class.text-neg]="infraccionesCount > 0" [class.text-pos]="infraccionesCount === 0">
-            {{ infraccionesCount }}
+          <div class="kpi-card">
+            <div class="kpi-label">Alertas de Descanso</div>
+            <div class="kpi-value" [class.text-neg]="infraccionesCount > 0" [class.text-pos]="infraccionesCount === 0">
+              {{ infraccionesCount }}
+            </div>
+            <div class="kpi-sub">Descanso mínimo: 12 horas</div>
           </div>
-          <div class="kpi-sub">Descanso mínimo: 12 horas</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-label">Balance Banco de Horas</div>
-          <div class="kpi-value" [class.text-pos]="balanceBancoHoras >= 0" [class.text-neg]="balanceBancoHoras < 0">
-            {{ formatearSigno(balanceBancoHoras) }}h
+          <div class="kpi-card">
+            <div class="kpi-label">Balance Banco de Horas</div>
+            <div class="kpi-value" [class.text-pos]="balanceBancoHoras >= 0" [class.text-neg]="balanceBancoHoras < 0">
+              {{ formatearSigno(balanceBancoHoras) }}h
+            </div>
+            <div class="kpi-sub">Total acumulado del servicio</div>
           </div>
-          <div class="kpi-sub">Total acumulado del servicio</div>
-        </div>
+        }
         <div class="kpi-card">
           <div class="kpi-label">Cambios de Turno Pendientes</div>
           <div class="kpi-value" [class.text-neg]="notificacionesCount > 0" [class.text-pos]="notificacionesCount === 0">
@@ -86,24 +93,28 @@ import { PermutaItem, RegistroAuditoria, ServicioHospitalario, SesionUsuarioSso 
           <div class="panel-filter-bar">
             <div class="filter-tabs">
               <button
+                type="button"
                 class="filter-tab"
                 [class.active]="filtroEstadoPermuta === 'TODAS'"
                 (click)="filtroEstadoPermuta = 'TODAS'">
                 Todas ({{ countTodas }})
               </button>
               <button
+                type="button"
                 class="filter-tab"
                 [class.active]="filtroEstadoPermuta === 'PENDIENTES'"
                 (click)="filtroEstadoPermuta = 'PENDIENTES'">
                 ⏳ Pendientes ({{ countPendientes }})
               </button>
               <button
+                type="button"
                 class="filter-tab"
                 [class.active]="filtroEstadoPermuta === 'APROBADA'"
                 (click)="filtroEstadoPermuta = 'APROBADA'">
                 ✅ Aprobadas ({{ countAprobadas }})
               </button>
               <button
+                type="button"
                 class="filter-tab"
                 [class.active]="filtroEstadoPermuta === 'RECHAZADA'"
                 (click)="filtroEstadoPermuta = 'RECHAZADA'">
@@ -113,11 +124,18 @@ import { PermutaItem, RegistroAuditoria, ServicioHospitalario, SesionUsuarioSso 
             <div class="search-input-wrap">
               <input
                 type="text"
+                aria-label="Buscar solicitudes de permuta por colaborador o turno"
                 [(ngModel)]="busquedaPermuta"
                 placeholder="🔍 Buscar colaborador o turno..."
                 class="filter-search-input" />
               @if (busquedaPermuta) {
-                <button class="btn-clear-search" (click)="busquedaPermuta = ''">✕</button>
+                <button
+                  type="button"
+                  aria-label="Limpiar búsqueda de permutas"
+                  class="btn-clear-search"
+                  (click)="busquedaPermuta = ''">
+                  ✕
+                </button>
               }
             </div>
           </div>
@@ -146,8 +164,12 @@ import { PermutaItem, RegistroAuditoria, ServicioHospitalario, SesionUsuarioSso 
                       <div class="supervisor-approval-group">
                         <span class="badge-concertada">🤝 Acuerdo mutuo confirmado</span>
                         <div class="btn-group-h">
-                          <button class="btn-approve" (click)="aprobarPermuta.emit(p.id)">✔ Aprobar Cambio</button>
-                          <button class="btn-reject" (click)="solicitarRechazoSupervisor(p.id)">✕ Rechazar</button>
+                          <button type="button" class="btn-approve" (click)="aprobarPermuta.emit(p.id)">
+                            ✔ Aprobar Cambio
+                          </button>
+                          <button type="button" class="btn-reject" (click)="solicitarRechazoSupervisor(p.id)">
+                            ✕ Rechazar
+                          </button>
                         </div>
                       </div>
                     } @else {
@@ -158,10 +180,10 @@ import { PermutaItem, RegistroAuditoria, ServicioHospitalario, SesionUsuarioSso 
                       <div class="supervisor-approval-group">
                         <span class="badge-incoming-par">📬 Propuesta dirigida a ti</span>
                         <div class="btn-group-h">
-                          <button class="btn-approve" (click)="aceptarPropuestaPar.emit(p.id)">
+                          <button type="button" class="btn-approve" (click)="aceptarPropuestaPar.emit(p.id)">
                             ✅ Aceptar Propuesta
                           </button>
-                          <button class="btn-reject" (click)="solicitarRechazoPar(p.id)">
+                          <button type="button" class="btn-reject" (click)="solicitarRechazoPar(p.id)">
                             ❌ Declinar
                           </button>
                         </div>
@@ -200,11 +222,18 @@ import { PermutaItem, RegistroAuditoria, ServicioHospitalario, SesionUsuarioSso 
             <div class="search-input-wrap search-input-full">
               <input
                 type="text"
+                aria-label="Buscar en historial de auditoría"
                 [(ngModel)]="busquedaAuditoria"
                 placeholder="🔍 Buscar por colaborador, actor, motivo, día o turno..."
                 class="filter-search-input" />
               @if (busquedaAuditoria) {
-                <button class="btn-clear-search" (click)="busquedaAuditoria = ''">✕</button>
+                <button
+                  type="button"
+                  aria-label="Limpiar búsqueda de auditoría"
+                  class="btn-clear-search"
+                  (click)="busquedaAuditoria = ''">
+                  ✕
+                </button>
               }
             </div>
           </div>
@@ -237,7 +266,7 @@ import { PermutaItem, RegistroAuditoria, ServicioHospitalario, SesionUsuarioSso 
                   </tr>
                 } @empty {
                   <tr>
-                    <td colspan="6" class="text-muted" style="text-align: center; padding: 22px;">
+                    <td colspan="6" class="text-muted dash-empty-row">
                       @if (busquedaAuditoria) {
                         🔍 No se encontraron registros de auditoría que coincidan con "{{ busquedaAuditoria }}".
                       } @else {
@@ -252,6 +281,46 @@ import { PermutaItem, RegistroAuditoria, ServicioHospitalario, SesionUsuarioSso 
         </div>
       </div>
     </div>
+
+    @if (modalRechazoAbierto) {
+      <div class="modal-backdrop" (click)="cerrarModalRechazo()">
+        <div
+          class="modal-box"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="modal-rechazo-title"
+          (click)="$event.stopPropagation()">
+          <div class="modal-header">
+            <h3 id="modal-rechazo-title">
+              {{ modoRechazoModal === 'SUPERVISOR' ? '✕ Rechazar Solicitud de Permuta' : '❌ Declinar Propuesta de Cambio' }}
+            </h3>
+            <button type="button" aria-label="Cerrar diálogo" (click)="cerrarModalRechazo()">✕</button>
+          </div>
+          <div class="modal-body">
+            @if (modoRechazoModal === 'SUPERVISOR') {
+              <div class="dash-modal-field">
+                <label for="motivo-rechazo-permuta">Motivo del rechazo de la solicitud:</label>
+                <textarea
+                  id="motivo-rechazo-permuta"
+                  class="dash-modal-textarea"
+                  [(ngModel)]="motivoRechazoModal"
+                  placeholder="Describa el motivo asistencial u operativo..."></textarea>
+              </div>
+            } @else {
+              <p class="dash-modal-desc">
+                ¿Está seguro de declinar esta propuesta de cambio de turno? Esta acción notificará al compañero solicitante.
+              </p>
+            }
+            <div class="modal-footer-confirm">
+              <button type="button" class="btn-outline" (click)="cerrarModalRechazo()">Cancelar</button>
+              <button type="button" class="btn-danger" (click)="confirmarModalRechazo()">
+                {{ modoRechazoModal === 'SUPERVISOR' ? 'Confirmar Rechazo' : 'Declinar Propuesta' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    }
   `,
 })
 export class DashboardSolicitudesComponent {
@@ -277,6 +346,18 @@ export class DashboardSolicitudesComponent {
   filtroEstadoPermuta: 'TODAS' | 'PENDIENTES' | 'APROBADA' | 'RECHAZADA' = 'TODAS';
   busquedaPermuta = '';
   busquedaAuditoria = '';
+
+  modalRechazoAbierto = false;
+  modoRechazoModal: 'SUPERVISOR' | 'PAR' = 'SUPERVISOR';
+  permutaObjetivoId = '';
+  motivoRechazoModal = 'Rechazada por necesidades asistenciales del servicio';
+
+  @HostListener('document:keydown.escape')
+  onEscapeKey(): void {
+    if (this.modalRechazoAbierto) {
+      this.cerrarModalRechazo();
+    }
+  }
 
   get countTodas(): number {
     return this.permutas.length;
@@ -325,11 +406,19 @@ export class DashboardSolicitudesComponent {
 
   get auditoriasFiltradas(): RegistroAuditoria[] {
     const q = this.busquedaAuditoria.trim().toLowerCase();
-    const porServicio = this.servicioSeleccionadoId
-      ? this.bitacoraAuditoria.filter(
-          (log) => !log.servicioId || log.servicioId === this.servicioSeleccionadoId
-        )
-      : this.bitacoraAuditoria;
+    let base = this.bitacoraAuditoria;
+    if (this.esColaborador) {
+      const miId = this.sesionActual?.empleadoId;
+      const miDoc = this.sesionActual?.documento;
+      base = base.filter(
+        (log) =>
+          (miId && log.empleadoId === miId) ||
+          (miDoc && log.empleadoDocumento === miDoc)
+      );
+    } else if (this.servicioSeleccionadoId) {
+      base = base.filter((log) => log.servicioId === this.servicioSeleccionadoId);
+    }
+    const porServicio = base;
     if (!q) return porServicio;
     return porServicio.filter(
       (log) =>
@@ -348,22 +437,36 @@ export class DashboardSolicitudesComponent {
   }
 
   solicitarRechazoSupervisor(idPermuta: string): void {
-    const motivo = window.prompt(
-      'Indique el motivo del rechazo de la solicitud:',
-      'Rechazada por necesidades asistenciales del servicio'
-    );
-    if (motivo !== null) {
-      this.rechazarPermuta.emit({
-        id: idPermuta,
-        motivo: motivo.trim() || 'Rechazada por la supervisora asistencial',
-      });
-    }
+    this.permutaObjetivoId = idPermuta;
+    this.modoRechazoModal = 'SUPERVISOR';
+    this.motivoRechazoModal = 'Rechazada por necesidades asistenciales del servicio';
+    this.modalRechazoAbierto = true;
   }
 
   solicitarRechazoPar(idPermuta: string): void {
-    const confirmar = window.confirm('¿Está seguro de declinar esta propuesta de cambio de turno?');
-    if (confirmar) {
-      this.rechazarPropuestaPar.emit(idPermuta);
+    this.permutaObjetivoId = idPermuta;
+    this.modoRechazoModal = 'PAR';
+    this.modalRechazoAbierto = true;
+  }
+
+  cerrarModalRechazo(): void {
+    this.modalRechazoAbierto = false;
+    this.permutaObjetivoId = '';
+  }
+
+  confirmarModalRechazo(): void {
+    if (!this.permutaObjetivoId) {
+      this.cerrarModalRechazo();
+      return;
     }
+    if (this.modoRechazoModal === 'SUPERVISOR') {
+      this.rechazarPermuta.emit({
+        id: this.permutaObjetivoId,
+        motivo: this.motivoRechazoModal.trim() || 'Rechazada por la supervisora asistencial',
+      });
+    } else {
+      this.rechazarPropuestaPar.emit(this.permutaObjetivoId);
+    }
+    this.cerrarModalRechazo();
   }
 }

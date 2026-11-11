@@ -1,19 +1,20 @@
-import { Component, EventEmitter, Input, Output, ViewEncapsulation } from '@angular/core';
+import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RegistroAuditoria, SesionUsuarioSso, ServicioHospitalario } from '../../models';
+import { hoyColombiaIso } from '../../shared/liquidacion-horas';
 
 @Component({
   selector: 'app-auditoria-trazabilidad',
   standalone: true,
   imports: [CommonModule, FormsModule],
-  encapsulation: ViewEncapsulation.None,
+  styleUrl: './auditoria-trazabilidad.component.css',
   template: `
     <div class="auditoria-layout">
       <!-- CABECERA INSTITUCIONAL DE AUDITORÍA -->
       <div class="auditoria-header-bar">
         <div class="header-main-info">
-          <div class="header-icon-wrap">🛡️</div>
+          <div class="header-icon-wrap" aria-hidden="true">🛡️</div>
           <div>
             <h2>Auditoría y Trazabilidad Médico-Legal</h2>
             <p class="auditoria-header-desc">
@@ -24,18 +25,21 @@ import { RegistroAuditoria, SesionUsuarioSso, ServicioHospitalario } from '../..
 
         <div class="header-action-buttons">
           <button
+            type="button"
             class="btn-audit-action btn-refresh"
             (click)="onRefrescar()"
             title="Sincronizar bitácora con PostgreSQL">
             🔄 Sincronizar
           </button>
           <button
+            type="button"
             class="btn-audit-action btn-export"
             (click)="exportarCsv()"
             title="Descargar bitácora en formato CSV compatible con Excel">
             📥 Exportar CSV
           </button>
           <button
+            type="button"
             class="btn-audit-action btn-print"
             (click)="imprimirActa()"
             title="Imprimir acta oficial médico-legal">
@@ -52,21 +56,21 @@ import { RegistroAuditoria, SesionUsuarioSso, ServicioHospitalario } from '../..
           <div class="kpi-sub">Eventos en el alcance actual</div>
         </div>
 
-        <div class="kpi-card" style="border-left: 4px solid #0284c7;">
+        <div class="kpi-card audit-kpi-permutas">
           <div class="kpi-label">🔄 Permutas Concertadas</div>
-          <div class="kpi-value" style="color: #0369a1;">{{ countPermutas }}</div>
+          <div class="kpi-value audit-kpi-val-permutas">{{ countPermutas }}</div>
           <div class="kpi-sub">Intercambios 1-a-1 aprobados</div>
         </div>
 
-        <div class="kpi-card" style="border-left: 4px solid #d97706;">
+        <div class="kpi-card audit-kpi-ediciones">
           <div class="kpi-label">✏️ Modificaciones en Publicado</div>
-          <div class="kpi-value" style="color: #b45309;">{{ countEdiciones }}</div>
+          <div class="kpi-value audit-kpi-val-ediciones">{{ countEdiciones }}</div>
           <div class="kpi-sub">Turnos ajustados post-publicación</div>
         </div>
 
-        <div class="kpi-card" style="border-left: 4px solid #7c3aed;">
+        <div class="kpi-card audit-kpi-estados">
           <div class="kpi-label">🔒 Cierres y Publicaciones</div>
-          <div class="kpi-value" style="color: #6d28d9;">{{ countEstados }}</div>
+          <div class="kpi-value audit-kpi-val-estados">{{ countEstados }}</div>
           <div class="kpi-sub">Estados oficiales de cuadrantes</div>
         </div>
       </div>
@@ -76,41 +80,41 @@ import { RegistroAuditoria, SesionUsuarioSso, ServicioHospitalario } from '../..
         <div class="audit-filters-row">
           <!-- Filtro de Categoría / Tipo de Acción -->
           <div class="filter-group-action">
-            <label class="filter-label">Tipo de Evento:</label>
+            <span class="filter-label">Tipo de Evento:</span>
             <div class="filter-pills">
               <button
                 type="button"
                 class="pill-tab"
                 [class.active]="tipoAccionFiltro === 'TODAS'"
-                (click)="tipoAccionFiltro = 'TODAS'">
+                (click)="onCambiarTipoAccion('TODAS')">
                 Todos ({{ bitacoraAuditoria.length }})
               </button>
               <button
                 type="button"
                 class="pill-tab"
                 [class.active]="tipoAccionFiltro === 'PERMUTA'"
-                (click)="tipoAccionFiltro = 'PERMUTA'">
+                (click)="onCambiarTipoAccion('PERMUTA')">
                 🔄 Permutas
               </button>
               <button
                 type="button"
                 class="pill-tab"
                 [class.active]="tipoAccionFiltro === 'EDICION_TURNO'"
-                (click)="tipoAccionFiltro = 'EDICION_TURNO'">
+                (click)="onCambiarTipoAccion('EDICION_TURNO')">
                 ✏️ Turnos Manuales
               </button>
               <button
                 type="button"
                 class="pill-tab"
                 [class.active]="tipoAccionFiltro === 'ESTADO_CUADRANTE'"
-                (click)="tipoAccionFiltro = 'ESTADO_CUADRANTE'">
+                (click)="onCambiarTipoAccion('ESTADO_CUADRANTE')">
                 🔒 Estados Oficiales
               </button>
               <button
                 type="button"
                 class="pill-tab"
                 [class.active]="tipoAccionFiltro === 'ACCION_MASIVA'"
-                (click)="tipoAccionFiltro = 'ACCION_MASIVA'">
+                (click)="onCambiarTipoAccion('ACCION_MASIVA')">
                 ⚡ Ajustes Masivos
               </button>
             </div>
@@ -118,12 +122,17 @@ import { RegistroAuditoria, SesionUsuarioSso, ServicioHospitalario } from '../..
 
           <!-- Filtro por Servicio Asistencial -->
           <div class="filter-control-box">
-            <label class="filter-label">Servicio Hospitalario:</label>
+            <label for="audit-servicio-select" class="filter-label">Servicio Hospitalario:</label>
             <select
+              id="audit-servicio-select"
               [(ngModel)]="servicioFiltro"
               (ngModelChange)="onCambiarServicioFiltro($event)"
               class="filter-select">
-              <option value="TODOS">🏥 Todos los Servicios</option>
+              @if (esAdminTh || servicios.length > 1) {
+                <option value="TODOS">
+                  {{ esAdminTh ? '🏥 Todos los Servicios' : '🏥 Todos mis Servicios Asignados' }}
+                </option>
+              }
               @for (srv of servicios; track srv.id) {
                 <option [value]="srv.id">{{ srv.nombre }} ({{ srv.codigo }})</option>
               }
@@ -132,22 +141,29 @@ import { RegistroAuditoria, SesionUsuarioSso, ServicioHospitalario } from '../..
 
           <!-- Filtro por Rango de Fechas -->
           <div class="filter-control-box filter-dates-box">
-            <label class="filter-label">Rango de Fechas (Desde - Hasta):</label>
+            <label for="audit-fecha-desde" class="filter-label">Rango de Fechas (Desde - Hasta):</label>
             <div class="dates-inputs-wrap">
               <input
+                id="audit-fecha-desde"
                 type="date"
+                aria-label="Fecha inicial de auditoría"
                 [(ngModel)]="fechaDesde"
+                (ngModelChange)="onCambiarRangoFechas()"
                 class="filter-date-input"
                 title="Fecha inicial de auditoría" />
-              <span style="color: #94a3b8;">→</span>
+              <span class="audit-date-arrow" aria-hidden="true">→</span>
               <input
+                id="audit-fecha-hasta"
                 type="date"
+                aria-label="Fecha final de auditoría"
                 [(ngModel)]="fechaHasta"
+                (ngModelChange)="onCambiarRangoFechas()"
                 class="filter-date-input"
                 title="Fecha final de auditoría" />
               @if (fechaDesde || fechaHasta) {
                 <button
                   type="button"
+                  aria-label="Limpiar rango de fechas"
                   class="btn-clear-date"
                   (click)="limpiarRangoFechas()"
                   title="Limpiar rango de fechas">
@@ -161,14 +177,21 @@ import { RegistroAuditoria, SesionUsuarioSso, ServicioHospitalario } from '../..
         <!-- Buscador de Texto en Tiempo Real -->
         <div class="audit-search-row">
           <div class="search-input-wrap search-input-full">
-            <span class="search-icon-decor">🔍</span>
+            <span class="search-icon-decor" aria-hidden="true">🔍</span>
             <input
               type="text"
+              aria-label="Buscar en bitácora de auditoría"
               [(ngModel)]="busquedaTexto"
               placeholder="Buscar colaborador, cédula, supervisor/actor, turno (M8, T8...), o detalle del motivo..."
               class="filter-search-input" />
             @if (busquedaTexto) {
-              <button class="btn-clear-search" (click)="busquedaTexto = ''">✕</button>
+              <button
+                type="button"
+                aria-label="Limpiar búsqueda de auditoría"
+                class="btn-clear-search"
+                (click)="busquedaTexto = ''">
+                ✕
+              </button>
             }
           </div>
           <div class="results-counter">
@@ -179,7 +202,7 @@ import { RegistroAuditoria, SesionUsuarioSso, ServicioHospitalario } from '../..
 
       <!-- TABLA PRINCIPAL DE AUDITORÍA Y TRAZABILIDAD -->
       <div class="panel-card audit-table-card">
-        <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
+        <div class="panel-header audit-table-header">
           <h3>📋 Registro Cronológico de Operaciones</h3>
           <span class="badge-audit-status">🛡️ Trazabilidad Legal Inmutable (PostgreSQL)</span>
         </div>
@@ -188,13 +211,13 @@ import { RegistroAuditoria, SesionUsuarioSso, ServicioHospitalario } from '../..
           <table class="data-table audit-data-table">
             <thead>
               <tr>
-                <th style="width: 155px;">Fecha / Hora</th>
-                <th style="width: 130px;">Tipo de Acción</th>
-                <th style="width: 170px;">Realizado por</th>
-                <th style="width: 200px;">Colaborador Afectado</th>
-                <th style="width: 160px;">Servicio</th>
-                <th style="width: 90px; text-align: center;">Día / Fecha</th>
-                <th style="width: 110px; text-align: center;">Transición</th>
+                <th class="audit-th-fecha">Fecha / Hora</th>
+                <th class="audit-th-tipo">Tipo de Acción</th>
+                <th class="audit-th-actor">Realizado por</th>
+                <th class="audit-th-colab">Colaborador Afectado</th>
+                <th class="audit-th-srv">Servicio</th>
+                <th class="audit-th-dia">Día / Fecha</th>
+                <th class="audit-th-trans">Transición</th>
                 <th>Motivo / Justificación Legal</th>
               </tr>
             </thead>
@@ -221,14 +244,14 @@ import { RegistroAuditoria, SesionUsuarioSso, ServicioHospitalario } from '../..
                   <td>
                     <span class="srv-chip">{{ log.servicioNombre }}</span>
                   </td>
-                  <td style="text-align: center;">
+                  <td class="audit-td-center">
                     @if (log.dia > 0) {
                       <span class="day-chip">Día {{ log.dia }}</span>
                     } @else {
                       <span class="period-chip">Periodo</span>
                     }
                   </td>
-                  <td style="text-align: center;">
+                  <td class="audit-td-center">
                     <div class="shift-transition-box">
                       <span class="mini-shift-badge before">{{ log.turnoAnterior || '—' }}</span>
                       <span class="transition-arrow">→</span>
@@ -244,15 +267,17 @@ import { RegistroAuditoria, SesionUsuarioSso, ServicioHospitalario } from '../..
                   <td colspan="8" class="text-muted empty-audit-box">
                     @if (busquedaTexto || tipoAccionFiltro !== 'TODAS' || servicioFiltro !== 'TODOS' || fechaDesde || fechaHasta) {
                       <div>
-                        <div style="font-size: 28px; margin-bottom: 6px;">🔍</div>
+                        <div class="audit-empty-icon" aria-hidden="true">🔍</div>
                         <strong>No se encontraron registros de auditoría</strong> con los filtros actuales.
-                        <div style="margin-top: 6px;">
-                          <button class="btn-clear-all-filters" (click)="resetearFiltros()">Limpiar todos los filtros</button>
+                        <div class="audit-empty-actions">
+                          <button type="button" class="btn-clear-all-filters" (click)="resetearFiltros()">
+                            Limpiar todos los filtros
+                          </button>
                         </div>
                       </div>
                     } @else {
                       <div>
-                        <div style="font-size: 28px; margin-bottom: 6px;">🛡️</div>
+                        <div class="audit-empty-icon" aria-hidden="true">🛡️</div>
                         <strong>No hay movimientos de auditoría registrados</strong> para el criterio seleccionado.
                       </div>
                     }
@@ -266,7 +291,7 @@ import { RegistroAuditoria, SesionUsuarioSso, ServicioHospitalario } from '../..
     </div>
   `,
 })
-export class AuditoriaTrazabilidadComponent {
+export class AuditoriaTrazabilidadComponent implements OnChanges {
   @Input() bitacoraAuditoria: RegistroAuditoria[] = [];
   @Input() servicios: ServicioHospitalario[] = [];
   @Input() servicioActualId = 'srv-urg';
@@ -274,8 +299,13 @@ export class AuditoriaTrazabilidadComponent {
   @Input() esCoordinador = false;
   @Input() sesionActual: SesionUsuarioSso | null = null;
 
-  @Output() refrescarBitacora = new EventEmitter<string | void>();
-  @Output() filtrarServicio = new EventEmitter<string>();
+  @Output() cambiarFiltrosServidor = new EventEmitter<{
+    servicioId: string;
+    tipoAccion: string;
+    fechaInicio: string;
+    fechaFin: string;
+  }>();
+  @Output() avisoToast = new EventEmitter<string>();
 
   tipoAccionFiltro: 'TODAS' | 'PERMUTA' | 'EDICION_TURNO' | 'ESTADO_CUADRANTE' | 'ACCION_MASIVA' = 'TODAS';
   servicioFiltro = 'TODOS';
@@ -283,28 +313,62 @@ export class AuditoriaTrazabilidadComponent {
   fechaHasta = '';
   busquedaTexto = '';
 
+  ngOnChanges(changes: SimpleChanges): void {
+    if (changes['servicios'] || changes['esAdminTh']) {
+      if (!this.esAdminTh && this.servicios.length === 1) {
+        this.servicioFiltro = this.servicios[0].id;
+      } else if (
+        this.servicioFiltro !== 'TODOS' &&
+        this.servicios.length > 0 &&
+        !this.servicios.some((s) => s.id === this.servicioFiltro)
+      ) {
+        this.servicioFiltro = this.esAdminTh || this.servicios.length > 1 ? 'TODOS' : this.servicios[0].id;
+      }
+    }
+  }
+
+  private emitirFiltros(): void {
+    this.cambiarFiltrosServidor.emit({
+      servicioId: this.servicioFiltro,
+      tipoAccion: this.tipoAccionFiltro,
+      fechaInicio: this.fechaDesde,
+      fechaFin: this.fechaHasta,
+    });
+  }
+
   onRefrescar(): void {
-    this.refrescarBitacora.emit(this.servicioFiltro);
+    this.emitirFiltros();
   }
 
   onCambiarServicioFiltro(srvId: string): void {
     this.servicioFiltro = srvId;
-    this.filtrarServicio.emit(srvId);
-    this.refrescarBitacora.emit(srvId);
+    this.emitirFiltros();
+  }
+
+  onCambiarTipoAccion(
+    tipo: 'TODAS' | 'PERMUTA' | 'EDICION_TURNO' | 'ESTADO_CUADRANTE' | 'ACCION_MASIVA'
+  ): void {
+    this.tipoAccionFiltro = tipo;
+    this.emitirFiltros();
+  }
+
+  onCambiarRangoFechas(): void {
+    this.emitirFiltros();
   }
 
   limpiarRangoFechas(): void {
     this.fechaDesde = '';
     this.fechaHasta = '';
+    this.emitirFiltros();
   }
 
   resetearFiltros(): void {
     this.tipoAccionFiltro = 'TODAS';
-    this.servicioFiltro = 'TODOS';
+    this.servicioFiltro = !this.esAdminTh && this.servicios.length === 1 ? this.servicios[0].id : 'TODOS';
     this.fechaDesde = '';
     this.fechaHasta = '';
     this.busquedaTexto = '';
-    this.refrescarBitacora.emit('TODOS');
+    this.emitirFiltros();
   }
 
   get countPermutas(): number {
@@ -331,8 +395,8 @@ export class AuditoriaTrazabilidadComponent {
     const q = this.busquedaTexto.trim().toLowerCase();
     const srv = this.servicioFiltro;
     const tipo = this.tipoAccionFiltro;
-    const dDesde = this.fechaDesde ? new Date(`${this.fechaDesde}T00:00:00Z`).getTime() : null;
-    const dHasta = this.fechaHasta ? new Date(`${this.fechaHasta}T23:59:59Z`).getTime() : null;
+    const dDesde = this.fechaDesde ? new Date(`${this.fechaDesde}T00:00:00-05:00`).getTime() : null;
+    const dHasta = this.fechaHasta ? new Date(`${this.fechaHasta}T23:59:59.999-05:00`).getTime() : null;
 
     return this.bitacoraAuditoria.filter((log) => {
       // 1. Filtro por Tipo de Acción
@@ -352,10 +416,9 @@ export class AuditoriaTrazabilidadComponent {
       // 3. Filtro por Rango de Fechas
       if (dDesde !== null || dHasta !== null) {
         const tsLog = log.timestampIso ? new Date(log.timestampIso).getTime() : null;
-        if (tsLog !== null) {
-          if (dDesde !== null && tsLog < dDesde) return false;
-          if (dHasta !== null && tsLog > dHasta) return false;
-        }
+        if (tsLog === null || Number.isNaN(tsLog)) return false;
+        if (dDesde !== null && tsLog < dDesde) return false;
+        if (dHasta !== null && tsLog > dHasta) return false;
       }
 
       // 4. Búsqueda por Texto Libre
@@ -425,7 +488,7 @@ export class AuditoriaTrazabilidadComponent {
   exportarCsv(): void {
     const datos = this.auditoriasFiltradas;
     if (datos.length === 0) {
-      window.alert('No hay registros de auditoría para exportar con los filtros seleccionados.');
+      this.avisoToast.emit('ℹ️ No hay registros de auditoría para exportar con los filtros seleccionados.');
       return;
     }
 
@@ -453,7 +516,7 @@ export class AuditoriaTrazabilidadComponent {
     };
 
     const lineas: string[] = [];
-    lineas.push(escapeCsv('HOSPITAL RAFAEL URIBE URIBE — RAFA TURNOS HOSPITALARIOS'));
+    lineas.push(escapeCsv('E.S.E. HOSPITAL SAN RAFAEL DE YOLOMBÓ — RAFA TURNOS HOSPITALARIOS'));
     lineas.push(escapeCsv('BITÁCORA OFICIAL DE AUDITORÍA Y TRAZABILIDAD MÉDICO-LEGAL'));
     lineas.push(escapeCsv(`Fecha de Emisión: ${fechaGen} | Generado por: ${usuarioGen} | Servicio: ${srvTexto}`));
     lineas.push(''); // Línea en blanco
@@ -481,7 +544,7 @@ export class AuditoriaTrazabilidadComponent {
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    const timestampArchivo = new Date().toISOString().slice(0, 10);
+    const timestampArchivo = hoyColombiaIso();
     link.setAttribute('href', url);
     link.setAttribute('download', `Auditoria_Turnos_${timestampArchivo}.csv`);
     document.body.appendChild(link);
@@ -491,6 +554,12 @@ export class AuditoriaTrazabilidadComponent {
   }
 
   imprimirActa(): void {
-    window.print();
+    document.body.classList.add('printing-audit');
+    const cleanup = () => {
+      document.body.classList.remove('printing-audit');
+    };
+    window.addEventListener('afterprint', cleanup, { once: true });
+    setTimeout(() => window.print(), 20);
+    setTimeout(cleanup, 1500);
   }
 }

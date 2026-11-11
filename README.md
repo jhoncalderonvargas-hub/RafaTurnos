@@ -1,13 +1,14 @@
 # Rafa Turnos 🏥
 
-Sistema web integral para la **programación, gestión y optimización de turnos laborales hospitalarios** organizados directamente por **Servicios Asistenciales** (Urgencias, UCI, Cirugía, Hospitalización, Laboratorio, etc. — sin dependencias, procesos ni subprocesos), tomando como referente operativo a **Thurni** y adaptado a la **normativa laboral asistencial colombiana** (Ley 2101 de 2021 y Código Sustantivo del Trabajo).
+Sistema web integral para la **programación, gestión y optimización de turnos laborales hospitalarios** organizados por **Macroprocesos del Mapa de Procesos Hospitalario**, **Servicios Asistenciales** (Urgencias, UCI, Cirugía, Hospitalización, Laboratorio, Farmacia, etc.) y **Servicios Hermanos** con rotación de personal, adaptado a la **normativa laboral colombiana** (Ley 2101 de 2021, Ley 2466 de 2025 y Código Sustantivo del Trabajo).
 
 ---
 
 ## 🛠️ Stack Tecnológico
-- **Backend**: [NestJS](https://nestjs.com/) (TypeScript, Arquitectura Modular, Prisma ORM, Swagger OpenAPI).
-- **Frontend**: [Angular](https://angular.dev/) (TypeScript, Standalone Components, Signals, CDK Virtual Scroll).
-- **Base de Datos**: [PostgreSQL](https://www.postgresql.org/) (Modelado relacional estricto, transacciones ACID).
+- **Backend**: [NestJS 10](https://nestjs.com/) (TypeScript, Arquitectura Modular, Prisma ORM 5, Jest + Supertest).
+- **Frontend**: [Angular 18](https://angular.dev/) (TypeScript, Standalone Components, Signals modularizados por dominio, Jasmine + Karma).
+- **Base de Datos**: [PostgreSQL 16](https://www.postgresql.org/) (Modelado relacional estricto, transacciones ACID y migraciones versionadas en `backend/prisma/migrations`).
+- **SSO & Simulador**: Integración satélite JWT HMAC-SHA256 con la Intranet Hospitalaria (incluye `simulador-intranet/` para desarrollo y pruebas locales en `:4300`).
 
 ---
 
@@ -38,17 +39,38 @@ Toda la fase de análisis de requisitos, reglas de negocio y arquitectura se enc
 
 ---
 
-## 🧪 Ejecutar en modo demostración
+## 🚀 Ejecución Local y Flujo Completo (PostgreSQL + Intranet SSO)
 
-El frontend incluye datos ficticios para probar el dashboard, el planificador, los servicios, los empleados y el registro local de novedades. No necesita PostgreSQL ni conexión con la Intranet. Los cambios realizados durante la demostración no se guardan permanentemente.
+Rafa Turnos opera como aplicación **satélite** conectada a PostgreSQL 16 y autenticada vía **SSO JWT** desde la Intranet Hospitalaria (`simulador-intranet/` en entorno local):
 
+1. **Base de datos y migraciones** (en una terminal desde la raíz):
 ```powershell
-cd frontend
+docker compose up -d db
+cd backend
 npm install
-npm start
+npx prisma migrate deploy
 ```
+> ⚠️ **Advertencia sobre `npm run prisma:seed`**: El script [`backend/prisma/seed.ts`](./backend/prisma/seed.ts) ejecuta `deleteMany()` sobre **todas las 16 tablas** de PostgreSQL antes de insertar los datos iniciales. Úsalo **únicamente** en bases vacías o entornos de desarrollo/pruebas; **nunca** en producción ni sobre datos reales.
 
-Abre `http://localhost:4200`. Las exportaciones de demostración se descargan como archivos CSV.
+2. **Arrancar Simulador Intranet (`:4300`), Backend (`:3000`) y Frontend (`:4200`)**:
+   - **En Windows (automático)**: ejecuta [`iniciar.bat`](./iniciar.bat) (o [`iniciar_silencioso.vbs`](./iniciar_silencioso.vbs)) y detén los servicios con [`detener.bat`](./detener.bat).
+   - **Manual en 3 terminales**:
+     - `node simulador-intranet/server.js` → `http://localhost:4300`
+     - `cd backend && npm run start:dev` → `http://localhost:3000/api/v1/health`
+     - `cd frontend && npm install && npm start` → `http://localhost:4200`
+
+Abre **[http://localhost:4300](http://localhost:4300)** en el navegador, selecciona el perfil SSO (`Talento Humano`, `Coordinador` o `Colaborador`) e ingresa automáticamente al aplicativo.
+
+---
+
+## 🧪 Pruebas Automatizadas y Validación
+
+| Suite | Alcance | Comando |
+|---|---|---|
+| **Motor normativo CST / Ley 2101 / Ley 2466** | 45 pruebas puras sobre [`shared/liquidacion-horas.ts`](./shared/liquidacion-horas.ts) | `node scripts/verificar-liquidacion.mjs` |
+| **Backend (Jest + Supertest)** | Guard SSO/RBAC, Cuadrantes, Permutas, iCal, Liquidación, Servicios y Festivos + verificación `sync:check` | `cd backend && npm run sync:check && npm test` |
+| **Frontend (Jasmine + Karma ChromeHeadless)** | Helpers de cálculo, Signal Stores (`NotificacionStore`, `CatalogosSsoStore`, `CuadranteStore`, `PermutasAuditoriaStore`, `PortalReportesStore`) y `AutocompletadoService` | `cd frontend && npm run sync:check && npm test` |
+| **E2E Ecosistema Completo (Idempotente)** | Planificación, Auditoría, Permutas, Feed `.ics` iCal y Cierre/Reapertura Nómina contra PostgreSQL + Intranet `:4300` + Backend `:3000` (limpia artefactos `2026-12` al terminar) | `node backend/test-e2e-ecosistema.js` |
 
 ---
 

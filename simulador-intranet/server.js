@@ -18,7 +18,22 @@ const path = require('path');
 
 const PORT = 4300;
 const RAFA_TURNOS_FRONTEND_URL = 'http://localhost:4200';
-const RAFA_TURNOS_BACKEND_URL = 'http://localhost:3000';
+const CENSO_RRHH_PATH = path.join(__dirname, 'censo-rrhh.json');
+
+function leerCensoRrhhLocal() {
+  try {
+    const raw = fs.readFileSync(CENSO_RRHH_PATH, 'utf8');
+    const data = JSON.parse(raw);
+    return {
+      macroprocesos: Array.isArray(data.macroprocesos) ? data.macroprocesos : [],
+      empleados: Array.isArray(data.empleados) ? data.empleados : [],
+      novedades: Array.isArray(data.novedades) ? data.novedades : [],
+    };
+  } catch (err) {
+    console.error('Error leyendo censo-rrhh.json:', err.message);
+    return { macroprocesos: [], empleados: [], novedades: [] };
+  }
+}
 
 function leerSecretoCompartido() {
   try {
@@ -194,16 +209,16 @@ const HTML_PORTAL = `<!DOCTYPE html>
     </div>
 
     <div class="panel">
-      <h2>🎯 Lanzamiento Personalizado (Selecciona cualquier empleado real de PostgreSQL)</h2>
+      <h2>🎯 Lanzamiento Personalizado (Censo Maestro RRHH por Cargo Profesional)</h2>
       <div class="form-grid">
         <div>
-          <label>Filtrar por Servicio:</label>
-          <select id="selServicio" onchange="filtrarEmpleados()">
-            <option value="TODOS">Todos los servicios</option>
+          <label>Filtrar por Cargo Profesional:</label>
+          <select id="selCargo" onchange="filtrarEmpleados()">
+            <option value="TODOS">Todos los cargos</option>
           </select>
         </div>
         <div>
-          <label>Colaborador (Base de Datos PostgreSQL):</label>
+          <label>Colaborador (Plantilla Maestra RRHH Intranet):</label>
           <select id="selEmpleado"></select>
         </div>
         <div>
@@ -221,54 +236,49 @@ const HTML_PORTAL = `<!DOCTYPE html>
         </div>
       </div>
       <div id="tokenBox" class="token-preview">
-        Cargando plantilla desde PostgreSQL (http://localhost:3000/api/v1/servicios-admin/empleados)...
+        Cargando Censo Maestro RRHH propio de la Intranet (/api/intranet/empleados)...
       </div>
     </div>
   </div>
 
   <script>
     let empleados = [];
-    let servicios = [];
 
     async function cargarDatos() {
       try {
-        const [resSrv, resEmp] = await Promise.all([
-          fetch('${RAFA_TURNOS_BACKEND_URL}/api/v1/servicios-admin'),
-          fetch('${RAFA_TURNOS_BACKEND_URL}/api/v1/servicios-admin/empleados')
-        ]);
-        servicios = await resSrv.json();
+        const resEmp = await fetch('/api/intranet/empleados');
         empleados = await resEmp.json();
 
-        const selSrv = document.getElementById('selServicio');
-        for (const s of servicios) {
+        const cargosUnicos = Array.from(new Set(empleados.map(e => e.cargoNombre).filter(Boolean))).sort();
+        const selCargo = document.getElementById('selCargo');
+        for (const c of cargosUnicos) {
           const opt = document.createElement('option');
-          opt.value = s.id;
-          opt.textContent = s.nombre + ' (' + s.codigo + ')';
-          selSrv.appendChild(opt);
+          opt.value = c;
+          opt.textContent = c;
+          selCargo.appendChild(opt);
         }
         filtrarEmpleados();
         document.getElementById('tokenBox').textContent =
-          '✅ ' + empleados.length + ' colaboradores cargados desde PostgreSQL. Elige un perfil para generar el token SSO.';
+          '✅ ' + empleados.length + ' colaboradores y ' + cargosUnicos.length + ' cargos profesionales cargados desde el Censo Maestro RRHH de la Intranet.';
       } catch (e) {
         document.getElementById('tokenBox').textContent =
-          '⚠️ No se pudo conectar con http://localhost:3000. Asegúrate de que el backend de Rafa Turnos esté encendido.';
+          '⚠️ Error cargando el Censo Maestro RRHH local de la Intranet.';
       }
     }
 
     function filtrarEmpleados() {
-      const srvId = document.getElementById('selServicio').value;
+      const cargo = document.getElementById('selCargo').value;
       const selEmp = document.getElementById('selEmpleado');
       selEmp.innerHTML = '';
-      const lista = srvId === 'TODOS'
+      const lista = cargo === 'TODOS'
         ? empleados
-        : empleados.filter(e => e.servicioBaseId === srvId);
+        : empleados.filter(e => e.cargoNombre === cargo);
 
       for (const e of lista) {
-        const cat = e.categoria ? (e.categoria.nombre || e.categoria) : '';
-        const srv = e.servicioBase ? e.servicioBase.codigo : '';
+        const cat = e.cargoNombre || '';
         const opt = document.createElement('option');
         opt.value = e.documento;
-        opt.textContent = e.nombre + ' — ' + cat + ' [' + srv + '] (C.C. ' + e.documento + ')';
+        opt.textContent = e.nombre + ' — ' + cat + ' (C.C. ' + e.documento + ')';
         selEmp.appendChild(opt);
       }
     }
@@ -301,9 +311,9 @@ const HTML_PORTAL = `<!DOCTYPE html>
       if (!empleados.length) return;
       let candidato = empleados[0];
       if (rol === 'COORDINADOR') {
-        candidato = empleados.find(e => e.servicioBaseId === 'srv-urg' && (e.categoria?.nombre || '').includes('Jefe')) || empleados[0];
+        candidato = empleados.find(e => (e.cargoNombre || '').includes('Jefe')) || empleados[0];
       } else if (rol === 'COLABORADOR') {
-        candidato = empleados.find(e => e.servicioBaseId === 'srv-urg' && (e.categoria?.nombre || '').includes('Auxiliar')) || empleados[1] || empleados[0];
+        candidato = empleados.find(e => (e.cargoNombre || '').includes('Auxiliar')) || empleados[1] || empleados[0];
       }
       emitirYRedirigir(candidato.documento, rol);
     }
@@ -324,6 +334,18 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.method === 'GET' && req.url.startsWith('/api/intranet/macroprocesos')) {
+    res.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    });
+    const { macroprocesos } = leerCensoRrhhLocal();
+    res.end(JSON.stringify(macroprocesos, null, 2));
+    return;
+  }
+
   if (req.method === 'GET' && req.url.startsWith('/api/intranet/empleados')) {
     res.writeHead(200, {
       'Content-Type': 'application/json; charset=utf-8',
@@ -331,53 +353,8 @@ const server = http.createServer((req, res) => {
       'Access-Control-Allow-Methods': 'GET, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     });
-
-    // Obtener censo actual desde PostgreSQL y enriquecer con novedades de contratación
-    fetch(`${RAFA_TURNOS_BACKEND_URL}/api/v1/servicios-admin/empleados`)
-      .then((r) => r.json())
-      .then((baseEmpleados) => {
-        const censo = Array.isArray(baseEmpleados)
-          ? baseEmpleados.map((e) => ({
-              documento: e.documento,
-              nombre: e.nombre,
-              correo: e.correo,
-              cargoNombre: e.categoria?.nombre || 'Auxiliar de Enfermería',
-              servicioCodigo: e.servicioBase?.codigo || 'URG',
-              horasContratoMes: e.horasContratoMes || 168,
-              estadoContrato: 'ACTIVO',
-            }))
-          : [];
-
-        // Nueva contratación reportada por Gestión Humana (para verificar auto-creación)
-        if (!censo.some((x) => x.documento === '1099887766')) {
-          censo.push({
-            documento: '1099887766',
-            nombre: 'Dra. Valentina Castro Mendoza',
-            correo: 'valentina.castro@hospital.gov.co',
-            cargoNombre: 'Médico General',
-            servicioCodigo: 'URG',
-            horasContratoMes: 168,
-            estadoContrato: 'ACTIVO',
-          });
-        }
-        if (!censo.some((x) => x.documento === '1037645123')) {
-          censo.push({
-            documento: '1037645123',
-            nombre: 'Tomas grajales frias',
-            correo: 'tomas.grajales@hospital.gov.co',
-            cargoNombre: 'Tecnólogo(a) en Imágenes Diagnósticas',
-            servicioCodigo: 'TOM',
-            horasContratoMes: 168,
-            estadoContrato: 'ACTIVO',
-           });
-        }
-
-        res.end(JSON.stringify(censo, null, 2));
-      })
-      .catch((err) => {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: err.message }));
-      });
+    const { empleados } = leerCensoRrhhLocal();
+    res.end(JSON.stringify(empleados, null, 2));
     return;
   }
 
@@ -388,48 +365,7 @@ const server = http.createServer((req, res) => {
       'Access-Control-Allow-Methods': 'GET, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     });
-    const novedades = [
-      {
-        empleadoDocumento: '1010001016',
-        empleadoNombre: 'Mónica Ruiz Quintero',
-        cargo: 'Auxiliar de Enfermería',
-        servicioCodigo: 'URG',
-        tipoNovedad: 'VAC',
-        fechaInicio: '2026-11-10',
-        fechaFin: '2026-11-18',
-        diasHabiles: 9,
-        estado: 'APROBADA',
-        resolucion: 'RES-GH-2026-849',
-        observaciones: 'Vacaciones reglamentarias aprobadas por Gestión Humana'
-      },
-      {
-        empleadoDocumento: '1010001001',
-        empleadoNombre: 'Dr. Pablo Franco Duque',
-        cargo: 'Médico General',
-        servicioCodigo: 'URG',
-        tipoNovedad: 'INC',
-        fechaInicio: '2026-11-03',
-        fechaFin: '2026-11-05',
-        diasHabiles: 3,
-        estado: 'APROBADA',
-        codigoCie10: 'J06.9',
-        entidad: 'EPS Sanitas',
-        observaciones: 'Incapacidad médica por enfermedad respiratoria'
-      },
-      {
-        empleadoDocumento: '1010001005',
-        empleadoNombre: 'Enf. Iván Pineda Mora',
-        cargo: 'Enfermero(a) Jefe',
-        servicioCodigo: 'URG',
-        tipoNovedad: 'LIC',
-        fechaInicio: '2026-11-24',
-        fechaFin: '2026-11-26',
-        diasHabiles: 3,
-        estado: 'APROBADA',
-        resolucion: 'LIC-CAL-2026-112',
-        observaciones: 'Licencia remunerada por calamidad / luto familiar'
-      }
-    ];
+    const { novedades } = leerCensoRrhhLocal();
     res.end(JSON.stringify(novedades, null, 2));
     return;
   }

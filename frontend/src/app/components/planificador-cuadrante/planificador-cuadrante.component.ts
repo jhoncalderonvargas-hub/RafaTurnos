@@ -1,11 +1,20 @@
-import { Component, ElementRef, EventEmitter, Input, OnDestroy, Output, ViewChild, ViewEncapsulation } from '@angular/core';
+import { Component, ElementRef, EventEmitter, Input, OnDestroy, Output, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import {
+  esCodigoExoneracionContrato,
+  formatearPorcentaje,
+  hoyColombiaIso,
+  obtenerHorasAmortizacionTurno,
+  resumenNormativoPeriodo,
+  SEMAFORO_BANCO_HORAS,
+} from '../../shared/liquidacion-horas';
 import { FormsModule } from '@angular/forms';
 import {
   CeldaAsignacion,
   DiaColumna,
   EmpleadoHospital,
   InfraccionNormativa,
+  MacroprocesoInfo,
   ReglaCargoServicio,
   ServicioHospitalario,
   TipoTurnoConfig,
@@ -15,29 +24,80 @@ import {
   selector: 'app-planificador-cuadrante',
   standalone: true,
   imports: [CommonModule, FormsModule],
-  encapsulation: ViewEncapsulation.None,
+  styleUrl: './planificador-cuadrante.component.css',
   template: `
     <section class="toolbar-controls toolbar-eje3">
       <!-- BLOQUE 1: CONTEXTO Y ESTADO CLÍNICO (IZQUIERDA) -->
       <div class="toolbar-zone toolbar-zone-context">
-        <div class="control-item" title="Servicio hospitalario activo">
-          <select class="select-context select-servicio" [ngModel]="servicioSeleccionadoId" (ngModelChange)="cambiarServicio.emit($event)">
-            @for (srv of serviciosVisibles; track srv.id) {
-              <option [value]="srv.id">{{ srv.nombre }}</option>
+        <div class="control-item" title="Servicio hospitalario activo (agrupado por Macroproceso del Mapa de Procesos)">
+          <select
+            class="select-context select-servicio"
+            aria-label="Seleccionar servicio hospitalario"
+            [ngModel]="servicioSeleccionadoId"
+            (ngModelChange)="cambiarServicio.emit($event)">
+            @for (grupo of serviciosAgrupadosPorMacroproceso; track grupo.macro.codigo) {
+              <optgroup [label]="grupo.macro.icono + ' ' + grupo.macro.nombreCorto">
+                @for (srv of grupo.servicios; track srv.id) {
+                  <option [value]="srv.id">{{ srv.nombre }} ({{ srv.codigo }})</option>
+                }
+              </optgroup>
             }
           </select>
         </div>
 
-        <div class="control-item" title="Periodo mensual de planificación">
-          <select class="select-context select-mes" [ngModel]="mesSeleccionado" (ngModelChange)="cambiarMes.emit($event)">
+        <div class="month-stepper month-stepper-toolbar" title="Navegar entre meses y años">
+          <button
+            type="button"
+            class="btn-nav-month"
+            aria-label="Ir al mes anterior"
+            (click)="navegarMes.emit(-1)"
+            title="Ir al mes anterior">
+            ◀
+          </button>
+          <select
+            class="select-context select-mes"
+            aria-label="Mes de planificación"
+            [ngModel]="mesSeleccionado"
+            (ngModelChange)="cambiarMes.emit(+$event)">
             @for (m of mesesDisponibles; track m.valor) {
-              <option [value]="m.valor">{{ m.nombre }} {{ anioSeleccionado }}</option>
+              <option [value]="m.valor">{{ m.nombre }}</option>
             }
           </select>
+          <select
+            class="select-context select-year"
+            aria-label="Año de planificación"
+            [ngModel]="anioSeleccionado"
+            (ngModelChange)="cambiarAnio.emit(+$event)"
+            title="Año de planificación">
+            @for (a of aniosDisponibles; track a) {
+              <option [value]="a">{{ a }}</option>
+            }
+          </select>
+          <button
+            type="button"
+            class="btn-nav-month"
+            aria-label="Ir al mes siguiente"
+            (click)="navegarMes.emit(1)"
+            title="Ir al mes siguiente">
+            ▶
+          </button>
+          <button
+            type="button"
+            class="btn-hoy-period"
+            [class.is-current]="esPeriodoActual"
+            [disabled]="esPeriodoActual"
+            (click)="irAMesActual.emit()"
+            [title]="esPeriodoActual ? 'Ya estás viendo el mes actual' : 'Volver al mes y año actual'">
+            {{ esPeriodoActual ? '● Hoy' : 'Hoy' }}
+          </button>
         </div>
 
         <div class="control-item" title="Filtrar cuadrante por cargo / especialidad">
-          <select class="select-context select-cargo" [ngModel]="filtroCategoriaActiva" (ngModelChange)="cambiarFiltroCategoria.emit($event)">
+          <select
+            class="select-context select-cargo"
+            aria-label="Filtrar cuadrante por cargo"
+            [ngModel]="filtroCategoriaActiva"
+            (ngModelChange)="cambiarFiltroCategoria.emit($event)">
             <option value="TODAS">Todos los cargos ({{ categoriasEnServicioActual.length }})</option>
             @for (cat of categoriasEnServicioActual; track cat) {
               <option [value]="cat">{{ cat }}</option>
@@ -69,6 +129,8 @@ import {
         <!-- Clúster Deshacer / Rehacer -->
         <div class="undo-redo-cluster">
           <button
+            type="button"
+            aria-label="Deshacer último cambio"
             class="btn-undo-action"
             (click)="deshacerUltimaAccion.emit()"
             [disabled]="pilaDeshacer.length === 0"
@@ -76,6 +138,8 @@ import {
             ↩️
           </button>
           <button
+            type="button"
+            aria-label="Rehacer cambio revertido"
             class="btn-undo-action"
             (click)="rehacerUltimaAccion.emit()"
             [disabled]="pilaRehacer.length === 0"
@@ -85,15 +149,27 @@ import {
         </div>
 
         <!-- Asistente y Acciones de Cuadrante -->
-        <button class="btn-tool btn-tool-wizard" (click)="ejecutarAutocompletarHuecos.emit()" title="Autocompletar turnos faltantes respetando descansos y normativa colombiana">
+        <button
+          type="button"
+          class="btn-tool btn-tool-wizard"
+          (click)="ejecutarAutocompletarHuecos.emit()"
+          title="Autocompletar turnos faltantes respetando descansos y normativa colombiana">
           ✨ Autocompletar
         </button>
 
-        <button class="btn-tool btn-tool-apoyo" (click)="abrirModalRotacion.emit()" title="Solicitar o traer personal de apoyo homólogo de otros servicios">
+        <button
+          type="button"
+          class="btn-tool btn-tool-apoyo"
+          (click)="abrirModalRotacion.emit()"
+          title="Solicitar o traer personal de apoyo homólogo de otros servicios">
           🔄 Apoyo
         </button>
 
-        <button class="btn-tool btn-tool-limpiar" (click)="limpiarCuadranteCompleto.emit()" title="Borra todos los turnos para armar a mano (conserva VAC/INC)">
+        <button
+          type="button"
+          class="btn-tool btn-tool-limpiar"
+          (click)="limpiarCuadranteCompleto.emit()"
+          title="Borra todos los turnos para armar a mano (conserva VAC/INC)">
           🧹 Limpiar
         </button>
 
@@ -114,6 +190,8 @@ import {
           <span class="live-dot"></span>
           <span class="intranet-label">Intranet</span>
           <button
+            type="button"
+            aria-label="Sincronizar novedades con Intranet"
             class="btn-icon-refresh"
             (click)="sincronizarNovedadesIntranet.emit()"
             [disabled]="sincronizandoNovedades"
@@ -122,14 +200,18 @@ import {
           </button>
         </div>
 
-        <button class="btn-tool btn-tool-excel" (click)="exportarExcelNomina.emit()" title="Exportar pre-nómina y desglose de horas a Microsoft Excel (.xlsx)">
+        <button
+          type="button"
+          class="btn-tool btn-tool-excel"
+          (click)="exportarExcelNomina.emit()"
+          title="Exportar pre-nómina y desglose de horas a Excel / CSV (.csv)">
           📊 Excel
         </button>
 
         @if (!esCoordinador && estadoCuadrante === 'PUBLICADO') {
           <button
-            class="btn-tool"
-            style="border-color: #fcd34d; background: #fffbeb; color: #92400e; font-weight: 700;"
+            type="button"
+            class="btn-tool btn-tool-revert"
             (click)="revertirABorrador.emit()"
             title="Devolver este cuadrante a estado Borrador (Exclusivo Talento Humano)">
             ↩️ Borrador
@@ -137,6 +219,7 @@ import {
         }
 
         <button
+          type="button"
           class="btn-cta-primary"
           [attr.data-estado]="estadoCuadrante"
           (click)="cambiarEstadoCuadrante.emit()"
@@ -156,37 +239,46 @@ import {
     </section>
 
     <!-- PALETA DE TURNOS (1 SOLA FILA COMPACTA) -->
-    <section class="thurni-palette-bar">
+    <section class="thurni-palette-bar" aria-label="Paleta de turnos">
       <div class="palette-clusters-wrapper">
         <!-- BLOQUE 1: HERRAMIENTAS (PUNTERO Y BORRADOR) -->
         <div class="palette-cluster cluster-tools">
-          <span class="cluster-tag" title="Herramientas de navegación y limpieza">🛠️</span>
-          <div
+          <span class="cluster-tag" title="Herramientas de navegación y limpieza" aria-hidden="true">🛠️</span>
+          <button
+            type="button"
             class="shift-chip pointer-chip"
+            aria-label="Herramienta Puntero: Navegar e inspeccionar celdas"
+            [attr.aria-pressed]="turnoPincelActivo === 'POINTER'"
             [class.selected]="turnoPincelActivo === 'POINTER'"
             (click)="seleccionarPincel.emit('POINTER')"
             title="Puntero: Navegar e inspeccionar celdas (Usa teclado 1-8, M, T, N, etc.)">
             <span class="chip-code">👆</span>
-          </div>
+          </button>
 
-          <div
+          <button
+            type="button"
             class="shift-chip eraser-chip"
+            aria-label="Herramienta Borrador: Limpiar turno asignado"
+            [attr.aria-pressed]="turnoPincelActivo === ''"
             [class.selected]="turnoPincelActivo === ''"
             draggable="true"
             (dragstart)="onDragStartPaleta('', $event)"
             (click)="seleccionarPincel.emit('')"
             title="Borrador: Limpiar turno asignado (Tecla Supr / Delete)">
             <span class="chip-code">🧽</span>
-          </div>
+          </button>
         </div>
 
         <!-- BLOQUE 2: OPERATIVOS DIURNOS -->
         @if (turnosDiurnos.length > 0) {
           <div class="palette-cluster cluster-diurnos">
-            <span class="cluster-tag tag-diurno" title="Familia Diurna (Horas ordinarias solares)">☀️</span>
+            <span class="cluster-tag tag-diurno" title="Familia Diurna (Horas ordinarias solares)" aria-hidden="true">☀️</span>
             @for (t of turnosDiurnos; track t.codigo) {
-              <div
+              <button
+                type="button"
                 class="shift-chip"
+                [attr.aria-pressed]="turnoPincelActivo === t.codigo"
+                [attr.aria-label]="'Turno ' + t.codigo + ': ' + t.nombre"
                 [class.selected]="turnoPincelActivo === t.codigo"
                 [style.background-color]="t.bgHex"
                 [style.color]="t.textHex"
@@ -196,7 +288,7 @@ import {
                 (click)="seleccionarPincel.emit(t.codigo)"
                 [title]="construirTooltipPaleta(t)">
                 <span class="chip-code">{{ t.codigo }}</span>
-              </div>
+              </button>
             }
           </div>
         }
@@ -204,10 +296,13 @@ import {
         <!-- BLOQUE 3: GUARDIAS Y NOCHES -->
         @if (turnosGuardiasNoches.length > 0) {
           <div class="palette-cluster cluster-guardias">
-            <span class="cluster-tag tag-guardia" title="Familia Guardias & Noches (Recargo nocturno y dominical)">🌙</span>
+            <span class="cluster-tag tag-guardia" title="Familia Guardias & Noches (Recargo nocturno y dominical)" aria-hidden="true">🌙</span>
             @for (t of turnosGuardiasNoches; track t.codigo) {
-              <div
+              <button
+                type="button"
                 class="shift-chip chip-heavy"
+                [attr.aria-pressed]="turnoPincelActivo === t.codigo"
+                [attr.aria-label]="'Turno ' + t.codigo + ': ' + t.nombre"
                 [class.selected]="turnoPincelActivo === t.codigo"
                 [class.chip-24]="t.codigo === 'G24' || t.horasOrdinarias >= 24"
                 [style.background-color]="t.bgHex"
@@ -218,7 +313,7 @@ import {
                 (click)="seleccionarPincel.emit(t.codigo)"
                 [title]="construirTooltipPaleta(t)">
                 <span class="chip-code">{{ t.codigo }}</span>
-              </div>
+              </button>
             }
           </div>
         }
@@ -226,10 +321,13 @@ import {
         <!-- BLOQUE 4: DESCANSOS Y BANCO -->
         @if (turnosDescansos.length > 0) {
           <div class="palette-cluster cluster-descansos">
-            <span class="cluster-tag tag-descanso" title="Familia Descanso Legal y Banco de Horas">☕</span>
+            <span class="cluster-tag tag-descanso" title="Familia Descanso Legal y Banco de Horas" aria-hidden="true">☕</span>
             @for (t of turnosDescansos; track t.codigo) {
-              <div
+              <button
+                type="button"
                 class="shift-chip"
+                [attr.aria-pressed]="turnoPincelActivo === t.codigo"
+                [attr.aria-label]="'Turno ' + t.codigo + ': ' + t.nombre"
                 [class.selected]="turnoPincelActivo === t.codigo"
                 [style.background-color]="t.bgHex"
                 [style.color]="t.textHex"
@@ -239,7 +337,7 @@ import {
                 (click)="seleccionarPincel.emit(t.codigo)"
                 [title]="construirTooltipPaleta(t)">
                 <span class="chip-code">{{ t.codigo }}</span>
-              </div>
+              </button>
             }
           </div>
         }
@@ -247,10 +345,13 @@ import {
         <!-- BLOQUE 5: AUSENCIAS OFICIALES INTRANET -->
         @if (turnosAusencias.length > 0) {
           <div class="palette-cluster cluster-ausencias">
-            <span class="cluster-tag tag-ausencia" title="Novedades oficiales bloqueadas por Intranet">🔒</span>
+            <span class="cluster-tag tag-ausencia" title="Novedades oficiales bloqueadas por Intranet" aria-hidden="true">🔒</span>
             @for (t of turnosAusencias; track t.codigo) {
-              <div
+              <button
+                type="button"
                 class="shift-chip"
+                [attr.aria-pressed]="turnoPincelActivo === t.codigo"
+                [attr.aria-label]="'Novedad ' + t.codigo + ': ' + t.nombre"
                 [class.selected]="turnoPincelActivo === t.codigo"
                 [style.background-color]="t.bgHex"
                 [style.color]="t.textHex"
@@ -260,7 +361,7 @@ import {
                 (click)="seleccionarPincel.emit(t.codigo)"
                 [title]="construirTooltipPaleta(t)">
                 <span class="chip-code">{{ t.codigo }}</span>
-              </div>
+              </button>
             }
           </div>
         }
@@ -297,7 +398,8 @@ import {
                 [class.is-saturday]="d.esSabado"
                 [class.is-sunday]="d.esDomingo"
                 [class.is-holiday]="!!d.festivo"
-                [title]="d.festivo ? '🇨🇴 FESTIVO: ' + d.festivo.nombre + ' (+75% Recargo)' : (d.esDomingo ? 'Domingo (+75% Recargo)' : (d.esSabado ? 'Sábado' : 'Día Ordinario'))">
+                [class.is-today]="!!d.esHoy"
+                [title]="(d.esHoy ? '📍 HOY • ' : '') + (d.festivo ? '🇨🇴 FESTIVO: ' + d.festivo.nombre + ' (+' + pct(normativa.recargos.dominical) + ' Recargo)' : (d.esDomingo ? 'Domingo (+' + pct(normativa.recargos.dominical) + ' Recargo)' : (d.esSabado ? 'Sábado' : 'Día Ordinario')))">
                 <div class="day-number">{{ d.dia }}</div>
                 <div class="day-letter">{{ d.letraDia }}</div>
                 @if (d.festivo) {
@@ -305,11 +407,11 @@ import {
                 }
               </th>
             }
-            <th class="col-summary" title="Horas Reales Programadas vs Contrato Mes (Ley 2101)">Horas<br>Mes</th>
-            <th class="col-summary col-recargo" title="Horas Ordinarias Diurnas (06:00-19:00 L-S)">HOD</th>
-            <th class="col-summary col-recargo" title="Horas Ordinarias Nocturnas (19:00-06:00 L-S) Recargo 35%">HON<br>35%</th>
-            <th class="col-summary col-recargo" title="Horas Dominicales/Festivas Diurnas (06:00-19:00) Recargo 75%">HDFD<br>75%</th>
-            <th class="col-summary col-recargo" title="Horas Dominicales/Festivas Nocturnas (19:00-06:00) Recargo 110%">HDFN<br>110%</th>
+            <th class="col-summary" [title]="'Horas Reales Programadas vs Contrato Mes (Jornada máxima legal vigente: ' + normativa.jornadaSemanalHoras + 'h/sem — Ley 2101/2021)'">Horas<br>Mes</th>
+            <th class="col-summary col-recargo" [title]="'Horas Ordinarias Diurnas hábiles ('+normativa.franjas.diurna+' Lun–Sáb no festivo)'">HOD</th>
+            <th class="col-summary col-recargo" [title]="'Horas Ordinarias Nocturnas hábiles ('+normativa.franjas.nocturna+') Recargo '+pct(normativa.recargos.nocturno)">HON<br>{{ pct(normativa.recargos.nocturno) }}</th>
+            <th class="col-summary col-recargo" [title]="'Horas Dominicales/Festivas Diurnas ('+normativa.franjas.diurna+') Recargo '+pct(normativa.recargos.dominical)">HDFD<br>{{ pct(normativa.recargos.dominical) }}</th>
+            <th class="col-summary col-recargo" [title]="'Horas Dominicales/Festivas Nocturnas ('+normativa.franjas.nocturna+') Recargo '+pct(normativa.recargos.nocturnoDominical)+' (dominical '+pct(normativa.recargos.dominical)+' + nocturno '+pct(normativa.recargos.nocturno)+')'">HDFN<br>{{ pct(normativa.recargos.nocturnoDominical) }}</th>
             <th class="col-summary" title="Saldo Arrastrado del Mes Anterior">Banco<br>Ant.</th>
             <th class="col-summary" title="Diferencia del Mes (Trabajadas - Contrato - Amortizadas COMP)">Mov.<br>Mes</th>
             <th class="col-summary col-banco-final" title="Nuevo Saldo Acumulado Continuo (Pasa al siguiente mes)">Nuevo<br>Banco</th>
@@ -342,16 +444,15 @@ import {
                   @if (fila.esPersonalRotado) {
                     <span
                       class="badge-rotado"
-                      [title]="'Personal de apoyo adscrito a: ' + (fila.servicioOrigenNombre || 'Servicio Hermano')"
-                    >
+                      [title]="'Personal de apoyo adscrito a: ' + (fila.servicioOrigenNombre || 'Servicio Hermano')">
                       🔄 {{ fila.servicioOrigenCodigo || 'APOYO' }}
                     </span>
                     <button
                       type="button"
+                      aria-label="Quitar personal de apoyo"
                       class="btn-quitar-rotado"
                       (click)="quitarPersonalApoyo.emit(fila.empleado.id)"
-                      title="Quitar este colaborador del personal de apoyo"
-                    >
+                      title="Quitar este colaborador del personal de apoyo">
                       ✕
                     </button>
                   }
@@ -369,7 +470,7 @@ import {
               @for (d of diasDelMes; track d.dia) {
                 @let celda = fila.celdas[d.dia];
                 @let cfg = obtenerConfigTurno(celda?.codigo || '');
-                @let conflicto = obtenerConflictoCelda(fila.empleado.id, d.dia);
+                @let conflictos = obtenerConflictosCelda(fila.empleado.id, d.dia);
                 @let esCeldaEspejo = esTurnoOtroServicio(celda);
                 @let cambioDiff = mostrarComparadorPrevisto && celda?.previsto !== undefined && celda?.previsto !== celda?.codigo;
 
@@ -384,8 +485,8 @@ import {
                   [class.cell-saturday]="d.esSabado"
                   [class.cell-sunday]="d.esDomingo"
                   [class.cell-holiday]="!!d.festivo"
-                  [class.cell-conflict]="!!conflicto"
-                  [class.cell-locked]="celda?.codigo === 'VAC' || celda?.codigo === 'INC' || celda?.codigo === 'LIC'"
+                  [class.cell-conflict]="conflictos.length > 0"
+                  [class.cell-locked]="esCeldaBloqueada(celda?.codigo, cfg)"
                   [class.cell-mirror-other-service]="esCeldaEspejo"
                   [class.shift-heavy]="!esCeldaEspejo && cfg && (cfg.horasOrdinarias >= 12 || cfg.codigo === 'G24' || cfg.codigo === 'N12' || cfg.codigo === 'D12')"
                   [class.shift-24]="!esCeldaEspejo && (celda?.codigo === 'G24' || (cfg && cfg.horasOrdinarias >= 24))"
@@ -396,7 +497,7 @@ import {
                   (dragover)="onCeldaDragOver($event)"
                   (drop)="onCeldaDrop($event, fila.empleado.id, d.dia)"
                   (keydown)="onCeldaKeyDown($event, fila.empleado.id, d.dia)"
-                  [title]="construirTooltipCelda(fila.empleado, d, celda, conflicto)">
+                  [title]="construirTooltipCelda(fila.empleado, d, celda, conflictos)">
 
                   <div class="cell-inner">
                     @if (esCeldaEspejo) {
@@ -406,7 +507,7 @@ import {
                       </div>
                     } @else {
                       <span class="cell-code">{{ celda?.codigo || '' }}</span>
-                      @if (celda?.codigo === 'VAC' || celda?.codigo === 'INC' || celda?.codigo === 'LIC') {
+                      @if (esCeldaBloqueada(celda?.codigo, cfg)) {
                         <span class="lock-mini-tag" title="Bloqueado por novedad oficial Intranet">🔒</span>
                       }
                       @if (celda?.esRotacion && celda?.codigo && celda?.codigo !== 'L') {
@@ -423,7 +524,7 @@ import {
               <!-- Totales, Desglose de Recargos y Banco de Horas por Colaborador -->
               <td class="col-summary font-mono" [title]="construirTooltipHorasMes(fila)">
                 <div>
-                  <strong>{{ fila.horasTrabajadas }}</strong><span class="sub-contract">/{{ fila.empleado.horasContratoMes }}</span>
+                  <strong>{{ fila.horasTrabajadas }}</strong><span class="sub-contract">/{{ fila.horasContratadasEfectivas ?? fila.empleado.horasContratoMes }}</span>
                 </div>
                 @if (fila.horasOtrosServicios > 0) {
                   <div class="multi-srv-hours-badge">
@@ -432,19 +533,19 @@ import {
                 }
               </td>
 
-              <td class="col-summary col-recargo font-mono" title="Horas Ordinarias Diurnas (06:00-19:00 L-S)">
+              <td class="col-summary col-recargo font-mono" [title]="'Horas Ordinarias Diurnas hábiles ('+normativa.franjas.diurna+')'">
                 {{ fila.hod }}h
               </td>
 
-              <td class="col-summary col-recargo font-mono" title="Horas Ordinarias Nocturnas (19:00-06:00 L-S) Recargo 35%">
+              <td class="col-summary col-recargo font-mono" [title]="'Horas Ordinarias Nocturnas hábiles ('+normativa.franjas.nocturna+') Recargo '+pct(normativa.recargos.nocturno)">
                 {{ fila.hon }}h
               </td>
 
-              <td class="col-summary col-recargo font-mono" title="Horas Dominicales/Festivas Diurnas (06:00-19:00) Recargo 75%">
+              <td class="col-summary col-recargo font-mono" [title]="'Horas Dominicales/Festivas Diurnas ('+normativa.franjas.diurna+') Recargo '+pct(normativa.recargos.dominical)">
                 {{ fila.hdfd }}h
               </td>
 
-              <td class="col-summary col-recargo font-mono" title="Horas Dominicales/Festivas Nocturnas (19:00-06:00) Recargo 110%">
+              <td class="col-summary col-recargo font-mono" [title]="'Horas Dominicales/Festivas Nocturnas ('+normativa.franjas.nocturna+') Recargo '+pct(normativa.recargos.nocturnoDominical)">
                 {{ fila.hdfn }}h
               </td>
 
@@ -466,9 +567,9 @@ import {
               <td class="col-summary col-banco-final font-mono">
                 <span
                   class="banco-badge-final"
-                  [class.status-ok]="fila.nuevoSaldoBanco >= -6 && fila.nuevoSaldoBanco <= 18"
-                  [class.status-warn]="(fila.nuevoSaldoBanco > 18 && fila.nuevoSaldoBanco <= 30) || (fila.nuevoSaldoBanco < -6 && fila.nuevoSaldoBanco >= -18)"
-                  [class.status-danger]="fila.nuevoSaldoBanco > 30 || fila.nuevoSaldoBanco < -18">
+                  [class.status-ok]="fila.nuevoSaldoBanco >= semaforo.ATENCION_NEG && fila.nuevoSaldoBanco <= semaforo.ATENCION_POS"
+                  [class.status-warn]="(fila.nuevoSaldoBanco > semaforo.ATENCION_POS && fila.nuevoSaldoBanco <= semaforo.CRITICO_POS) || (fila.nuevoSaldoBanco < semaforo.ATENCION_NEG && fila.nuevoSaldoBanco >= semaforo.CRITICO_NEG)"
+                  [class.status-danger]="fila.nuevoSaldoBanco > semaforo.CRITICO_POS || fila.nuevoSaldoBanco < semaforo.CRITICO_NEG">
                   {{ formatearSigno(fila.nuevoSaldoBanco) }}h
                 </span>
               </td>
@@ -476,9 +577,11 @@ import {
               <td class="col-summary">
                 <div class="equity-counts">
                   <span title="Turnos de Noche en el mes">🌙 {{ fila.conteoNoches }}</span>
-                  <span title="Domingos y Festivos laborados (≥3 genera Compensatorio)">☀️ {{ fila.conteoDomFest }}</span>
+                  <span [title]="'Domingos laborados: ' + (fila.conteoDomingos ?? fila.conteoDomFest) + ' (≥3 causa compensatorio Art. 179 CST) • Dom+Fest: ' + fila.conteoDomFest">
+                    ☀️ {{ fila.conteoDomFest }}@if (fila.conteoDomingos !== undefined && fila.conteoDomingos !== fila.conteoDomFest) { <small class="dom-sub-count">({{ fila.conteoDomingos }}d)</small> }
+                  </span>
                   @if (fila.causaCompensatorioDominical) {
-                    <span class="comp-dom-tag" title="Laboró 3 o más domingos: Causa 1 Compensatorio Legal CST">🏅</span>
+                    <span class="comp-dom-tag" [title]="'Laboró ' + (fila.conteoDomingos ?? fila.conteoDomFest) + ' domingos (≥3): Causa 1 Compensatorio Legal CST (Art. 179 Par. 1 / Art. 181)'">🏅</span>
                   }
                 </div>
               </td>
@@ -486,27 +589,32 @@ import {
           }
         </tbody>
 
-        <!-- FOOTER REACTIVO DE COBERTURAS MÍNIMAS POR TURNO -->
+        <!-- FOOTER REACTIVO DE COBERTURAS MÍNIMAS POR TURNO (DÍA / NOCHE) -->
         <tfoot>
           @let reglaFiltroFoot = reglaCargoActivaEnCuadrante;
           <tr class="coverage-row">
             <td class="col-sticky-emp coverage-label">
-              ☀️ Cobertura Mañana • <strong>Mín: {{ reglaFiltroFoot ? reglaFiltroFoot.reqManana : servicioActual.reqManana }}</strong>
+              ☀️ Cobertura Día • <strong>Mín: {{ reglaFiltroFoot ? reglaFiltroFoot.reqDia : servicioActual.reqDia }}</strong>
+              @if (servicioActual.modalidadDias === 'TODOS_GUARDIA_FDS') {
+                <span class="coverage-fds-note">
+                  (Dom/Fest: {{ reglaFiltroFoot ? (reglaFiltroFoot.reqDiaDomFest ?? reglaFiltroFoot.reqDia) : (servicioActual.reqDiaDomFest ?? servicioActual.reqDia) }})
+                </span>
+              }
               @if (filtroCategoriaActiva !== 'TODAS') {
-                <span style="font-size: 10.5px; color: #0284c7; font-weight: 700;">({{ filtroCategoriaActiva }})</span>
+                <span class="coverage-cargo-tag">({{ filtroCategoriaActiva }})</span>
               }
             </td>
-            <td class="col-empalme" style="background: #f8fafc; color: #94a3b8;">—</td>
+            <td class="col-empalme coverage-off">—</td>
             @for (d of diasDelMes; track d.dia) {
               @let cob = coberturaPorDia[d.dia];
               @let metas = obtenerMetasDiaServicio(servicioActual, d);
-              @if (metas.cerrado || metas.reqManana === 0) {
-                <td class="coverage-cell" [class.cell-week-end]="d.esDomingo" style="color: #94a3b8; background: #f8fafc;" title="Servicio sin requerimiento en esta franja / día">
+              @if (metas.cerrado || metas.reqDia === 0) {
+                <td class="coverage-cell coverage-off" [class.cell-week-end]="d.esDomingo" title="Servicio sin requerimiento en esta franja / día">
                   —
                 </td>
               } @else {
-                <td class="coverage-cell" [class.cell-week-end]="d.esDomingo" [class.cov-ok]="cob.manana >= metas.reqManana" [class.cov-deficit]="cob.manana < metas.reqManana">
-                  {{ cob.manana }}/{{ metas.reqManana }}
+                <td class="coverage-cell" [class.cell-week-end]="d.esDomingo" [class.cov-ok]="cob.dia >= metas.reqDia" [class.cov-deficit]="cob.dia < metas.reqDia">
+                  {{ cob.dia }}/{{ metas.reqDia }}
                 </td>
               }
             }
@@ -517,43 +625,22 @@ import {
 
           <tr class="coverage-row">
             <td class="col-sticky-emp coverage-label">
-              🌤️ Cobertura Tarde • <strong>Mín: {{ reglaFiltroFoot ? reglaFiltroFoot.reqTarde : servicioActual.reqTarde }}</strong>
-              @if (filtroCategoriaActiva !== 'TODAS') {
-                <span style="font-size: 10.5px; color: #0284c7; font-weight: 700;">({{ filtroCategoriaActiva }})</span>
-              }
-            </td>
-            <td class="col-empalme" style="background: #f8fafc; color: #94a3b8;">—</td>
-            @for (d of diasDelMes; track d.dia) {
-              @let cob = coberturaPorDia[d.dia];
-              @let metas = obtenerMetasDiaServicio(servicioActual, d);
-              @if (metas.cerrado || metas.reqTarde === 0) {
-                <td class="coverage-cell" [class.cell-week-end]="d.esDomingo" style="color: #94a3b8; background: #f8fafc;" title="Servicio sin requerimiento en esta franja / día">
-                  —
-                </td>
-              } @else {
-                <td class="coverage-cell" [class.cell-week-end]="d.esDomingo" [class.cov-ok]="cob.tarde >= metas.reqTarde" [class.cov-deficit]="cob.tarde < metas.reqTarde">
-                  {{ cob.tarde }}/{{ metas.reqTarde }}
-                </td>
-              }
-            }
-            <td colspan="9" class="coverage-summary-note">
-              Verde = Cobertura completa • (—) = Franja/día no operativo
-            </td>
-          </tr>
-
-          <tr class="coverage-row">
-            <td class="col-sticky-emp coverage-label">
               🌙 Cobertura Noche • <strong>Mín: {{ reglaFiltroFoot ? reglaFiltroFoot.reqNoche : servicioActual.reqNoche }}</strong>
+              @if (servicioActual.modalidadDias === 'TODOS_GUARDIA_FDS') {
+                <span class="coverage-fds-note">
+                  (Dom/Fest: {{ reglaFiltroFoot ? (reglaFiltroFoot.reqNocheDomFest ?? reglaFiltroFoot.reqNoche) : (servicioActual.reqNocheDomFest ?? servicioActual.reqNoche) }})
+                </span>
+              }
               @if (filtroCategoriaActiva !== 'TODAS') {
-                <span style="font-size: 10.5px; color: #0284c7; font-weight: 700;">({{ filtroCategoriaActiva }})</span>
+                <span class="coverage-cargo-tag">({{ filtroCategoriaActiva }})</span>
               }
             </td>
-            <td class="col-empalme" style="background: #f8fafc; color: #94a3b8;">—</td>
+            <td class="col-empalme coverage-off">—</td>
             @for (d of diasDelMes; track d.dia) {
               @let cob = coberturaPorDia[d.dia];
               @let metas = obtenerMetasDiaServicio(servicioActual, d);
               @if (metas.cerrado || metas.reqNoche === 0) {
-                <td class="coverage-cell" [class.cell-week-end]="d.esDomingo" style="color: #94a3b8; background: #f8fafc;" title="Servicio sin requerimiento en esta franja / día">
+                <td class="coverage-cell coverage-off" [class.cell-week-end]="d.esDomingo" title="Servicio sin requerimiento en esta franja / día">
                   —
                 </td>
               } @else {
@@ -563,7 +650,10 @@ import {
               }
             }
             <td colspan="9" class="coverage-summary-note">
-              Rojo = Falta personal en el turno
+              Verde = Cobertura completa • Rojo = Déficit • (—) = Franja/día no operativo • ⚖️ {{ normativa.jornadaSemanalHoras }}h/sem
+              @if (normativa.franjaCambiaEnElMes || normativa.recargoDominicalCambiaEnElMes || normativa.jornadaSemanalCambiaEnElMes) {
+                <span class="normativa-trans-note"> • ⚠️ Transición normativa en el mes</span>
+              }
             </td>
           </tr>
         </tfoot>
@@ -577,12 +667,16 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
   private autoScrollAnimationId: number | null = null;
   private autoScrollVelocidadY = 0;
   private autoScrollVelocidadX = 0;
+  @Input() macroprocesos: MacroprocesoInfo[] = [];
   @Input() servicioSeleccionadoId = '';
   @Input() serviciosVisibles: ServicioHospitalario[] = [];
   @Input() servicios: ServicioHospitalario[] = [];
   @Input() mesSeleccionado = 1;
   @Input() mesesDisponibles: Array<{ valor: number; nombre: string }> = [];
-  @Input() anioSeleccionado = 2026;
+  @Input() anioSeleccionado = Number(hoyColombiaIso().substring(0, 4));
+  readonly semaforo = SEMAFORO_BANCO_HORAS;
+  @Input() aniosDisponibles: number[] = [];
+  @Input() esPeriodoActual = true;
   @Input() filtroCategoriaActiva = 'TODAS';
   @Input() categoriasEnServicioActual: string[] = [];
   @Input() estadoCuadrante = 'BORRADOR';
@@ -606,10 +700,13 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
   @Input() catalogoTurnosMap: Record<string, TipoTurnoConfig> = {};
   @Input() reglaCargoActivaEnCuadrante: ReglaCargoServicio | null | undefined = null;
   @Input({ required: true }) servicioActual!: ServicioHospitalario;
-  @Input() coberturaPorDia: Record<number, { manana: number; tarde: number; noche: number }> = {};
+  @Input() coberturaPorDia: Record<number, { dia: number; noche: number }> = {};
 
   @Output() cambiarServicio = new EventEmitter<string>();
   @Output() cambiarMes = new EventEmitter<number>();
+  @Output() cambiarAnio = new EventEmitter<number>();
+  @Output() navegarMes = new EventEmitter<-1 | 1>();
+  @Output() irAMesActual = new EventEmitter<void>();
   @Output() cambiarFiltroCategoria = new EventEmitter<string>();
   @Output() cambiarAutoAvanzar = new EventEmitter<boolean>();
   @Output() cambiarMostrarComparador = new EventEmitter<boolean>();
@@ -634,6 +731,21 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
 
   celdaHovered: { empId: string; dia: number } | null = null;
 
+  private normativaCache?: { clave: string; valor: ReturnType<typeof resumenNormativoPeriodo> };
+
+  /** Franjas y recargos legales vigentes del periodo visible (Art. 160/168/179 CST, Ley 2466/2025). */
+  get normativa(): ReturnType<typeof resumenNormativoPeriodo> {
+    const clave = `${this.anioSeleccionado}-${this.mesSeleccionado}`;
+    if (!this.normativaCache || this.normativaCache.clave !== clave) {
+      this.normativaCache = { clave, valor: resumenNormativoPeriodo(this.anioSeleccionado, this.mesSeleccionado) };
+    }
+    return this.normativaCache.valor;
+  }
+
+  pct(fraccion: number): string {
+    return formatearPorcentaje(fraccion);
+  }
+
   /**
    * Un único láser inteligente:
    * - Cuando el puntero está sobre la grilla (`celdaHovered`), el haz láser sigue al puntero.
@@ -641,6 +753,26 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
    */
   get celdaGuiaLaser(): { empId: string; dia: number } | null {
     return this.celdaHovered ?? this.celdaEnfocada;
+  }
+
+  get serviciosAgrupadosPorMacroproceso(): Array<{
+    macro: { codigo: string; icono: string; nombreCorto: string };
+    servicios: ServicioHospitalario[];
+  }> {
+    const lista = this.serviciosVisibles || [];
+    if (!this.macroprocesos || this.macroprocesos.length === 0) {
+      return lista.length > 0
+        ? [{ macro: { codigo: 'TODOS', icono: '🏥', nombreCorto: 'Servicios' }, servicios: lista }]
+        : [];
+    }
+    return this.macroprocesos
+      .map((macro) => ({
+        macro,
+        servicios: lista.filter(
+          (s) => (s.tipoAsistencia || 'URGENCIAS').toUpperCase() === macro.codigo
+        ),
+      }))
+      .filter((g) => g.servicios.length > 0);
   }
 
   ngOnDestroy(): void {
@@ -774,8 +906,12 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
     return this.catalogoTurnosMap[codigo];
   }
 
-  obtenerConflictoCelda(empId: string, dia: number): InfraccionNormativa | undefined {
-    return this.infraccionesActivas.find((i) => i.empleadoId === empId && i.dia === dia);
+  obtenerConflictosCelda(empId: string, dia: number): InfraccionNormativa[] {
+    return this.infraccionesActivas.filter((i) => i.empleadoId === empId && i.dia === dia);
+  }
+
+  esCeldaBloqueada(codigo?: string, cfg?: TipoTurnoConfig): boolean {
+    return Boolean(cfg?.esAusencia || esCodigoExoneracionContrato(codigo));
   }
 
   obtenerIniciales(nombre: string): string {
@@ -816,7 +952,7 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
   }
 
   clasificarFamilia(t: TipoTurnoConfig): 'DIURNO' | 'GUARDIA_NOCHE' | 'DESCANSO' | 'AUSENCIA' {
-    if (t.esAusencia || ['VAC', 'INC', 'LIC'].includes((t.codigo || '').toUpperCase())) {
+    if (t.esAusencia || esCodigoExoneracionContrato(t.codigo)) {
       return 'AUSENCIA';
     }
     if (
@@ -840,12 +976,12 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
     const partes: string[] = [`${t.codigo} • ${t.nombre} (${t.horario})`];
     if (t.horasOrdinarias > 0) {
       partes.push(`${t.horasOrdinarias}h ordinarias`);
-      if (t.horasNocturnas > 0) partes.push(`${t.horasNocturnas}h nocturnas (Recargo 35%)`);
+      if (t.horasNocturnas > 0) partes.push(`${t.horasNocturnas}h nocturnas (Recargo ${this.pct(this.normativa.recargos.nocturno)})`);
       if (t.minutosAlmuerzo && t.minutosAlmuerzo > 0) partes.push(`${t.minutosAlmuerzo}m almuerzo`);
-    } else if (t.esAusencia) {
+    } else if (t.esAusencia || esCodigoExoneracionContrato(t.codigo)) {
       partes.push('Novedad Oficial Intranet (Bloqueo Legal)');
     } else if (t.descuentaBancoHoras) {
-      partes.push('Amortiza 8h Banco de Horas');
+      partes.push(`Amortiza ${obtenerHorasAmortizacionTurno(t)}h Banco de Horas`);
     } else {
       partes.push('Descanso no laborado');
     }
@@ -854,7 +990,7 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
 
   esTurnoOtroServicio(celda?: CeldaAsignacion): boolean {
     if (!celda || !celda.codigo) return false;
-    if (['L', 'VAC', 'INC', 'LIC'].includes(celda.codigo)) return false;
+    if (celda.codigo === 'L' || esCodigoExoneracionContrato(celda.codigo)) return false;
     return Boolean(
       celda.servicioEjecutorId &&
         celda.servicioEjecutorId !== this.servicioSeleccionadoId
@@ -878,7 +1014,11 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
   }
 
   construirTooltipHorasMes(fila: any): string {
-    const base = `Total Hospital: ${fila.horasTrabajadas}h programadas de ${fila.empleado.horasContratoMes}h de contrato`;
+    const metaEf = fila.horasContratadasEfectivas ?? fila.empleado.horasContratoMes;
+    const base =
+      (fila.diasExonerados || 0) > 0
+        ? `Total Hospital: ${fila.horasTrabajadas}h programadas de ${metaEf}h efectivas (Nominal: ${fila.empleado.horasContratoMes}h menos ${fila.horasExoneradas || 0}h por ${fila.diasExonerados}d VAC/INC/LIC/FAM)`
+        : `Total Hospital: ${fila.horasTrabajadas}h programadas de ${fila.empleado.horasContratoMes}h de contrato`;
     if (!fila.desgloseServicios || fila.desgloseServicios.length <= 1) {
       if (fila.horasOtrosServicios > 0) {
         return `${base}\n• En este servicio: ${fila.horasLocales}h\n• En otros servicios (Apoyo): ${fila.horasOtrosServicios}h`;
@@ -896,7 +1036,7 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
     emp: EmpleadoHospital,
     d: DiaColumna,
     celda?: CeldaAsignacion,
-    conflicto?: InfraccionNormativa
+    conflictos?: InfraccionNormativa[] | InfraccionNormativa
   ): string {
     const partes: string[] = [`${emp.nombre} • ${emp.categoria} • Día ${d.dia}`];
     if (d.festivo) partes.push(`🇨🇴 Festivo: ${d.festivo.nombre}`);
@@ -930,15 +1070,33 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
     } else {
       partes.push('Sin turno asignado');
     }
-    if (conflicto) partes.push(`⚠️ ALERTA: ${conflicto.mensaje}`);
+    const listaConflictos = Array.isArray(conflictos)
+      ? conflictos
+      : conflictos
+        ? [conflictos]
+        : [];
+    for (const c of listaConflictos) {
+      partes.push(`⚠️ ALERTA: ${c.mensaje}`);
+    }
     return partes.join('\n');
+  }
+
+  private clasificarFranjasTurnoLocal(cfg?: TipoTurnoConfig): { dia: boolean; noche: boolean } {
+    if (!cfg || cfg.horasOrdinarias <= 0 || cfg.esAusencia) {
+      return { dia: false, noche: false };
+    }
+    if (cfg.horasOrdinarias >= 24) {
+      return { dia: true, noche: true };
+    }
+    const noche = Boolean(cfg.esNocturnoPesado || cfg.horasNocturnas >= 6);
+    return { dia: !noche, noche };
   }
 
   obtenerMetasDiaServicio(
     srv: ServicioHospitalario,
     d: DiaColumna,
     categoriaEspecifica?: string
-  ): { reqManana: number; reqTarde: number; reqNoche: number; cerrado: boolean } {
+  ): { reqDia: number; reqNoche: number; cerrado: boolean } {
     const mod = srv.modalidadDias || 'TODOS_24_7';
     const esDomOFest = d.esDomingo || !!d.festivo;
 
@@ -953,57 +1111,65 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
       ? (srv.reglasPorCargo || []).find((r) => r.categoriaNombre === catFiltro)
       : undefined;
 
-    const baseM = reglaCargo ? reglaCargo.reqManana : srv.reqManana;
-    const baseT = reglaCargo ? reglaCargo.reqTarde : srv.reqTarde;
+    if (catFiltro && (srv.reglasPorCargo?.length || 0) > 0 && !reglaCargo) {
+      return { reqDia: 0, reqNoche: 0, cerrado: false };
+    }
+
+    const baseD = reglaCargo ? reglaCargo.reqDia : srv.reqDia;
     const baseN = reglaCargo ? reglaCargo.reqNoche : srv.reqNoche;
-    const fdsM = reglaCargo ? (reglaCargo.reqMananaFds ?? baseM) : (srv.reqMananaFds ?? baseM);
-    const fdsT = reglaCargo ? (reglaCargo.reqTardeFds ?? baseT) : (srv.reqTardeFds ?? baseT);
-    const fdsN = reglaCargo ? (reglaCargo.reqNocheFds ?? baseN) : (srv.reqNocheFds ?? baseN);
+    const domFestD = reglaCargo ? (reglaCargo.reqDiaDomFest ?? baseD) : (srv.reqDiaDomFest ?? baseD);
+    const domFestN = reglaCargo ? (reglaCargo.reqNocheDomFest ?? baseN) : (srv.reqNocheDomFest ?? baseN);
+
+    const turnosHab =
+      reglaCargo?.turnosHabilitados && reglaCargo.turnosHabilitados.length > 0
+        ? reglaCargo.turnosHabilitados
+        : srv.turnosHabilitados && srv.turnosHabilitados.length > 0
+          ? srv.turnosHabilitados
+          : [];
+
+    const tieneDia =
+      turnosHab.length === 0 ||
+      turnosHab.some((c) => {
+        const cfg = this.catalogoTurnosMap[c.toUpperCase()];
+        return cfg && this.clasificarFranjasTurnoLocal(cfg).dia;
+      });
+    const tieneNoche =
+      turnosHab.length === 0 ||
+      turnosHab.some((c) => {
+        const cfg = this.catalogoTurnosMap[c.toUpperCase()];
+        return cfg && this.clasificarFranjasTurnoLocal(cfg).noche;
+      });
+
+    const efD = tieneDia ? baseD : 0;
+    const efN = tieneNoche ? baseN : 0;
+    const efDomFestD = tieneDia ? domFestD : 0;
+    const efDomFestN = tieneNoche ? domFestN : 0;
 
     if (esDomOFest) {
       if (mod === 'LUN_VIE_HABILES' || mod === 'LUN_SAB_SIN_FESTIVOS') {
-        return { reqManana: 0, reqTarde: 0, reqNoche: 0, cerrado: true };
+        return { reqDia: 0, reqNoche: 0, cerrado: true };
       }
       if (mod === 'TODOS_GUARDIA_FDS') {
         return {
-          reqManana: fdsM,
-          reqTarde: fdsT,
-          reqNoche: fdsN,
+          reqDia: efDomFestD,
+          reqNoche: efDomFestN,
           cerrado: false,
         };
       }
       return {
-        reqManana: baseM,
-        reqTarde: baseT,
-        reqNoche: baseN,
+        reqDia: efD,
+        reqNoche: efN,
         cerrado: false,
       };
     }
 
-    if (d.esSabado) {
-      if (mod === 'LUN_VIE_HABILES') {
-        return { reqManana: 0, reqTarde: 0, reqNoche: 0, cerrado: true };
-      }
-      if (mod === 'TODOS_GUARDIA_FDS' || mod === 'LUN_SAB_SIN_FESTIVOS') {
-        return {
-          reqManana: fdsM,
-          reqTarde: fdsT,
-          reqNoche: fdsN,
-          cerrado: false,
-        };
-      }
-      return {
-        reqManana: baseM,
-        reqTarde: baseT,
-        reqNoche: baseN,
-        cerrado: false,
-      };
+    if (d.esSabado && mod === 'LUN_VIE_HABILES') {
+      return { reqDia: 0, reqNoche: 0, cerrado: true };
     }
 
     return {
-      reqManana: baseM,
-      reqTarde: baseT,
-      reqNoche: baseN,
+      reqDia: efD,
+      reqNoche: efN,
       cerrado: false,
     };
   }
@@ -1011,11 +1177,11 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
   etiquetaModalidadDias(mod?: string): string {
     switch (mod) {
       case 'TODOS_GUARDIA_FDS':
-        return '24/7 (Guardia FDS/Fest.)';
+        return '24/7 (Lun–Sáb y Dom/Fest diferenciado)';
       case 'LUN_SAB_SIN_FESTIVOS':
-        return 'Lun-Sáb (Cierra Dom/Fest)';
+        return 'Lun–Sáb (Cierra Dom/Fest)';
       case 'LUN_VIE_HABILES':
-        return 'Lun-Vie Hábiles';
+        return 'Lun–Vie Hábiles';
       default:
         return 'Todos los días 24/7';
     }

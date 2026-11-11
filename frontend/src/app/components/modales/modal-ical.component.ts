@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { Component, EventEmitter, HostListener, Input, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
 @Component({
@@ -8,10 +8,15 @@ import { CommonModule } from '@angular/common';
   template: `
     @if (abierto) {
       <div class="modal-backdrop" (click)="cerrar.emit()">
-        <div class="modal-box" (click)="$event.stopPropagation()">
+        <div
+          class="modal-box"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="modal-ical-title"
+          (click)="$event.stopPropagation()">
           <div class="modal-header">
-            <h3>📅 Vincular Calendario — {{ empleadoNombre }}</h3>
-            <button (click)="cerrar.emit()">✕</button>
+            <h3 id="modal-ical-title">📅 Vincular Calendario — {{ empleadoNombre }}</h3>
+            <button type="button" aria-label="Cerrar diálogo" (click)="cerrar.emit()">✕</button>
           </div>
           <div class="modal-body">
             <p>
@@ -26,8 +31,8 @@ import { CommonModule } from '@angular/common';
               <li>✔ Incluye horarios exactos de entrada y salida (y novedades VAC / INC / COMP).</li>
             </ul>
             <div class="modal-footer">
-              <button class="btn-outline" (click)="descargar.emit()">📥 Descargar archivo .ics</button>
-              <button class="btn-primary" (click)="copiar.emit()">📋 Copiar Enlace al Portapapeles</button>
+              <button type="button" class="btn-outline" (click)="descargar.emit()">📥 Descargar archivo .ics</button>
+              <button type="button" class="btn-primary" (click)="copiar.emit()">📋 Copiar Enlace al Portapapeles</button>
             </div>
           </div>
         </div>
@@ -35,6 +40,9 @@ import { CommonModule } from '@angular/common';
     }
   `,
   styles: [`
+    :host {
+      display: contents;
+    }
     .modal-backdrop {
       position: fixed;
       top: 0;
@@ -165,4 +173,11 @@ export class ModalIcalComponent {
   @Output() cerrar = new EventEmitter<void>();
   @Output() copiar = new EventEmitter<void>();
   @Output() descargar = new EventEmitter<void>();
+
+  @HostListener('document:keydown.escape')
+  onEscapeKey(): void {
+    if (this.abierto) {
+      this.cerrar.emit();
+    }
+  }
 }

@@ -1,0 +1,8 @@
+:host {
+  display: contents;
+}
+
+.festivos-panel-header {
+  flex-wrap: wrap;
+  gap: 10px;
+}

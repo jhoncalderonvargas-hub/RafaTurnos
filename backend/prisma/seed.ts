@@ -1,61 +1,83 @@
-import { PrismaClient, TipoAsistencia } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
 async function main() {
   console.log('🏥 Iniciando siembra (Seed) de Rafa Turnos para Hospital Nivel II / III...');
 
-  // 1. Limpieza ordenada para no duplicar datos
+  // 1. Limpieza ordenada (respetando llaves foráneas) para no duplicar datos
   await prisma.auditoriaCambio.deleteMany();
+  await prisma.solicitudPermuta.deleteMany();
   await prisma.asignacionTurno.deleteMany();
   await prisma.bancoHorasSaldo.deleteMany();
   await prisma.novedadAusencia.deleteMany();
   await prisma.tokenCalendario.deleteMany();
+  await prisma.servicioTurnoHabilitado.deleteMany();
   await prisma.requerimientoCobertura.deleteMany();
+  await prisma.servicioHermano.deleteMany();
   await prisma.cuadrante.deleteMany();
   await prisma.empleado.deleteMany();
   await prisma.tipoTurno.deleteMany();
   await prisma.categoriaProfesional.deleteMany();
   await prisma.servicio.deleteMany();
+  await prisma.macroproceso.deleteMany();
   await prisma.festivoColombia.deleteMany();
 
   console.log('🧹 Base de datos reseteada.');
 
-  // 2. Servicios Hospitalarios (14 Servicios agrupados en bloques de afinidad)
+  // 1.5 Macroprocesos del Mapa de Procesos (Intranet -> PostgreSQL)
+  const macroprocesosData = [
+    { id: 'mp-urgencias', codigo: 'URGENCIAS', nombre: 'Atención de Urgencias y Emergencias', nombreCorto: 'Urgencias y Emergencias', tipoProceso: 'MISIONAL_ASISTENCIAL', icono: '🚨', orden: 1, modalidadSugerida: 'TODOS_24_7', plantillaTurnosSugerida: 'ROTATIVO_8H' },
+    { id: 'mp-cuidados-intensivos', codigo: 'CUIDADOS_INTENSIVOS', nombre: 'Cuidado Crítico e Intensivo (UCI / UCIM)', nombreCorto: 'Cuidado Crítico (UCI)', tipoProceso: 'MISIONAL_ASISTENCIAL', icono: '💓', orden: 2, modalidadSugerida: 'TODOS_24_7', plantillaTurnosSugerida: 'GUARDIAS_12_24' },
+    { id: 'mp-hospitalizacion', codigo: 'HOSPITALIZACION', nombre: 'Hospitalización e Internación', nombreCorto: 'Hospitalización', tipoProceso: 'MISIONAL_ASISTENCIAL', icono: '🛏️', orden: 3, modalidadSugerida: 'TODOS_24_7', plantillaTurnosSugerida: 'ROTATIVO_8H' },
+    { id: 'mp-quirurgico', codigo: 'QUIRURGICO', nombre: 'Atención Quirúrgica y Esterilización', nombreCorto: 'Quirúrgico y Cirugía', tipoProceso: 'MISIONAL_ASISTENCIAL', icono: '🔪', orden: 4, modalidadSugerida: 'TODOS_GUARDIA_FDS', plantillaTurnosSugerida: 'GUARDIAS_12_24' },
+    { id: 'mp-apoyo-diagnostico', codigo: 'APOYO_DIAGNOSTICO', nombre: 'Apoyo Diagnóstico y Terapéutico', nombreCorto: 'Apoyo Diagnóstico', tipoProceso: 'MISIONAL_ASISTENCIAL', icono: '🔬', orden: 5, modalidadSugerida: 'TODOS_GUARDIA_FDS', plantillaTurnosSugerida: 'ROTATIVO_8H' },
+    { id: 'mp-consulta-externa', codigo: 'CONSULTA_EXTERNA', nombre: 'Consulta Externa y Ambulatoria', nombreCorto: 'Consulta Externa', tipoProceso: 'MISIONAL_ASISTENCIAL', icono: '🩺', orden: 6, modalidadSugerida: 'LUN_SAB_SIN_FESTIVOS', plantillaTurnosSugerida: 'ADMINISTRATIVO' },
+    { id: 'mp-administrativo', codigo: 'ADMINISTRATIVO', nombre: 'Gestión Financiera, Facturación y Admisiones', nombreCorto: 'Administrativo y Admisiones', tipoProceso: 'APOYO_ADMINISTRATIVO', icono: '🏛️', orden: 7, modalidadSugerida: 'LUN_VIE_HABILES', plantillaTurnosSugerida: 'ADMINISTRATIVO' },
+    { id: 'mp-apoyo-operativo', codigo: 'APOYO_OPERATIVO', nombre: 'Apoyo Operativo, Logística y Mantenimiento', nombreCorto: 'Apoyo Operativo y Logística', tipoProceso: 'APOYO_OPERATIVO', icono: '🛠️', orden: 8, modalidadSugerida: 'TODOS_GUARDIA_FDS', plantillaTurnosSugerida: 'ROTATIVO_8H' },
+  ];
+
+  for (const m of macroprocesosData) {
+    await prisma.macroproceso.create({ data: m });
+  }
+  console.log(`✅ ${macroprocesosData.length} Macroprocesos del Mapa de Procesos creados.`);
+
+  // 2. Servicios Hospitalarios (14 Servicios agrupados por Macroproceso)
+  const TURNOS_BASE_TODOS = ['M8', 'T8', 'N8', 'M6', 'T6', 'N12', 'D12', 'G24', 'ADM', 'MD', 'AP', 'DISP', 'S', 'L', 'COMP', 'FAM', 'VAC', 'INC', 'LIC'];
   const serviciosData = [
     // Bloque Urgencias y Críticos
-    { id: 'srv-urg', codigo: 'URG', nombre: 'Urgencias Generales y Reanimación', tipoAsistencia: TipoAsistencia.URGENCIAS },
-    { id: 'srv-mat', codigo: 'MAT', nombre: 'Maternidad y Salas de Parto', tipoAsistencia: TipoAsistencia.URGENCIAS },
-    { id: 'srv-ped', codigo: 'PED', nombre: 'Pediatría y Observación Pediátrica', tipoAsistencia: TipoAsistencia.URGENCIAS },
+    { id: 'srv-urg', codigo: 'URG', nombre: 'Urgencias Generales y Reanimación', macroprocesoId: 'mp-urgencias', modalidadDias: 'TODOS_24_7', turnosHabilitadosCodigos: TURNOS_BASE_TODOS },
+    { id: 'srv-mat', codigo: 'MAT', nombre: 'Maternidad y Salas de Parto', macroprocesoId: 'mp-urgencias', modalidadDias: 'TODOS_24_7', turnosHabilitadosCodigos: TURNOS_BASE_TODOS },
+    { id: 'srv-ped', codigo: 'PED', nombre: 'Pediatría y Observación Pediátrica', macroprocesoId: 'mp-urgencias', modalidadDias: 'TODOS_24_7', turnosHabilitadosCodigos: TURNOS_BASE_TODOS },
 
     // Bloque Quirúrgico
-    { id: 'srv-cir', codigo: 'CIR', nombre: 'Cirugía / Quirófanos y Recuperación', tipoAsistencia: TipoAsistencia.QUIRURGICO },
+    { id: 'srv-cir', codigo: 'CIR', nombre: 'Cirugía / Quirófanos y Recuperación', macroprocesoId: 'mp-quirurgico', modalidadDias: 'TODOS_GUARDIA_FDS', turnosHabilitadosCodigos: TURNOS_BASE_TODOS },
 
-    // Bloque Hospitalización Clínica (Rotan entre sí)
-    { id: 'srv-hosp', codigo: 'HOSP', nombre: 'Hospitalización Pisos', tipoAsistencia: TipoAsistencia.HOSPITALIZACION },
-    { id: 'srv-med-int', codigo: 'MED-INT', nombre: 'Medicina Interna (Cuidados Intermedios)', tipoAsistencia: TipoAsistencia.HOSPITALIZACION },
-    { id: 'srv-med-gral', codigo: 'MED-GRAL', nombre: 'Medicina General y Consulta Externa', tipoAsistencia: TipoAsistencia.HOSPITALIZACION },
+    // Bloque Hospitalización, Cuidado Crítico y Consulta Externa
+    { id: 'srv-hosp', codigo: 'HOSP', nombre: 'Hospitalización Pisos', macroprocesoId: 'mp-hospitalizacion', modalidadDias: 'TODOS_24_7', turnosHabilitadosCodigos: TURNOS_BASE_TODOS },
+    { id: 'srv-med-int', codigo: 'MED-INT', nombre: 'Medicina Interna (Cuidados Intermedios)', macroprocesoId: 'mp-cuidados-intensivos', modalidadDias: 'TODOS_24_7', turnosHabilitadosCodigos: TURNOS_BASE_TODOS },
+    { id: 'srv-med-gral', codigo: 'MED-GRAL', nombre: 'Medicina General y Consulta Externa', macroprocesoId: 'mp-consulta-externa', modalidadDias: 'LUN_SAB_SIN_FESTIVOS', turnosHabilitadosCodigos: ['M8', 'T8', 'M6', 'T6', 'ADM', 'MD', 'AP', 'L', 'COMP', 'FAM', 'VAC', 'INC', 'LIC'] },
 
     // Bloque Apoyo Diagnóstico
-    { id: 'srv-lab-img', codigo: 'LAB-IMG', nombre: 'Laboratorio Clínico e Imágenes Diagnósticas', tipoAsistencia: TipoAsistencia.APOYO_DIAGNOSTICO },
+    { id: 'srv-lab-img', codigo: 'LAB-IMG', nombre: 'Laboratorio Clínico e Imágenes Diagnósticas', macroprocesoId: 'mp-apoyo-diagnostico', modalidadDias: 'TODOS_GUARDIA_FDS', turnosHabilitadosCodigos: TURNOS_BASE_TODOS },
 
     // Bloque Farmacia
-    { id: 'srv-farm', codigo: 'FARM', nombre: 'Servicio Farmacéutico Hospitalario', tipoAsistencia: TipoAsistencia.APOYO_DIAGNOSTICO },
+    { id: 'srv-farm', codigo: 'FARM', nombre: 'Servicio Farmacéutico Hospitalario', macroprocesoId: 'mp-apoyo-diagnostico', modalidadDias: 'TODOS_GUARDIA_FDS', turnosHabilitadosCodigos: TURNOS_BASE_TODOS },
 
     // Bloque Facturación y Admisiones
-    { id: 'srv-fact-urg', codigo: 'FACT-URG', nombre: 'Facturación y Admisiones Urgencias (24/7)', tipoAsistencia: TipoAsistencia.CONSULTA_EXTERNA },
-    { id: 'srv-fact-cen', codigo: 'FACT-CEN', nombre: 'Facturación Central y Cartera', tipoAsistencia: TipoAsistencia.CONSULTA_EXTERNA },
+    { id: 'srv-fact-urg', codigo: 'FACT-URG', nombre: 'Facturación y Admisiones Urgencias (24/7)', macroprocesoId: 'mp-administrativo', modalidadDias: 'TODOS_24_7', turnosHabilitadosCodigos: ['M8', 'T8', 'N8', 'N12', 'D12', 'ADM', 'S', 'L', 'COMP', 'FAM', 'VAC', 'INC', 'LIC'] },
+    { id: 'srv-fact-cen', codigo: 'FACT-CEN', nombre: 'Facturación Central y Cartera', macroprocesoId: 'mp-administrativo', modalidadDias: 'LUN_VIE_HABILES', turnosHabilitadosCodigos: ['ADM', 'M8', 'T8', 'L', 'COMP', 'FAM', 'VAC', 'INC', 'LIC'] },
 
     // Bloque Operaciones y Logística
-    { id: 'srv-cond', codigo: 'COND', nombre: 'Conductores de Ambulancia y Traslados', tipoAsistencia: TipoAsistencia.URGENCIAS },
-    { id: 'srv-of-var', codigo: 'OF-VAR', nombre: 'Oficios Varios y Desinfección Hospitalaria', tipoAsistencia: TipoAsistencia.CONSULTA_EXTERNA },
-    { id: 'srv-mant', codigo: 'MANT', nombre: 'Mantenimiento Hospitalario y Biomédica', tipoAsistencia: TipoAsistencia.CONSULTA_EXTERNA },
+    { id: 'srv-cond', codigo: 'COND', nombre: 'Conductores de Ambulancia y Traslados', macroprocesoId: 'mp-apoyo-operativo', modalidadDias: 'TODOS_GUARDIA_FDS', turnosHabilitadosCodigos: ['M8', 'T8', 'N8', 'D12', 'N12', 'DISP', 'S', 'L', 'COMP', 'FAM', 'VAC', 'INC', 'LIC'] },
+    { id: 'srv-of-var', codigo: 'OF-VAR', nombre: 'Oficios Varios y Desinfección Hospitalaria', macroprocesoId: 'mp-apoyo-operativo', modalidadDias: 'TODOS_GUARDIA_FDS', turnosHabilitadosCodigos: ['M8', 'T8', 'N8', 'M6', 'T6', 'ADM', 'MD', 'L', 'COMP', 'FAM', 'VAC', 'INC', 'LIC'] },
+    { id: 'srv-mant', codigo: 'MANT', nombre: 'Mantenimiento Hospitalario y Biomédica', macroprocesoId: 'mp-apoyo-operativo', modalidadDias: 'TODOS_GUARDIA_FDS', turnosHabilitadosCodigos: ['M8', 'T8', 'N8', 'M6', 'T6', 'ADM', 'MD', 'DISP', 'L', 'COMP', 'FAM', 'VAC', 'INC', 'LIC'] },
   ];
 
   for (const s of serviciosData) {
     await prisma.servicio.create({ data: s });
   }
-  console.log(`✅ ${serviciosData.length} Servicios Asistenciales creados.`);
+  console.log(`✅ ${serviciosData.length} Servicios Hospitalarios creados.`);
 
   // 3. Categorías Profesionales (14 Cargos Hospitalarios)
   const categoriasNombres = [
@@ -100,22 +122,27 @@ async function main() {
     { codigo: 'D12', nombre: 'Guardia Diurna 12h', horaInicio: '07:00', horaFin: '19:00', horasOrdinarias: 12, horasDiurnas: 12, horasNocturnas: 0, colorHex: '#FFEDD5', descuentaBancoHoras: false },
     { codigo: 'G24', nombre: 'Guardia Médica 24h', horaInicio: '07:00', horaFin: '07:00', horasOrdinarias: 24, horasDiurnas: 13, horasNocturnas: 11, colorHex: '#FEE2E2', descuentaBancoHoras: false, esNocturnoPesado: true },
 
-    // Administrativos y Horas Pico
-    { codigo: 'ADM', nombre: 'Administrativo Oficina 8h', horaInicio: '08:00', horaFin: '17:00', horasOrdinarias: 8, horasDiurnas: 8, horasNocturnas: 0, colorHex: '#F3F4F6', descuentaBancoHoras: false },
+    // Administrativos y Horas Pico (ADM: 08:00-17:00 con 60 min almuerzo Art. 167 CST = 8h netas)
+    { codigo: 'ADM', nombre: 'Administrativo Oficina 8h', horaInicio: '08:00', horaFin: '17:00', horasOrdinarias: 8, horasDiurnas: 8, horasNocturnas: 0, minutosAlmuerzo: 60, colorHex: '#F3F4F6', descuentaBancoHoras: false },
     { codigo: 'MD', nombre: 'Madrugada / Apertura 8h', horaInicio: '06:00', horaFin: '14:00', horasOrdinarias: 8, horasDiurnas: 8, horasNocturnas: 0, colorHex: '#E2E8F0', descuentaBancoHoras: false },
     { codigo: 'AP', nombre: 'Refuerzo Horas Pico 8h', horaInicio: '10:00', horaFin: '18:00', horasOrdinarias: 8, horasDiurnas: 8, horasNocturnas: 0, colorHex: '#CFFAFE', descuentaBancoHoras: false },
-    { codigo: 'DISP', nombre: 'Disponibilidad / Retén', horaInicio: '00:00', horaFin: '23:59', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, colorHex: '#FEF9C3', descuentaBancoHoras: false },
+    { codigo: 'DISP', nombre: 'Disponibilidad / Retén', horaInicio: '00:00', horaFin: '23:59', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, colorHex: '#FEF9C3', descuentaBancoHoras: false, visibleEnPaleta: false },
 
     // Descansos, Banco y Novedades
     { codigo: 'S', nombre: 'Saliente de Guardia', horaInicio: '00:00', horaFin: '23:59', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, colorHex: '#ECFEFF', descuentaBancoHoras: false },
     { codigo: 'L', nombre: 'Libre Programado', horaInicio: '00:00', horaFin: '23:59', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, colorHex: '#F8FAFC', descuentaBancoHoras: false },
-    { codigo: 'COMP', nombre: 'Compensatorio Banco de Horas', horaInicio: '00:00', horaFin: '23:59', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, colorHex: '#CCFBF1', descuentaBancoHoras: true },
+    { codigo: 'BLANCO', nombre: 'Celda en Blanco (Sin asignar)', horaInicio: '00:00', horaFin: '00:00', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, colorHex: '#FFFFFF', descuentaBancoHoras: false, visibleEnPaleta: false },
+    { codigo: 'COMP', nombre: 'Compensatorio Banco de Horas', horaInicio: '00:00', horaFin: '23:59', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, colorHex: '#CCFBF1', descuentaBancoHoras: true, horasAmortizacionBanco: 8 },
+    { codigo: 'FAM', nombre: 'Día de la Familia (Ley 1857 / Exonerado a 42h)', horaInicio: '00:00', horaFin: '23:59', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, colorHex: '#FCE7F3', descuentaBancoHoras: false },
     { codigo: 'VAC', nombre: 'Vacaciones RRHH', horaInicio: '00:00', horaFin: '23:59', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, colorHex: '#D1FAE5', descuentaBancoHoras: false },
     { codigo: 'INC', nombre: 'Incapacidad Médica', horaInicio: '00:00', horaFin: '23:59', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, colorHex: '#FCE7F3', descuentaBancoHoras: false },
+    { codigo: 'LIC', nombre: 'Licencia Remunerada / Luto / Maternidad', horaInicio: '00:00', horaFin: '23:59', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, colorHex: '#E0E7FF', descuentaBancoHoras: false },
   ];
 
+  const mapTiposTurno: Record<string, string> = {};
   for (const t of turnosData) {
-    await prisma.tipoTurno.create({ data: t });
+    const creado = await prisma.tipoTurno.create({ data: t });
+    mapTiposTurno[t.codigo] = creado.id;
   }
   console.log(`✅ ${turnosData.length} Tipos de Turno registrados con recargos CST.`);
 
@@ -227,9 +254,6 @@ async function main() {
     { srvId: 'srv-mant', cargo: 'Técnico de Mantenimiento', cantidad: 4 },
   ];
 
-  // Saldos variados del Banco de Horas (múltiplos de 8h: a favor +24h/+16h/+8h, en cero 0h, o en contra -8h/-16h)
-  const saldosBancoVariados = [24, 16, 8, 0, 0, -8, -16, 8, 0, 16, -8, 24];
-
   for (const dot of dotaciones) {
     const catId = mapCategorias[dot.cargo];
     for (let i = 0; i < dot.cantidad; i++) {
@@ -261,7 +285,6 @@ async function main() {
       }
 
       const doc = String(cedulaBase++);
-      const saldoBanco = 0;
       const slugPila = nombrePila.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
       const slugAp = apellido1.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
@@ -284,17 +307,93 @@ async function main() {
           anio: 2026,
           mes: 10, // Cierre del mes anterior
           saldoInicial: 0,
-          horasTrabajadas: 168 + saldoBanco,
+          horasTrabajadas: 168,
           horasContratadas: 168,
           horasAmortizadasComp: 0,
-          diferenciaMes: saldoBanco,
-          saldoFinalAcumulado: saldoBanco, // Pasa como saldo anterior a Noviembre
+          diferenciaMes: 0,
+          saldoFinalAcumulado: 0,
         },
       });
     }
   }
 
-  console.log(`🎉 ¡ÉXITO TOTAL! ${contadorTotal} colaboradores creados con sus saldos de Banco de Horas.`);
+  // 7. Reglas de Cobertura (Día / Noche Lun-Sáb y Dom/Fest) y Turnos Habilitados por Servicio × Cargo
+  const totalesPorServicio = new Map<string, { reqDia: number; reqNoche: number; reqDiaDomFest: number; reqNocheDomFest: number }>();
+  const mapaServiciosSeed = new Map(serviciosData.map((s) => [s.id, s]));
+
+  for (const dot of dotaciones) {
+    const srvCfg = mapaServiciosSeed.get(dot.srvId)!;
+    const catId = mapCategorias[dot.cargo];
+    const reqDia = Math.max(1, Math.min(Math.floor(dot.cantidad / 2), 2));
+    const reqNoche =
+      srvCfg.modalidadDias === 'LUN_VIE_HABILES' || srvCfg.modalidadDias === 'LUN_SAB_SIN_FESTIVOS'
+        ? 0
+        : dot.cantidad >= 3
+          ? 1
+          : 0;
+    const reqDiaDomFest =
+      srvCfg.modalidadDias === 'LUN_VIE_HABILES' || srvCfg.modalidadDias === 'LUN_SAB_SIN_FESTIVOS'
+        ? 0
+        : srvCfg.modalidadDias === 'TODOS_GUARDIA_FDS'
+          ? Math.max(1, reqDia - 1)
+          : reqDia;
+    const reqNocheDomFest = reqNoche;
+
+    await prisma.requerimientoCobertura.create({
+      data: {
+        servicioId: dot.srvId,
+        categoriaId: catId,
+        reqDia,
+        reqNoche,
+        reqDiaDomFest,
+        reqNocheDomFest,
+      },
+    });
+
+    const acc = totalesPorServicio.get(dot.srvId) || { reqDia: 0, reqNoche: 0, reqDiaDomFest: 0, reqNocheDomFest: 0 };
+    acc.reqDia += reqDia;
+    acc.reqNoche += reqNoche;
+    acc.reqDiaDomFest += reqDiaDomFest;
+    acc.reqNocheDomFest += reqNocheDomFest;
+    totalesPorServicio.set(dot.srvId, acc);
+
+    const filasTurnos = srvCfg.turnosHabilitadosCodigos
+      .filter((cod) => cod !== 'BLANCO' && mapTiposTurno[cod])
+      .map((cod) => ({
+        servicioId: dot.srvId,
+        categoriaId: catId,
+        tipoTurnoId: mapTiposTurno[cod],
+        habilitado: true,
+      }));
+    if (filasTurnos.length > 0) {
+      await prisma.servicioTurnoHabilitado.createMany({ data: filasTurnos, skipDuplicates: true });
+    }
+  }
+
+  for (const [srvId, tot] of totalesPorServicio.entries()) {
+    await prisma.servicio.update({
+      where: { id: srvId },
+      data: tot,
+    });
+  }
+
+  // 8. Enlaces iniciales de Servicios Hermanos para rotación homóloga
+  const paresHermanos: Array<[string, string]> = [
+    ['srv-urg', 'srv-mat'],
+    ['srv-urg', 'srv-ped'],
+    ['srv-fact-urg', 'srv-fact-cen'],
+  ];
+  for (const [a, b] of paresHermanos) {
+    await prisma.servicioHermano.createMany({
+      data: [
+        { servicioId: a, servicioHermanoId: b },
+        { servicioId: b, servicioHermanoId: a },
+      ],
+      skipDuplicates: true,
+    });
+  }
+
+  console.log(`🎉 ¡ÉXITO TOTAL! ${contadorTotal} colaboradores creados con cobertura, hermanos y Banco de Horas.`);
   console.log('🏥 Rafa Turnos sembrado con éxito en tu base de datos PostgreSQL.');
 }
 

@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { Component, EventEmitter, HostListener, Input, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ModalConfirmacionConfig } from '../../models';
 
@@ -9,16 +9,22 @@ import { ModalConfirmacionConfig } from '../../models';
   template: `
     @if (config) {
       <div class="modal-backdrop" (click)="cancelar.emit()">
-        <div class="modal-box modal-box-confirm" (click)="$event.stopPropagation()">
+        <div
+          class="modal-box modal-box-confirm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="modal-confirm-title"
+          (click)="$event.stopPropagation()">
           <div class="modal-header" [class.modal-header-danger]="config.esPeligroso">
-            <h3>{{ config.titulo }}</h3>
-            <button (click)="cancelar.emit()">✕</button>
+            <h3 id="modal-confirm-title">{{ config.titulo }}</h3>
+            <button type="button" aria-label="Cerrar diálogo" (click)="cancelar.emit()">✕</button>
           </div>
           <div class="modal-body">
             <p class="confirm-message-text">{{ config.mensaje }}</p>
             <div class="modal-footer modal-footer-confirm">
-              <button class="btn-outline" (click)="cancelar.emit()">Cancelar</button>
+              <button type="button" class="btn-outline" (click)="cancelar.emit()">Cancelar</button>
               <button
+                type="button"
                 [class.btn-danger]="config.esPeligroso"
                 [class.btn-primary]="!config.esPeligroso"
                 (click)="confirmar.emit()">
@@ -31,6 +37,9 @@ import { ModalConfirmacionConfig } from '../../models';
     }
   `,
   styles: [`
+    :host {
+      display: contents;
+    }
     .modal-backdrop {
       position: fixed;
       top: 0;
@@ -154,4 +163,11 @@ export class ModalConfirmacionComponent {
   @Input() config: ModalConfirmacionConfig | null = null;
   @Output() cancelar = new EventEmitter<void>();
   @Output() confirmar = new EventEmitter<void>();
+
+  @HostListener('document:keydown.escape')
+  onEscapeKey(): void {
+    if (this.config) {
+      this.cancelar.emit();
+    }
+  }
 }
