@@ -50,6 +50,21 @@ class StubGuardRoutesController {
     return { ok: true };
   }
 
+  @Patch('cuadrantes/celda/nota')
+  guardarNotaCelda() {
+    return { ok: true };
+  }
+
+  @Patch('cuadrantes/celda/fijar')
+  fijarCelda() {
+    return { ok: true };
+  }
+
+  @Patch('cuadrantes/celda/apoyo')
+  apoyoCelda() {
+    return { ok: true };
+  }
+
   @Put('cuadrantes/estado')
   actualizarEstado() {
     return { ok: true };
@@ -130,12 +145,13 @@ describe('SsoRoleGuard (RBAC + Sliding Session)', () => {
 
   const signRole = (
     rol: 'ADMIN_TH' | 'COORDINADOR' | 'COLABORADOR',
-    opts?: { serviciosCoordinados?: string[]; expiresIn?: number }
+    opts?: { serviciosCoordinados?: string[]; expiresIn?: number; nombre?: string }
   ) =>
     firmarJwtHmac(
       {
         documento: '101010',
         empleadoId: 'emp-1',
+        nombre: opts?.nombre ?? 'Usuario Prueba',
         rol,
         serviciosCoordinados: opts?.serviciosCoordinados ?? ['srv-urg'],
       },
@@ -295,7 +311,7 @@ describe('SsoRoleGuard (RBAC + Sliding Session)', () => {
   });
 
   it('emite header x-renewed-token en sliding session cuando restan < 2h', async () => {
-    const porVencer = signRole('COORDINADOR', { expiresIn: 1800 });
+    const porVencer = signRole('COORDINADOR', { expiresIn: 1800, nombre: 'Laura Coord' });
     const resRenovado = await request(app.getHttpServer())
       .put('/api/v1/cuadrantes/celda')
       .set('Authorization', `Bearer ${porVencer}`)
@@ -304,8 +320,9 @@ describe('SsoRoleGuard (RBAC + Sliding Session)', () => {
 
     const renewed = resRenovado.headers['x-renewed-token'];
     expect(typeof renewed).toBe('string');
-    const decoded = verificarJwtHmac(renewed, SECRET);
+    const decoded: any = verificarJwtHmac(renewed, SECRET);
     expect(decoded.rol).toBe('COORDINADOR');
+    expect(decoded.nombre).toBe('Laura Coord');
 
     const fresco = signRole('COORDINADOR', { expiresIn: 25000 });
     const resFresco = await request(app.getHttpServer())
@@ -315,5 +332,38 @@ describe('SsoRoleGuard (RBAC + Sliding Session)', () => {
       .expect(200);
 
     expect(resFresco.headers['x-renewed-token']).toBeUndefined();
+  });
+
+  it('protege /celda/nota, /celda/fijar y /celda/apoyo contra COLABORADOR y restringe servicioDestinoId para COORDINADOR', async () => {
+    const tokenColab = signRole('COLABORADOR');
+    await request(app.getHttpServer())
+      .patch('/api/v1/cuadrantes/celda/nota')
+      .set('Authorization', `Bearer ${tokenColab}`)
+      .send({ servicioId: 'srv-urg', nota: 'Hack' })
+      .expect(403);
+    await request(app.getHttpServer())
+      .patch('/api/v1/cuadrantes/celda/fijar')
+      .set('Authorization', `Bearer ${tokenColab}`)
+      .send({ servicioId: 'srv-urg', fijada: true })
+      .expect(403);
+    await request(app.getHttpServer())
+      .patch('/api/v1/cuadrantes/celda/apoyo')
+      .set('Authorization', `Bearer ${tokenColab}`)
+      .send({ servicioId: 'srv-urg', servicioDestinoId: 'srv-uci' })
+      .expect(403);
+
+    const tokenCoordSoloUrg = signRole('COORDINADOR', { serviciosCoordinados: ['srv-urg'] });
+    await request(app.getHttpServer())
+      .patch('/api/v1/cuadrantes/celda/apoyo')
+      .set('Authorization', `Bearer ${tokenCoordSoloUrg}`)
+      .send({ servicioId: 'srv-urg', servicioDestinoId: 'srv-uci' })
+      .expect(403);
+
+    const tokenCoordAmbos = signRole('COORDINADOR', { serviciosCoordinados: ['srv-urg', 'srv-uci'] });
+    await request(app.getHttpServer())
+      .patch('/api/v1/cuadrantes/celda/apoyo')
+      .set('Authorization', `Bearer ${tokenCoordAmbos}`)
+      .send({ servicioId: 'srv-urg', servicioDestinoId: 'srv-uci' })
+      .expect(200);
   });
 });

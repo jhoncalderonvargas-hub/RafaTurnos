@@ -38,9 +38,9 @@ export class SsoRoleGuard implements CanActivate {
         ? authHeader.slice(7).trim()
         : '';
 
-    let payload: (PayloadTokenSsoIntranet & { empleadoId?: string }) | null = null;
+    let payload: (PayloadTokenSsoIntranet & { empleadoId?: string; nombre?: string }) | null = null;
     if (token) {
-      payload = verificarJwtHmac<PayloadTokenSsoIntranet & { empleadoId?: string }>(
+      payload = verificarJwtHmac<PayloadTokenSsoIntranet & { empleadoId?: string; nombre?: string }>(
         token,
         this.obtenerSecret()
       );
@@ -53,6 +53,7 @@ export class SsoRoleGuard implements CanActivate {
           {
             documento: payload.documento,
             empleadoId: payload.empleadoId,
+            nombre: payload.nombre,
             rol: payload.rol,
             serviciosCoordinados: payload.serviciosCoordinados,
           },
@@ -139,6 +140,17 @@ export class SsoRoleGuard implements CanActivate {
       ) {
         throw new ForbiddenException(
           `Acceso denegado: no tienes permisos de coordinación sobre el servicio "${srvIdBody}".`
+        );
+      }
+
+      const srvDestinoBody = req.body?.servicioDestinoId;
+      if (
+        srvDestinoBody &&
+        (!Array.isArray(payload.serviciosCoordinados) ||
+          !payload.serviciosCoordinados.includes(srvDestinoBody))
+      ) {
+        throw new ForbiddenException(
+          `Acceso denegado: no tienes permisos de coordinación sobre el servicio destino "${srvDestinoBody}".`
         );
       }
 

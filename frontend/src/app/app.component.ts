@@ -1,7 +1,17 @@
 import { Component, computed, DestroyRef, HostListener, inject, OnInit, signal } from '@angular/core';
 import { catchError, forkJoin, map, Observable, of, Subject, switchMap } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { SesionUsuarioSso } from './models';
+import {
+  CeldaAsignacion,
+  CodigoTurno,
+  DiaColumna,
+  EmpleadoHospital,
+  InfraccionNormativa,
+  MenuContextualCeldaState,
+  ServicioHospitalario,
+  SesionUsuarioSso,
+  TargetCeldaInspector,
+} from './models';
 import { TurnosApiService } from './turnos-api.service';
 import { NotificacionStore } from './stores/notificacion.store';
 import { CatalogosSsoStore } from './stores/catalogos-sso.store';
@@ -19,6 +29,8 @@ import { ConfiguracionGeneralComponent } from './components/configuracion-genera
 import { PlanificadorCuadranteComponent } from './components/planificador-cuadrante/planificador-cuadrante.component';
 import { SidebarNavegacionComponent } from './components/sidebar-navegacion/sidebar-navegacion.component';
 import { AuditoriaTrazabilidadComponent } from './components/auditoria-trazabilidad/auditoria-trazabilidad.component';
+import { CeldaMenuContextualComponent } from './components/inspector-celda/celda-menu-contextual.component';
+import { CeldaDrawerComponent } from './components/inspector-celda/celda-drawer.component';
 
 @Component({
   selector: 'app-root',
@@ -34,6 +46,8 @@ import { AuditoriaTrazabilidadComponent } from './components/auditoria-trazabili
     PlanificadorCuadranteComponent,
     SidebarNavegacionComponent,
     AuditoriaTrazabilidadComponent,
+    CeldaMenuContextualComponent,
+    CeldaDrawerComponent,
   ],
   templateUrl: './app.component.html',
   styleUrl: './app.component.css',
@@ -57,6 +71,110 @@ export class AppComponent implements OnInit {
   readonly sidebarHovered = signal<boolean>(false);
   readonly sidebarExpandido = computed<boolean>(() => this.sidebarFijo() || this.sidebarHovered());
   readonly sidebarContraido = computed<boolean>(() => !this.sidebarExpandido());
+
+  // Estado del Inspector Híbrido de Celda (Menú Contextual Clic Derecho + Drawer F2)
+  readonly menuContextualCelda = signal<MenuContextualCeldaState | null>(null);
+  readonly drawerInspectorCelda = signal<TargetCeldaInspector | null>(null);
+
+  readonly menuContextualData = computed(() => {
+    const st = this.menuContextualCelda();
+    return st ? this.resolverContextoCelda(st.empId, st.dia, st.origenVista) : null;
+  });
+
+  readonly drawerInspectorData = computed(() => {
+    const st = this.drawerInspectorCelda();
+    return st ? this.resolverContextoCelda(st.empId, st.dia, st.origenVista) : null;
+  });
+
+  private resolverContextoCelda(
+    empId: string,
+    dia: number,
+    origenVista: 'PLANIFICADOR' | 'PORTAL'
+  ): {
+    anio: number;
+    mes: number;
+    diasDelMes: DiaColumna[];
+    empleado: EmpleadoHospital | undefined;
+    celda: CeldaAsignacion | undefined;
+    codigoDiaAnterior: CodigoTurno;
+    celdaDiaSiguiente: CeldaAsignacion | undefined;
+    servicioActual: ServicioHospitalario;
+    estadoCuadrante: 'BORRADOR' | 'PUBLICADO' | 'CERRADO_NOMINA' | 'SIN_PLANIFICAR';
+    infraccionesActivas: InfraccionNormativa[];
+  } {
+    const anio = this.catalogos.anioSeleccionado();
+    if (origenVista === 'PORTAL') {
+      const mes = this.portalReportes.mesSeleccionadoPortal();
+      const diasDelMes = this.portalReportes.diasDelMesPortal();
+      const portalData = this.portalReportes.datosEmpleadoPortal();
+      const empleado =
+        portalData.empleado?.id === empId
+          ? portalData.empleado
+          : this.catalogos.empleados().find((e) => e.id === empId);
+      const celdasEmp =
+        portalData.empleado?.id === empId
+          ? (portalData.celdas || {})
+          : (this.portalReportes.asignacionesMesPortal()[empId] || {});
+      const celda = celdasEmp[dia];
+      const codigoDiaAnterior = (
+        dia === 1
+          ? this.cuadrante.obtenerUltimoTurnoMesPrevioEnPeriodo(
+              empId,
+              anio,
+              mes,
+              empleado?.ultimoTurnoMesPrevio || 'L'
+            )
+          : celdasEmp[dia - 1]?.codigo || ''
+      ) as CodigoTurno;
+      const celdaDiaSiguiente = dia < diasDelMes.length ? celdasEmp[dia + 1] : undefined;
+      const srvIdEje =
+        celda?.servicioEjecutorId || empleado?.servicioBaseId || this.catalogos.servicioSeleccionadoId();
+      const servicioActual =
+        this.catalogos.servicios().find((s) => s.id === srvIdEje) ||
+        portalData.servicioBase ||
+        this.catalogos.servicioActual();
+
+      return {
+        anio,
+        mes,
+        diasDelMes,
+        empleado,
+        celda,
+        codigoDiaAnterior,
+        celdaDiaSiguiente,
+        servicioActual,
+        estadoCuadrante: this.portalReportes.estadoCuadrantePortal(),
+        infraccionesActivas: [],
+      };
+    }
+
+    const mes = this.catalogos.mesSeleccionado();
+    const diasDelMes = this.cuadrante.diasDelMes();
+    const fila = this.cuadrante.filasServicioCompletas().find((f) => f.empleado.id === empId);
+    const empleado =
+      fila?.empleado || this.catalogos.empleados().find((e) => e.id === empId);
+    const celdasEmp = this.cuadrante.asignaciones()[empId] || {};
+    const celda = celdasEmp[dia];
+    const codigoDiaAnterior = (
+      dia === 1
+        ? this.cuadrante.obtenerUltimoTurnoMesPrevio(empId, empleado?.ultimoTurnoMesPrevio || 'L')
+        : celdasEmp[dia - 1]?.codigo || ''
+    ) as CodigoTurno;
+    const celdaDiaSiguiente = dia < diasDelMes.length ? celdasEmp[dia + 1] : undefined;
+
+    return {
+      anio,
+      mes,
+      diasDelMes,
+      empleado,
+      celda,
+      codigoDiaAnterior,
+      celdaDiaSiguiente,
+      servicioActual: this.catalogos.servicioActual(),
+      estadoCuadrante: this.cuadrante.estadoCuadrante(),
+      infraccionesActivas: this.cuadrante.infraccionesActivas(),
+    };
+  }
 
   private readonly periodoCambioSubject = new Subject<{
     anio: number;
@@ -326,6 +444,8 @@ export class AppComponent implements OnInit {
       );
       return;
     }
+    this.menuContextualCelda.set(null);
+    this.drawerInspectorCelda.set(null);
     this.vistaActual.set(vista);
     if (vista === 'DASHBOARD' || vista === 'AUDITORIA') {
       this.permutasAuditoria.sincronizarAuditoriasDesdePostgres();
@@ -336,8 +456,99 @@ export class AppComponent implements OnInit {
     }
   }
 
+  // Controladores del Inspector de Celda (Clic Derecho + F2)
+  abrirMenuContextualPlanificador(ev: {
+    empId: string;
+    dia: number;
+    clientX: number;
+    clientY: number;
+  }): void {
+    this.menuContextualCelda.set({ ...ev, origenVista: 'PLANIFICADOR' });
+  }
+
+  abrirDrawerDesdeMenuContextual(ev: {
+    empId: string;
+    dia: number;
+    origenVista: 'PLANIFICADOR' | 'PORTAL';
+    focoSeccion?: 'NOTA' | 'APOYO' | 'EDICION';
+  }): void {
+    this.menuContextualCelda.set(null);
+    this.drawerInspectorCelda.set(ev);
+  }
+
+  abrirDrawerPlanificador(ev: { empId: string; dia: number }): void {
+    this.menuContextualCelda.set(null);
+    this.drawerInspectorCelda.set({
+      empId: ev.empId,
+      dia: ev.dia,
+      origenVista: 'PLANIFICADOR',
+    });
+  }
+
+  abrirMenuContextualPortal(ev: { dia: number; clientX: number; clientY: number }): void {
+    const empId =
+      this.portalReportes.datosEmpleadoPortal().empleado?.id ||
+      this.portalReportes.empleadoPortalId() ||
+      this.catalogos.sesionActual()?.empleadoId ||
+      '';
+    if (!empId) return;
+    this.menuContextualCelda.set({
+      empId,
+      dia: ev.dia,
+      clientX: ev.clientX,
+      clientY: ev.clientY,
+      origenVista: 'PORTAL',
+    });
+  }
+
+  abrirDrawerPortalDia(dia: number): void {
+    const empId =
+      this.portalReportes.datosEmpleadoPortal().empleado?.id ||
+      this.portalReportes.empleadoPortalId() ||
+      this.catalogos.sesionActual()?.empleadoId ||
+      '';
+    if (!empId) return;
+    this.menuContextualCelda.set(null);
+    this.drawerInspectorCelda.set({
+      empId,
+      dia,
+      origenVista: 'PORTAL',
+    });
+  }
+
+  navegarDiaDrawer(nuevoDia: number): void {
+    const actual = this.drawerInspectorCelda();
+    if (!actual) return;
+    const totalDias =
+      actual.origenVista === 'PORTAL'
+        ? this.portalReportes.diasDelMesPortal().length
+        : this.cuadrante.diasDelMes().length;
+    if (nuevoDia < 1 || nuevoDia > totalDias) return;
+    this.drawerInspectorCelda.set({
+      empId: actual.empId,
+      dia: nuevoDia,
+      origenVista: actual.origenVista,
+    });
+    if (actual.origenVista === 'PLANIFICADOR') {
+      this.cuadrante.enfocarCeldaPorId(actual.empId, nuevoDia);
+    } else {
+      this.portalReportes.seleccionarDiaEnPortal(nuevoDia);
+    }
+  }
+
+  irAPermutaDesdeInspector(dia: number): void {
+    this.portalReportes.seleccionarDiaEnPortal(dia);
+    setTimeout(() => {
+      const sel = document.getElementById('portal-companero-select');
+      sel?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      sel?.focus();
+    }, 60);
+  }
+
   // Controladores de cambio de servicio y periodo
   cambiarServicio(nuevoId: string): void {
+    this.menuContextualCelda.set(null);
+    this.drawerInspectorCelda.set(null);
     this.catalogos.servicioSeleccionadoId.set(nuevoId);
     this.cuadrante.limpiarEstadoAlCambiarServicio();
     this.permutasAuditoria.sincronizarAuditoriasDesdePostgres();
@@ -386,6 +597,7 @@ export class AppComponent implements OnInit {
   }
 
   private cambiarPeriodo(nuevoAnio: number, nuevoMes: number, desdePortal: boolean): void {
+    this.menuContextualCelda.set(null);
     const anioValido = Number(nuevoAnio);
     const mesValido = Math.min(12, Math.max(1, Number(nuevoMes)));
     const cambioAnio = anioValido !== this.catalogos.anioSeleccionado();
@@ -414,12 +626,32 @@ export class AppComponent implements OnInit {
       this.cuadrante.teclaCtrlPresionada.set(true);
     }
 
+    const activeTag = (document.activeElement?.tagName || '').toLowerCase();
+    const enInputEditable = activeTag === 'input' || activeTag === 'textarea' || activeTag === 'select';
+
+    if (event.key === 'F2' && !enInputEditable) {
+      if (this.vistaActual() === 'PLANIFICADOR') {
+        const enfocada = this.cuadrante.celdaEnfocada();
+        if (enfocada) {
+          event.preventDefault();
+          this.abrirDrawerPlanificador(enfocada);
+          return;
+        }
+      } else if (
+        this.vistaActual() === 'PORTAL_EMPLEADO' &&
+        this.portalReportes.mesesDisponiblesPortal().length > 0
+      ) {
+        event.preventDefault();
+        this.abrirDrawerPortalDia(this.portalReportes.diaPermutaSeleccionado());
+        return;
+      }
+    }
+
     const isCtrl = event.ctrlKey || event.metaKey;
     const keyLower = event.key.toLowerCase();
 
     if (isCtrl && keyLower === 'z' && !event.shiftKey) {
-      const activeTag = (document.activeElement?.tagName || '').toLowerCase();
-      if (activeTag === 'input' || activeTag === 'textarea' || activeTag === 'select') {
+      if (enInputEditable) {
         return;
       }
       event.preventDefault();
@@ -428,8 +660,7 @@ export class AppComponent implements OnInit {
     }
 
     if (isCtrl && (keyLower === 'y' || (keyLower === 'z' && event.shiftKey))) {
-      const activeTag = (document.activeElement?.tagName || '').toLowerCase();
-      if (activeTag === 'input' || activeTag === 'textarea' || activeTag === 'select') {
+      if (enInputEditable) {
         return;
       }
       event.preventDefault();

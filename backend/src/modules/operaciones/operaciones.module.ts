@@ -1,4 +1,4 @@
-import { BadRequestException, Body, ConflictException, Controller, Get, Header, Headers, Injectable, Module, NotFoundException, Optional, Param, Patch, Post, Query, Req, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, ForbiddenException, Get, Header, Headers, Injectable, Module, NotFoundException, Optional, Param, Patch, Post, Query, Req, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { randomBytes } from 'crypto';
@@ -14,6 +14,7 @@ import {
   calcularDescansoEntreTurnosMin,
   DESCANSO_MINIMO_ENTRE_TURNOS_MIN,
   esCodigoExoneracionContrato,
+  esFechaIsoValida,
   r2,
   sumarDiasIso,
   turnoEsLaborado,
@@ -223,6 +224,14 @@ export class PermutasController {
     if (novSol || novRec) {
       throw new ConflictException(
         `RN-03 Bloqueante: Novedad oficial activa (${(novSol || novRec)?.tipo}) bloquea el intercambio en esa fecha.`
+      );
+    }
+
+    if ((asigOri as any)?.fijada || (asigDes as any)?.fijada) {
+      const empBloq = (asigOri as any)?.fijada ? solicitante.nombre : receptor.nombre;
+      const diaBloq = (asigOri as any)?.fijada ? params.diaOrigen : params.diaDestino;
+      throw new ConflictException(
+        `Celda fijada (📌): el turno de ${empBloq} en el día ${diaBloq} está bloqueado por coordinación contra permutas.`
       );
     }
 
@@ -600,9 +609,32 @@ export class PermutasController {
           horasRec
         );
 
-        const actorNombre = req?.usuarioSso?.nombre
-          ? `${req.usuarioSso.nombre} (${req.usuarioSso.rol === 'ADMIN_TH' ? 'Talento Humano' : 'Coordinador'})`
-          : 'Coordinación Asistencial';
+        const uSso = req?.usuarioSso;
+        let actorNombre = 'Coordinación Asistencial';
+        if (uSso) {
+          const rolEtiqueta = uSso.rol === 'ADMIN_TH' ? 'Talento Humano' : 'Coordinador';
+          if (uSso.nombre && String(uSso.nombre).trim()) {
+            actorNombre = `${String(uSso.nombre).trim()} (${rolEtiqueta})`;
+          } else if (
+            typeof tx.empleado?.findFirst === 'function' &&
+            (uSso.empleadoId || uSso.documento)
+          ) {
+            const actorEmp = await tx.empleado.findFirst({
+              where: {
+                OR: [
+                  ...(uSso.empleadoId ? [{ id: String(uSso.empleadoId) }] : []),
+                  ...(uSso.documento ? [{ documento: String(uSso.documento) }] : []),
+                ],
+              },
+              select: { nombre: true },
+            });
+            if (actorEmp?.nombre) {
+              actorNombre = `${actorEmp.nombre} (${rolEtiqueta})`;
+            }
+          }
+        }
+        const faseCuadPermuta =
+          cuadrante.estado === 'CERRADO_NOMINA' ? 'CERRADO_NOMINA' : 'PUBLICADO';
 
         await tx.auditoriaCambio.createMany({
           data: [
@@ -615,6 +647,10 @@ export class PermutasController {
               turnoAnterior: actualSolicitante,
               turnoNuevo: normalizarCodigo(permuta.turnoDestino),
               justificacion: `Permuta aprobada con ${permuta.receptor.nombre} (Día ${permuta.diaOrigen}: [${permuta.turnoOrigen}] ⇄ Día ${permuta.diaDestino}: [${permuta.turnoDestino}])`,
+              fechaObjetivo: fechaOrigen,
+              faseCuadrante: faseCuadPermuta,
+              origenAccion: 'PERMUTA',
+              esDetalleLote: false,
             },
             {
               asignacionTurnoId: nuevaReceptor.id,
@@ -625,6 +661,10 @@ export class PermutasController {
               turnoAnterior: actualReceptor,
               turnoNuevo: normalizarCodigo(permuta.turnoOrigen),
               justificacion: `Permuta aprobada con ${permuta.solicitante.nombre} (Día ${permuta.diaDestino}: [${permuta.turnoDestino}] ⇄ Día ${permuta.diaOrigen}: [${permuta.turnoOrigen}])`,
+              fechaObjetivo: fechaDestino,
+              faseCuadrante: faseCuadPermuta,
+              origenAccion: 'PERMUTA',
+              esDetalleLote: false,
             },
           ],
         });
@@ -966,6 +1006,7 @@ export class IntranetIntegrationController {
       {
         documento: usuario.documento,
         empleadoId: usuario.empleadoId,
+        nombre: usuario.nombre,
         rol: usuario.rol,
         serviciosCoordinados: usuario.serviciosPermitidosIds,
       },
@@ -1212,6 +1253,12 @@ export class CalendarioIcalController {
 
         const srvNombre = a.servicioEjecutor?.nombre || empleado.servicioBase.nombre;
         const catNombre = empleado.categoria?.nombre || 'Personal Asistencial';
+        const notaLim = (a as any).nota
+          ? String((a as any).nota).trim().replace(/\r?\n/g, ' ')
+          : '';
+        const lineaNota = notaLim
+          ? `\\nNota: ${notaLim.replace(/([,;\\])/g, '\\$1')}`
+          : '';
 
         if (a.tipoTurno.horasOrdinarias <= 0) {
           // Evento de día completo para Novedades / Compensatorios (VAC, INC, COMP, DISP)
@@ -1222,7 +1269,7 @@ export class CalendarioIcalController {
             `DTSTART;VALUE=DATE:${ymdInicio}`,
             `DTEND;VALUE=DATE:${ymdDiaSig}`,
             `SUMMARY:[${cod}] ${a.tipoTurno.nombre} - ${srvNombre}`,
-            `DESCRIPTION:Colaborador: ${empleado.nombre} (${catNombre})\\nNovedad / Estado: ${a.tipoTurno.nombre}\\nServicio: ${srvNombre}`,
+            `DESCRIPTION:Colaborador: ${empleado.nombre} (${catNombre})\\nNovedad / Estado: ${a.tipoTurno.nombre}\\nServicio: ${srvNombre}${lineaNota}`,
             `LOCATION:${srvNombre}`,
             'END:VEVENT'
           );
@@ -1251,7 +1298,7 @@ export class CalendarioIcalController {
             `DTSTART;TZID=America/Bogota:${ymdInicio}T${hmsInicio}`,
             `DTEND;TZID=America/Bogota:${ymdFin}T${hmsFin}`,
             `SUMMARY:[${cod}] ${a.tipoTurno.nombre} (${a.tipoTurno.horaInicio}-${a.tipoTurno.horaFin}) - ${srvNombre}`,
-            `DESCRIPTION:Colaborador: ${empleado.nombre} (${catNombre})\\nTurno: ${cod} - ${a.tipoTurno.nombre} (${a.tipoTurno.horasOrdinarias}h)\\nServicio: ${srvNombre}`,
+            `DESCRIPTION:Colaborador: ${empleado.nombre} (${catNombre})\\nTurno: ${cod} - ${a.tipoTurno.nombre} (${a.tipoTurno.horasOrdinarias}h)\\nServicio: ${srvNombre}${lineaNota}`,
             `LOCATION:${srvNombre}`,
             'END:VEVENT'
           );
@@ -1268,6 +1315,195 @@ export class CalendarioIcalController {
 export class AuditoriasController {
   constructor(private readonly prisma: PrismaService) {}
 
+  @Get('celda')
+  async obtenerAuditoriaCelda(
+    @Query('empleadoId') empleadoIdParam?: string,
+    @Query('fecha') fechaParam?: string,
+    @Req() req?: any,
+  ) {
+    const usuarioSso = req?.usuarioSso;
+    if (!usuarioSso) {
+      throw new UnauthorizedException(
+        'Sesión SSO requerida para consultar la trazabilidad de la celda.'
+      );
+    }
+
+    const empKey = String(empleadoIdParam || '').trim();
+    const fechaIso = String(fechaParam || '').trim();
+    if (!empKey || !esFechaIsoValida(fechaIso)) {
+      throw new BadRequestException(
+        'Debe especificar empleadoId y fecha válida (YYYY-MM-DD).'
+      );
+    }
+
+    const emp = await this.prisma.empleado.findFirst({
+      where: { OR: [{ id: empKey }, { documento: empKey }] },
+      select: { id: true, documento: true, nombre: true, servicioBaseId: true },
+    });
+    if (!emp) {
+      throw new NotFoundException(`Colaborador "${empKey}" no encontrado.`);
+    }
+
+    const fechaUtc = new Date(`${fechaIso}T00:00:00.000Z`);
+    const anio = fechaUtc.getUTCFullYear();
+    const mes = fechaUtc.getUTCMonth() + 1;
+    const dia = fechaUtc.getUTCDate();
+
+    const asigActual = await this.prisma.asignacionTurno.findUnique({
+      where: { empleadoId_fecha: { empleadoId: emp.id, fecha: fechaUtc } },
+      select: {
+        id: true,
+        servicioEjecutorId: true,
+        nota: true,
+        fijada: true,
+        codigoPrevisto: true,
+        cuadrante: { select: { estado: true } },
+      },
+    });
+
+    const rol = usuarioSso.rol;
+    if (rol === 'COLABORADOR') {
+      const esMismoEmp =
+        (usuarioSso.empleadoId && usuarioSso.empleadoId === emp.id) ||
+        (usuarioSso.documento && String(usuarioSso.documento) === emp.documento);
+      if (!esMismoEmp) {
+        throw new ForbiddenException(
+          'Acceso denegado: como colaborador solo puedes consultar el historial de tus propios turnos.'
+        );
+      }
+    } else if (rol === 'COORDINADOR') {
+      const permitidos = Array.isArray(usuarioSso.serviciosCoordinados)
+        ? usuarioSso.serviciosCoordinados
+        : [];
+      const enAlcance =
+        permitidos.includes(emp.servicioBaseId) ||
+        (asigActual?.servicioEjecutorId &&
+          permitidos.includes(asigActual.servicioEjecutorId));
+      if (!enAlcance) {
+        throw new ForbiddenException(
+          'Acceso denegado: el colaborador no pertenece a tus servicios coordinados en esta fecha.'
+        );
+      }
+    } else if (rol !== 'ADMIN_TH') {
+      throw new ForbiddenException('Rol SSO no autorizado.');
+    }
+
+    const esColaborador = rol === 'COLABORADOR';
+    const [logs, permutasCell, novedad] = await Promise.all([
+      this.prisma.auditoriaCambio.findMany({
+        where: {
+          AND: [
+            {
+              OR: [
+                { empleadoId: emp.id, fechaObjetivo: fechaUtc },
+                { asignacionTurno: { empleadoId: emp.id, fecha: fechaUtc } },
+              ],
+            },
+            ...(esColaborador ? [{ faseCuadrante: { not: 'BORRADOR' } }] : []),
+          ],
+        },
+        include: {
+          servicio: { select: { id: true, nombre: true, codigo: true } },
+        },
+        orderBy: { timestamp: 'desc' },
+        take: 150,
+      }),
+      typeof this.prisma.solicitudPermuta?.findMany === 'function'
+        ? this.prisma.solicitudPermuta.findMany({
+            where: {
+              anio,
+              mes,
+              OR: [
+                { solicitanteId: emp.id, diaOrigen: dia },
+                { receptorId: emp.id, diaDestino: dia },
+              ],
+            },
+            include: {
+              solicitante: { select: { id: true, nombre: true } },
+              receptor: { select: { id: true, nombre: true } },
+              servicio: { select: { id: true, nombre: true, codigo: true } },
+            },
+            orderBy: { creadoEn: 'desc' },
+          })
+        : Promise.resolve([]),
+      typeof this.prisma.novedadAusencia?.findFirst === 'function'
+        ? this.prisma.novedadAusencia.findFirst({
+            where: {
+              empleadoId: emp.id,
+              fechaInicio: { lte: fechaUtc },
+              fechaFin: { gte: fechaUtc },
+            },
+          })
+        : Promise.resolve(null),
+    ]);
+
+    return {
+      empleadoId: emp.id,
+      fecha: fechaIso,
+      celda: {
+        nota: (asigActual as any)?.nota ?? null,
+        fijada: Boolean((asigActual as any)?.fijada),
+        codigoPrevisto: asigActual?.codigoPrevisto ?? null,
+        estadoCuadrante: asigActual?.cuadrante?.estado ?? null,
+      },
+      historial: logs.map((log: any) => {
+        const tsDate = new Date(log.timestamp);
+        const timestampFormateado =
+          tsDate.toLocaleDateString('es-CO', { timeZone: 'America/Bogota' }) +
+          ' ' +
+          tsDate.toLocaleTimeString('es-CO', {
+            timeZone: 'America/Bogota',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true,
+          });
+        const motivoLimpio = (log.justificacion || 'Modificación registrada').replace(
+          /Permuta [0-9a-fA-F\-]{36} aprobada con /g,
+          'Permuta aprobada con '
+        );
+        return {
+          id: log.id,
+          timestamp: timestampFormateado,
+          timestampIso: log.timestamp.toISOString(),
+          actor: log.actorId || 'Supervisión Asistencial',
+          tipoAccion: log.tipoAccion || 'EDICION_TURNO',
+          origenAccion: log.origenAccion || 'MANUAL',
+          faseCuadrante: log.faseCuadrante || 'PUBLICADO',
+          esDetalleLote: Boolean(log.esDetalleLote),
+          servicioNombre: log.servicio?.nombre || 'Servicio Asistencial',
+          turnoAnterior: log.turnoAnterior || '—',
+          turnoNuevo: log.turnoNuevo || '—',
+          // Opción B aprobada: justificación visible también para el colaborador tras publicar
+          justificacion: motivoLimpio,
+        };
+      }),
+      permutas: (Array.isArray(permutasCell) ? permutasCell : []).map((p: any) => ({
+        id: p.id,
+        fechaSolicitud: formatearFechaHoraBogota(p.fechaSolicitud),
+        solicitanteId: p.solicitanteId,
+        solicitanteNombre: p.solicitante?.nombre || 'Solicitante',
+        receptorId: p.receptorId,
+        receptorNombre: p.receptor?.nombre || 'Receptor',
+        servicioNombre: p.servicio?.nombre || 'Servicio',
+        diaOrigen: p.diaOrigen,
+        turnoOrigen: p.turnoOrigen,
+        diaDestino: p.diaDestino,
+        turnoDestino: p.turnoDestino,
+        estado: p.estado,
+        motivoRechazo: p.motivoRechazo || null,
+      })),
+      ausencia: novedad
+        ? {
+            id: novedad.id,
+            tipo: novedad.tipo,
+            fechaInicio: novedad.fechaInicio.toISOString().substring(0, 10),
+            fechaFin: novedad.fechaFin.toISOString().substring(0, 10),
+            codigoCie10: rol === 'ADMIN_TH' ? (novedad.codigoCie10 ?? null) : null,
+          }
+        : null,
+    };
+  }
+
   @Get()
   async listarAuditorias(
     @Query('servicioId') servicioId?: string,
@@ -1277,6 +1513,7 @@ export class AuditoriasController {
     @Query('fechaFin') fechaFin?: string,
     @Query('limite') limiteQuery?: string,
     @Query('page') pageQuery?: string,
+    @Query('incluirBorrador') incluirBorrador?: string,
     @Req() req?: any,
   ) {
     const usuarioSso = req?.usuarioSso;
@@ -1284,6 +1521,14 @@ export class AuditoriasController {
     const esCoordinador = usuarioSso?.rol === 'COORDINADOR';
 
     const andConditions: any[] = [];
+
+    // Por defecto la bitácora global oculta desgloses masivos y eventos de BORRADOR (siempre oculto para COLABORADOR)
+    const mostrarBorrador =
+      !esColaborador && String(incluirBorrador || '').toLowerCase() === 'true';
+    if (!mostrarBorrador) {
+      andConditions.push({ esDetalleLote: false });
+      andConditions.push({ faseCuadrante: { not: 'BORRADOR' } });
+    }
 
     // 1. Regla de Privacidad: COLABORADOR solo ve sus propios movimientos
     if (esColaborador && (usuarioSso?.empleadoId || usuarioSso?.documento)) {
@@ -1395,10 +1640,9 @@ export class AuditoriasController {
       take: limite,
     });
 
-    return logs.map((log) => {
-      const fechaUtc = log.asignacionTurno?.fecha
-        ? new Date(log.asignacionTurno.fecha)
-        : null;
+    return logs.map((log: any) => {
+      const fechaRaw = log.fechaObjetivo || log.asignacionTurno?.fecha;
+      const fechaUtc = fechaRaw ? new Date(fechaRaw) : null;
       const dia = fechaUtc ? fechaUtc.getUTCDate() : 0;
       const tsDate = new Date(log.timestamp);
       const timestampFormateado =
@@ -1436,6 +1680,9 @@ export class AuditoriasController {
         timestampIso: log.timestamp.toISOString(),
         actor: log.actorId || 'Supervisión Asistencial',
         tipoAccion: log.tipoAccion || 'EDICION_TURNO',
+        origenAccion: log.origenAccion || 'MANUAL',
+        faseCuadrante: log.faseCuadrante || 'PUBLICADO',
+        esDetalleLote: Boolean(log.esDetalleLote),
         empleadoId: log.empleadoId || log.asignacionTurno?.empleadoId,
         empleadoNombre: empNombre,
         empleadoDocumento: empDoc,

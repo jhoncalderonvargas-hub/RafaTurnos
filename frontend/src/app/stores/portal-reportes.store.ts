@@ -357,6 +357,7 @@ export class PortalReportesStore {
       }
 
       const celdaPar = matriz[e.id]?.[dia];
+      if (celdaPar?.fijada) return false;
       const codPar = (celdaPar?.codigo || '').trim().toUpperCase();
       const ejecutaEnSrvDia = celdaPar?.servicioEjecutorId === srvDiaId;
       const esDePlanta = e.servicioBaseId === srvDiaId;
@@ -625,6 +626,12 @@ export class PortalReportesStore {
     const datosMios = this.datosEmpleadoPortal();
     const dia = this.diaPermutaSeleccionado();
     const celdaMia = datosMios.celdas?.[dia];
+    if (celdaMia?.fijada) {
+      this.notificacion.mostrar(
+        `📌 Tu turno del día ${dia} está fijado por coordinación. No puedes solicitar permutas mientras esté protegido.`
+      );
+      return;
+    }
     const miTurno = celdaMia?.codigo || '';
     if (!miTurno) {
       this.notificacion.mostrar('⛔ No tienes un turno asignado en este día para proponer intercambio.');
@@ -644,6 +651,12 @@ export class PortalReportesStore {
     }
 
     const celdaComp = matrizPortal[comp.id]?.[dia];
+    if (celdaComp?.fijada) {
+      this.notificacion.mostrar(
+        `📌 El turno de ${comp.nombre} en el día ${dia} está fijado por coordinación y no admite permutas.`
+      );
+      return;
+    }
     const turnoComp = celdaComp?.codigo || 'L';
     if (
       celdaComp?.servicioEjecutorId &&

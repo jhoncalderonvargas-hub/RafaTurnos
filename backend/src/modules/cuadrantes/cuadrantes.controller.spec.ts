@@ -8,6 +8,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 
 describe('CuadrantesController + CuadrantesReglasService', () => {
   let app: INestApplication;
+  let controller: CuadrantesController;
   let prismaMock: any;
   let liquidacionMock: any;
 
@@ -92,8 +93,18 @@ describe('CuadrantesController + CuadrantesReglasService', () => {
     });
     prismaMock.novedadAusencia.findFirst.mockResolvedValue(null);
     prismaMock.novedadAusencia.findMany.mockResolvedValue([]);
+    prismaMock.cuadrante.findMany.mockResolvedValue([]);
+    prismaMock.bancoHorasSaldo.findMany.mockResolvedValue([]);
     prismaMock.asignacionTurno.findUnique.mockResolvedValue(null);
     prismaMock.asignacionTurno.findMany.mockResolvedValue([]);
+    prismaMock.asignacionTurno.update.mockImplementation(async ({ where, data }: any) => ({
+      id: where.id || 'asig-upd-1',
+      ...data,
+    }));
+    prismaMock.asignacionTurno.create.mockImplementation(async ({ data }: any) => ({
+      id: 'asig-new-1',
+      ...data,
+    }));
     prismaMock.asignacionTurno.upsert.mockImplementation(async ({ create }: any) => ({
       id: 'asig-1',
       ...create,
@@ -112,14 +123,21 @@ describe('CuadrantesController + CuadrantesReglasService', () => {
       ...create,
     }));
     prismaMock.auditoriaCambio.create.mockResolvedValue({ id: 'aud-1' });
+    prismaMock.auditoriaCambio.createMany.mockResolvedValue({ count: 1 });
+    prismaMock.empleado.findFirst.mockResolvedValue(null);
     prismaMock.empleado.findUnique.mockResolvedValue({
       id: 'emp-1',
+      nombre: 'Ana Solicitante',
+      categoriaId: 'cat-enf',
+      categoria: { nombre: 'Enfermero(a)' },
       servicioBaseId: 'srv-urg',
+      servicioBase: { id: 'srv-urg', codigo: 'URG', nombre: 'Urgencias Generales' },
     });
     prismaMock.empleado.findMany.mockResolvedValue([]);
     prismaMock.servicio.findUnique.mockResolvedValue({
       id: 'srv-urg',
       nombre: 'Urgencias Generales',
+      cargosPermitidos: [],
     });
     prismaMock.festivoColombia.findMany.mockResolvedValue([]);
     prismaMock.$executeRaw.mockResolvedValue(1);
@@ -138,12 +156,19 @@ describe('CuadrantesController + CuadrantesReglasService', () => {
 
   beforeEach(async () => {
     prismaMock = {
-      cuadrante: { upsert: jest.fn(), findUnique: jest.fn() },
+      cuadrante: { upsert: jest.fn(), findUnique: jest.fn(), findMany: jest.fn() },
+      bancoHorasSaldo: { findMany: jest.fn() },
       novedadAusencia: { findFirst: jest.fn(), findMany: jest.fn() },
-      asignacionTurno: { findUnique: jest.fn(), findMany: jest.fn(), upsert: jest.fn() },
+      asignacionTurno: {
+        findUnique: jest.fn(),
+        findMany: jest.fn(),
+        upsert: jest.fn(),
+        update: jest.fn(),
+        create: jest.fn(),
+      },
       tipoTurno: { findUnique: jest.fn(), findMany: jest.fn(), upsert: jest.fn() },
-      auditoriaCambio: { create: jest.fn() },
-      empleado: { findUnique: jest.fn(), findMany: jest.fn() },
+      auditoriaCambio: { create: jest.fn(), createMany: jest.fn() },
+      empleado: { findUnique: jest.fn(), findMany: jest.fn(), findFirst: jest.fn() },
       servicio: { findUnique: jest.fn() },
       festivoColombia: { findMany: jest.fn() },
       $executeRaw: jest.fn(),
@@ -167,6 +192,7 @@ describe('CuadrantesController + CuadrantesReglasService', () => {
       ],
     }).compile();
 
+    controller = moduleRef.get(CuadrantesController);
     app = moduleRef.createNestApplication();
     await app.init();
   });
@@ -510,5 +536,260 @@ describe('CuadrantesController + CuadrantesReglasService', () => {
       .put('/api/v1/cuadrantes/estado')
       .send({ servicioId: 'srv-urg', anio: 2026, mes: 11, estado: 'CERRADO_NOMINA' })
       .expect(200);
+  });
+
+  it('audita cambios desde BORRADOR, bloquea celdas fijadas (409) y expone nota/fijada en estado-global', async () => {
+    await request(app.getHttpServer())
+      .put('/api/v1/cuadrantes/celda')
+      .send({
+        servicioId: 'srv-urg',
+        anio: 2026,
+        mes: 11,
+        dia: 9,
+        empleadoId: 'emp-1',
+        codigo: 'M8',
+        origenAccion: 'PANEL_CELDA',
+        justificacion: 'Ajuste borrador solicitado',
+      })
+      .expect(200);
+
+    expect(prismaMock.auditoriaCambio.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          tipoAccion: 'EDICION_TURNO',
+          faseCuadrante: 'BORRADOR',
+          origenAccion: 'PANEL_CELDA',
+          esDetalleLote: false,
+          justificacion: 'Ajuste borrador solicitado',
+        }),
+      })
+    );
+
+    prismaMock.asignacionTurno.findUnique.mockResolvedValueOnce({
+      id: 'asig-pin',
+      fijada: true,
+      nota: 'No mover',
+      servicioEjecutorId: 'srv-urg',
+      tipoTurno: { codigo: 'M8' },
+    });
+
+    const resFijada = await request(app.getHttpServer())
+      .put('/api/v1/cuadrantes/celda')
+      .send({
+        servicioId: 'srv-urg',
+        anio: 2026,
+        mes: 11,
+        dia: 9,
+        empleadoId: 'emp-1',
+        codigo: 'T8',
+      })
+      .expect(409);
+    expect(resFijada.body.message).toContain('fijada');
+
+    prismaMock.asignacionTurno.findMany.mockResolvedValueOnce([
+      {
+        empleadoId: 'emp-1',
+        fecha: new Date('2026-11-09T00:00:00.000Z'),
+        esRotacion: false,
+        codigoPrevisto: 'M8',
+        nota: 'Cubrir ambulancia',
+        fijada: true,
+        servicioEjecutorId: 'srv-urg',
+        tipoTurno: { codigo: 'M8' },
+        cuadrante: { anio: 2026 },
+      },
+    ]);
+
+    const resGlobal = await request(app.getHttpServer())
+      .get('/api/v1/cuadrantes/estado-global?anio=2026')
+      .expect(200);
+    expect(resGlobal.body.asignacionesPorPeriodo['2026-11']['emp-1']['9']).toEqual(
+      expect.objectContaining({
+        codigo: 'M8',
+        nota: 'Cubrir ambulancia',
+        fijada: true,
+      })
+    );
+  });
+
+  it('guardarLote omite celdas fijadas (📌) y desglosa por celda (esDetalleLote=true) desde BORRADOR', async () => {
+    prismaMock.asignacionTurno.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 'asig-pin-3',
+          empleadoId: 'emp-1',
+          fecha: new Date('2026-11-03T00:00:00.000Z'),
+          fijada: true,
+          tipoTurno: { codigo: 'M8' },
+        },
+      ]);
+
+    const res = await request(app.getHttpServer())
+      .put('/api/v1/cuadrantes/lote')
+      .send({
+        servicioId: 'srv-urg',
+        anio: 2026,
+        mes: 11,
+        origenAccion: 'AUTOCOMPLETAR',
+        celdas: [
+          { empleadoId: 'emp-1', dia: 3, codigo: 'T8' }, // omitida por fijada
+          { empleadoId: 'emp-1', dia: 4, codigo: 'M8' }, // aplicada
+        ],
+      })
+      .expect(200);
+
+    expect(res.body.totalGuardadas).toBe(1);
+    expect(res.body.omitidasFijadas).toBe(1);
+    expect(prismaMock.auditoriaCambio.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          tipoAccion: 'ACCION_MASIVA',
+          faseCuadrante: 'BORRADOR',
+          origenAccion: 'AUTOCOMPLETAR',
+          esDetalleLote: false,
+        }),
+      })
+    );
+    expect(prismaMock.auditoriaCambio.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [
+          expect.objectContaining({
+            empleadoId: 'emp-1',
+            turnoAnterior: 'L',
+            turnoNuevo: 'M8',
+            faseCuadrante: 'BORRADOR',
+            origenAccion: 'AUTOCOMPLETAR',
+            esDetalleLote: true,
+          }),
+        ],
+      })
+    );
+  });
+
+  it('PATCH /celda/nota y /celda/fijar persisten sobre días vacíos, auditan y bloquean ausencia/espejo', async () => {
+    // Guardar nota en día vacío -> crea asignación BLANCO con nota y audita NOTA_CELDA
+    const resNota = await request(app.getHttpServer())
+      .patch('/api/v1/cuadrantes/celda/nota')
+      .send({
+        servicioId: 'srv-urg',
+        anio: 2026,
+        mes: 11,
+        dia: 12,
+        empleadoId: 'emp-1',
+        nota: 'Salida anticipada autorizada',
+      })
+      .expect(200);
+    expect(resNota.body.nota).toBe('Salida anticipada autorizada');
+    expect(prismaMock.asignacionTurno.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ nota: 'Salida anticipada autorizada' }),
+      })
+    );
+    expect(prismaMock.auditoriaCambio.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ tipoAccion: 'NOTA_CELDA', origenAccion: 'NOTA' }),
+      })
+    );
+
+    // Fijar día con novedad activa -> 409
+    prismaMock.novedadAusencia.findFirst.mockResolvedValueOnce({ tipo: 'VAC' });
+    await request(app.getHttpServer())
+      .patch('/api/v1/cuadrantes/celda/fijar')
+      .send({
+        servicioId: 'srv-urg',
+        anio: 2026,
+        mes: 11,
+        dia: 12,
+        empleadoId: 'emp-1',
+        fijada: true,
+      })
+      .expect(409);
+
+    // Fijar día normal -> 200 y audita FIJACION_CELDA
+    const resFij = await request(app.getHttpServer())
+      .patch('/api/v1/cuadrantes/celda/fijar')
+      .send({
+        servicioId: 'srv-urg',
+        anio: 2026,
+        mes: 11,
+        dia: 12,
+        empleadoId: 'emp-1',
+        fijada: true,
+      })
+      .expect(200);
+    expect(resFij.body.fijada).toBe(true);
+    expect(prismaMock.auditoriaCambio.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ tipoAccion: 'FIJACION_CELDA', origenAccion: 'FIJACION' }),
+      })
+    );
+  });
+
+  it('PATCH /celda/apoyo restringe servicioDestinoId para COORDINADOR y permite apoyo compatible', async () => {
+    prismaMock.servicio.findUnique.mockResolvedValue({
+      id: 'srv-uci',
+      nombre: 'UCI Adultos',
+      cargosPermitidos: [{ categoriaId: 'cat-enf' }],
+    });
+
+    // COORDINADOR intentando enviar apoyo a servicio que no coordina -> 403
+    await expect(
+      controller.asignarApoyoDiaCelda(
+        {
+          servicioId: 'srv-urg',
+          anio: 2026,
+          mes: 11,
+          dia: 14,
+          empleadoId: 'emp-1',
+          servicioDestinoId: 'srv-uci',
+          codigo: 'M8',
+        },
+        {
+          usuarioSso: {
+            rol: 'COORDINADOR',
+            nombre: 'Coord Urgencias',
+            serviciosCoordinados: ['srv-urg'],
+          },
+        }
+      )
+    ).rejects.toThrow(/no tienes permisos/i);
+
+    // COORDINADOR con ambos servicios en serviciosCoordinados -> éxito y esRotacion=true
+    const resOk = await controller.asignarApoyoDiaCelda(
+      {
+        servicioId: 'srv-urg',
+        anio: 2026,
+        mes: 11,
+        dia: 14,
+        empleadoId: 'emp-1',
+        servicioDestinoId: 'srv-uci',
+        codigo: 'M8',
+      },
+      {
+        usuarioSso: {
+          rol: 'COORDINADOR',
+          nombre: 'Coord Mixto',
+          serviciosCoordinados: ['srv-urg', 'srv-uci'],
+        },
+      }
+    );
+    expect(resOk).toEqual(
+      expect.objectContaining({
+        ok: true,
+        servicioEjecutorId: 'srv-uci',
+        esRotacion: true,
+        codigo: 'M8',
+      })
+    );
+    expect(prismaMock.auditoriaCambio.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          actorId: 'Coord Mixto (Coordinador)',
+          tipoAccion: 'APOYO_SERVICIO',
+          origenAccion: 'APOYO',
+        }),
+      })
+    );
   });
 });

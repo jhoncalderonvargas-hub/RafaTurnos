@@ -3,11 +3,13 @@ import {
   Body,
   ConflictException,
   Controller,
+  ForbiddenException,
   Get,
   Injectable,
   Module,
   NotFoundException,
   Optional,
+  Patch,
   Post,
   Put,
   Query,
@@ -66,12 +68,15 @@ export interface GuardarCeldaCuadranteDto {
   previsto?: string;
   esRotacion?: boolean;
   justificacion?: string;
+  origenAccion?: string;
 }
 
 export interface GuardarLoteCuadranteDto {
   servicioId: string;
   anio: number;
   mes: number;
+  origenAccion?: string;
+  justificacion?: string;
   celdas: {
     empleadoId: string;
     dia: number;
@@ -79,6 +84,36 @@ export interface GuardarLoteCuadranteDto {
     previsto?: string;
     esRotacion?: boolean;
   }[];
+}
+
+export interface GuardarNotaCeldaDto {
+  servicioId: string;
+  anio: number;
+  mes: number;
+  dia: number;
+  empleadoId: string;
+  nota: string | null;
+}
+
+export interface FijarCeldaDto {
+  servicioId: string;
+  anio: number;
+  mes: number;
+  dia: number;
+  empleadoId: string;
+  fijada: boolean;
+  justificacion?: string;
+}
+
+export interface ApoyoCeldaDto {
+  servicioId: string;
+  anio: number;
+  mes: number;
+  dia: number;
+  empleadoId: string;
+  servicioDestinoId?: string | null;
+  codigo?: string;
+  justificacion?: string;
 }
 
 const CODIGO_CELDA_VACIA_DB = 'BLANCO';
@@ -252,6 +287,55 @@ export class CuadrantesController {
     return !u || u === CODIGO_CELDA_VACIA_DB ? 'L' : u;
   }
 
+  private normalizarOrigenAccion(origen?: string | null, fallback = 'MANUAL'): string {
+    const clean = String(origen || '')
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9_]/g, '_')
+      .slice(0, 40);
+    return clean || fallback;
+  }
+
+  private faseDesdeEstado(estado?: EstadoCuadrante | string | null): string {
+    if (estado === EstadoCuadrante.CERRADO_NOMINA) return 'CERRADO_NOMINA';
+    if (estado === EstadoCuadrante.PUBLICADO || estado === EstadoCuadrante.VALIDADO) {
+      return 'PUBLICADO';
+    }
+    return 'BORRADOR';
+  }
+
+  private async resolverActorAuditoria(
+    req?: any,
+    tx?: Prisma.TransactionClient,
+    fallback = 'Supervisión Asistencial'
+  ): Promise<string> {
+    const u = req?.usuarioSso;
+    if (!u) return fallback;
+    const rolEtiqueta = u.rol === 'ADMIN_TH' ? 'Talento Humano' : 'Coordinador';
+    if (u.nombre && String(u.nombre).trim()) {
+      return `${String(u.nombre).trim()} (${rolEtiqueta})`;
+    }
+    const db: any = tx || this.prisma;
+    if (
+      typeof db?.empleado?.findFirst === 'function' &&
+      (u.empleadoId || u.documento)
+    ) {
+      const emp = await db.empleado.findFirst({
+        where: {
+          OR: [
+            ...(u.empleadoId ? [{ id: String(u.empleadoId) }] : []),
+            ...(u.documento ? [{ documento: String(u.documento) }] : []),
+          ],
+        },
+        select: { nombre: true },
+      });
+      if (emp?.nombre) {
+        return `${emp.nombre} (${rolEtiqueta})`;
+      }
+    }
+    return u.documento ? `${u.documento} (${rolEtiqueta})` : fallback;
+  }
+
   private esTurnoOperativoOtroServicio(
     tipo?: { codigo?: string | null; horasOrdinarias?: number | null; esAusencia?: boolean | null } | null
   ): boolean {
@@ -337,6 +421,8 @@ export class CuadrantesController {
           fecha: true,
           esRotacion: true,
           codigoPrevisto: true,
+          nota: true,
+          fijada: true,
           servicioEjecutorId: true,
           tipoTurno: {
             select: { codigo: true },
@@ -376,6 +462,8 @@ export class CuadrantesController {
             previsto?: string;
             esRotacion?: boolean;
             servicioEjecutorId?: string;
+            nota?: string;
+            fijada?: boolean;
           }
         >
       >
@@ -405,6 +493,8 @@ export class CuadrantesController {
             : (a.codigoPrevisto ?? codigoReal),
         esRotacion: codigoReal === '' ? false : a.esRotacion,
         servicioEjecutorId: codigoReal === '' ? undefined : a.servicioEjecutorId,
+        ...(a.nota ? { nota: a.nota } : {}),
+        ...(a.fijada ? { fijada: true } : {}),
       };
     }
 
@@ -525,10 +615,11 @@ export class CuadrantesController {
 
         // Auditoría de Cambio de Estado Oficial del Cuadrante
         if (estadoAnterior !== estadoEnum) {
-          const usuario = req?.usuarioSso;
-          const actor = usuario?.nombre
-            ? `${usuario.nombre} (${usuario.rol === 'ADMIN_TH' ? 'Talento Humano' : 'Coordinador'})`
-            : 'Supervisión Asistencial / Nómina';
+          const actor = await this.resolverActorAuditoria(
+            req,
+            tx,
+            'Supervisión Asistencial / Nómina'
+          );
 
           const mesesNombres = [
             '',
@@ -564,6 +655,9 @@ export class CuadrantesController {
               turnoAnterior: estadoAnterior,
               turnoNuevo: estadoEnum,
               justificacion: accionDetalle,
+              faseCuadrante: this.faseDesdeEstado(estadoEnum),
+              origenAccion: 'ESTADO_CUADRANTE',
+              esDetalleLote: false,
             },
           });
         }
@@ -724,6 +818,17 @@ export class CuadrantesController {
           );
         }
 
+        const codigoNuevoAud = this.normalizarCodigoParaAuditoria(codigoRaw);
+        if (
+          !novedadActiva &&
+          Boolean((asigPrevia as any)?.fijada) &&
+          codigoAnteriorAud !== codigoNuevoAud
+        ) {
+          throw new ConflictException(
+            'Celda fijada (📌): desbloquéala antes de modificar el turno.'
+          );
+        }
+
         const tipoTurno = await this.resolverTipoTurno(codigoRaw, tx);
         const reglasEmp = this.liquidacionService.resolverReglasEmpleado?.(emp as any);
         const horas = await this.liquidacionService.calcularHorasPorTipo(
@@ -776,15 +881,22 @@ export class CuadrantesController {
           },
         });
 
-        const codigoNuevoAud = this.normalizarCodigoParaAuditoria(codigoRaw);
-        if (
-          (cuadrante.estado === EstadoCuadrante.PUBLICADO ||
-            cuadrante.estado === EstadoCuadrante.VALIDADO) &&
-          codigoAnteriorAud !== codigoNuevoAud
-        ) {
-          const actor = req?.usuarioSso?.nombre
-            ? `${req.usuarioSso.nombre} (${req.usuarioSso.rol === 'ADMIN_TH' ? 'Talento Humano' : 'Coordinador'})`
-            : 'Supervisión Asistencial';
+        if (codigoAnteriorAud !== codigoNuevoAud) {
+          const actor = await this.resolverActorAuditoria(req, tx);
+          const origenNorm = this.normalizarOrigenAccion(dto.origenAccion, 'MANUAL');
+          const faseCuad = this.faseDesdeEstado(cuadrante.estado);
+          const faseTxt =
+            faseCuad === 'BORRADOR' ? 'en fase Borrador' : 'sobre cuadrante publicado';
+          let justifDefault = `Modificación manual de turno (Día ${dia}: [${codigoAnteriorAud}] → [${codigoNuevoAud}]) ${faseTxt}`;
+          if (origenNorm === 'REVERTIR_PREVISTO') {
+            justifDefault = `Reversión al turno previsto oficial (Día ${dia}: [${codigoAnteriorAud}] → [${codigoNuevoAud}]) ${faseTxt}`;
+          } else if (origenNorm === 'DESHACER') {
+            justifDefault = `Acción Deshacer (Ctrl+Z) (Día ${dia}: [${codigoAnteriorAud}] → [${codigoNuevoAud}]) ${faseTxt}`;
+          } else if (origenNorm === 'REHACER') {
+            justifDefault = `Acción Rehacer (Ctrl+Y) (Día ${dia}: [${codigoAnteriorAud}] → [${codigoNuevoAud}]) ${faseTxt}`;
+          } else if (origenNorm === 'PANEL_CELDA') {
+            justifDefault = `Edición desde Inspector de Celda (Día ${dia}: [${codigoAnteriorAud}] → [${codigoNuevoAud}]) ${faseTxt}`;
+          }
           await tx.auditoriaCambio.create({
             data: {
               asignacionTurnoId: asignacion.id,
@@ -795,8 +907,11 @@ export class CuadrantesController {
               turnoAnterior: codigoAnteriorAud,
               turnoNuevo: codigoNuevoAud,
               justificacion:
-                dto.justificacion ||
-                `Modificación manual de turno (Día ${dia}: [${codigoAnteriorAud}] → [${codigoNuevoAud}]) sobre cuadrante publicado`,
+                String(dto.justificacion || '').trim() || justifDefault,
+              fechaObjetivo: fechaUtc,
+              faseCuadrante: faseCuad,
+              origenAccion: origenNorm,
+              esDetalleLote: false,
             },
           });
         }
@@ -838,6 +953,539 @@ export class CuadrantesController {
           ok: true,
           id: asignacion.id,
           advertenciasReglas: validacion.alertas,
+        };
+      },
+      { timeout: 20000 }
+    );
+  }
+
+  /**
+   * 3b. Guarda o elimina la nota operativa de una celda (visible en cuadrante, portal e iCal).
+   */
+  @Patch('celda/nota')
+  async guardarNotaCelda(@Body() dto: GuardarNotaCeldaDto, @Req() req?: any) {
+    const anio = Number(dto.anio);
+    const mes = Number(dto.mes);
+    const dia = Number(dto.dia);
+    if (!dto?.servicioId || !dto?.empleadoId) {
+      throw new BadRequestException('Debe indicar servicioId y empleadoId válidos.');
+    }
+    const usuario = req?.usuarioSso;
+    if (usuario?.rol === 'COORDINADOR') {
+      const permitidos = Array.isArray(usuario.serviciosCoordinados)
+        ? usuario.serviciosCoordinados
+        : [];
+      if (!permitidos.includes(dto.servicioId)) {
+        throw new ForbiddenException(
+          `Acceso denegado: no tienes permisos de coordinación sobre el servicio "${dto.servicioId}".`
+        );
+      }
+    }
+    const fechaUtc = this.construirFechaUtcStrict(anio, mes, dia);
+    const notaLim = String(dto.nota ?? '').trim();
+    const notaGuardar = notaLim.length > 0 ? notaLim.slice(0, 500) : null;
+
+    return this.prisma.$transaction(
+      async (tx) => {
+        const cuadrante = await tx.cuadrante.upsert({
+          where: {
+            anio_mes_servicioId: { anio, mes, servicioId: dto.servicioId },
+          },
+          update: {},
+          create: {
+            anio,
+            mes,
+            servicioId: dto.servicioId,
+            estado: EstadoCuadrante.BORRADOR,
+          },
+        });
+
+        if (cuadrante.estado === EstadoCuadrante.CERRADO_NOMINA) {
+          throw new ConflictException(
+            'El cuadrante de este periodo se encuentra CERRADO para nómina. Reábrelo para editar notas de celda.'
+          );
+        }
+
+        const asigPrevia = await tx.asignacionTurno.findUnique({
+          where: {
+            empleadoId_fecha: { empleadoId: dto.empleadoId, fecha: fechaUtc },
+          },
+          include: {
+            tipoTurno: true,
+            servicioEjecutor: { select: { codigo: true, nombre: true } },
+          },
+        });
+
+        if (
+          asigPrevia &&
+          asigPrevia.servicioEjecutorId &&
+          asigPrevia.servicioEjecutorId !== dto.servicioId &&
+          this.esTurnoOperativoOtroServicio(asigPrevia.tipoTurno)
+        ) {
+          const nombreOtroSrv =
+            asigPrevia.servicioEjecutor?.nombre || asigPrevia.servicioEjecutorId;
+          throw new ConflictException(
+            `Celda Espejo bloqueada: edita la nota desde "${nombreOtroSrv}", servicio donde se ejecuta el turno.`
+          );
+        }
+
+        const notaPrevia = (asigPrevia as any)?.nota
+          ? String((asigPrevia as any).nota).trim()
+          : null;
+        if (!asigPrevia && notaGuardar === null) {
+          return { ok: true, id: null, nota: null };
+        }
+
+        let asignacionId = asigPrevia?.id || null;
+        const codAud = this.normalizarCodigoParaAuditoria(asigPrevia?.tipoTurno?.codigo);
+
+        if (asigPrevia) {
+          const updated = await tx.asignacionTurno.update({
+            where: { id: asigPrevia.id },
+            data: { nota: notaGuardar },
+          });
+          asignacionId = updated?.id || asigPrevia.id;
+        } else {
+          const blanco = await this.resolverTipoTurno(CODIGO_CELDA_VACIA_DB, tx);
+          const created = await tx.asignacionTurno.create({
+            data: {
+              cuadranteId: cuadrante.id,
+              empleadoId: dto.empleadoId,
+              tipoTurnoId: blanco.id,
+              servicioEjecutorId: dto.servicioId,
+              fecha: fechaUtc,
+              esRotacion: false,
+              codigoPrevisto: '',
+              nota: notaGuardar,
+            },
+          });
+          asignacionId = created?.id || null;
+        }
+
+        if (notaPrevia !== notaGuardar) {
+          const actor = await this.resolverActorAuditoria(req, tx);
+          await tx.auditoriaCambio.create({
+            data: {
+              asignacionTurnoId: asignacionId,
+              servicioId: dto.servicioId,
+              empleadoId: dto.empleadoId,
+              actorId: actor,
+              tipoAccion: 'NOTA_CELDA',
+              turnoAnterior: codAud,
+              turnoNuevo: codAud,
+              justificacion: notaGuardar
+                ? `Nota operativa ${notaPrevia ? 'actualizada' : 'agregada'} (Día ${dia}): "${notaGuardar}"`
+                : `Nota operativa eliminada (Día ${dia}, antes: "${notaPrevia}")`,
+              fechaObjetivo: fechaUtc,
+              faseCuadrante: this.faseDesdeEstado(cuadrante.estado),
+              origenAccion: 'NOTA',
+              esDetalleLote: false,
+            },
+          });
+        }
+
+        return { ok: true, id: asignacionId, nota: notaGuardar };
+      },
+      { timeout: 20000 }
+    );
+  }
+
+  /**
+   * 3c. Activa o retira el candado de planificación (📌 Fijada) en una celda puntual.
+   */
+  @Patch('celda/fijar')
+  async alternarFijacionCelda(@Body() dto: FijarCeldaDto, @Req() req?: any) {
+    const anio = Number(dto.anio);
+    const mes = Number(dto.mes);
+    const dia = Number(dto.dia);
+    const fijada = Boolean(dto.fijada);
+    if (!dto?.servicioId || !dto?.empleadoId) {
+      throw new BadRequestException('Debe indicar servicioId y empleadoId válidos.');
+    }
+    const usuario = req?.usuarioSso;
+    if (usuario?.rol === 'COORDINADOR') {
+      const permitidos = Array.isArray(usuario.serviciosCoordinados)
+        ? usuario.serviciosCoordinados
+        : [];
+      if (!permitidos.includes(dto.servicioId)) {
+        throw new ForbiddenException(
+          `Acceso denegado: no tienes permisos de coordinación sobre el servicio "${dto.servicioId}".`
+        );
+      }
+    }
+    const fechaUtc = this.construirFechaUtcStrict(anio, mes, dia);
+
+    return this.prisma.$transaction(
+      async (tx) => {
+        const novedadActiva = await tx.novedadAusencia.findFirst({
+          where: {
+            empleadoId: dto.empleadoId,
+            fechaInicio: { lte: fechaUtc },
+            fechaFin: { gte: fechaUtc },
+          },
+        });
+        if (fijada && novedadActiva) {
+          throw new ConflictException(
+            `Esta fecha ya cuenta con novedad oficial bloqueante (${novedadActiva.tipo}) de Intranet.`
+          );
+        }
+
+        const cuadrante = await tx.cuadrante.upsert({
+          where: {
+            anio_mes_servicioId: { anio, mes, servicioId: dto.servicioId },
+          },
+          update: {},
+          create: {
+            anio,
+            mes,
+            servicioId: dto.servicioId,
+            estado: EstadoCuadrante.BORRADOR,
+          },
+        });
+
+        if (cuadrante.estado === EstadoCuadrante.CERRADO_NOMINA) {
+          throw new ConflictException(
+            'El cuadrante de este periodo se encuentra CERRADO para nómina. Reábrelo antes de fijar o desbloquear celdas.'
+          );
+        }
+
+        const asigPrevia = await tx.asignacionTurno.findUnique({
+          where: {
+            empleadoId_fecha: { empleadoId: dto.empleadoId, fecha: fechaUtc },
+          },
+          include: {
+            tipoTurno: true,
+            servicioEjecutor: { select: { codigo: true, nombre: true } },
+          },
+        });
+
+        if (fijada && asigPrevia?.tipoTurno?.esAusencia) {
+          throw new ConflictException(
+            `La celda ya tiene una novedad de ausencia (${asigPrevia.tipoTurno.codigo}) con prioridad legal.`
+          );
+        }
+
+        if (
+          asigPrevia &&
+          asigPrevia.servicioEjecutorId &&
+          asigPrevia.servicioEjecutorId !== dto.servicioId &&
+          this.esTurnoOperativoOtroServicio(asigPrevia.tipoTurno)
+        ) {
+          const nombreOtroSrv =
+            asigPrevia.servicioEjecutor?.nombre || asigPrevia.servicioEjecutorId;
+          throw new ConflictException(
+            `Celda Espejo bloqueada: fija o desbloquea la celda desde "${nombreOtroSrv}", servicio donde se ejecuta el turno.`
+          );
+        }
+
+        const fijadaPrevia = Boolean((asigPrevia as any)?.fijada);
+        if (!asigPrevia && !fijada) {
+          return { ok: true, id: null, fijada: false };
+        }
+
+        let asignacionId = asigPrevia?.id || null;
+        const codAud = this.normalizarCodigoParaAuditoria(asigPrevia?.tipoTurno?.codigo);
+
+        if (asigPrevia) {
+          const updated = await tx.asignacionTurno.update({
+            where: { id: asigPrevia.id },
+            data: { fijada },
+          });
+          asignacionId = updated?.id || asigPrevia.id;
+        } else {
+          const blanco = await this.resolverTipoTurno(CODIGO_CELDA_VACIA_DB, tx);
+          const created = await tx.asignacionTurno.create({
+            data: {
+              cuadranteId: cuadrante.id,
+              empleadoId: dto.empleadoId,
+              tipoTurnoId: blanco.id,
+              servicioEjecutorId: dto.servicioId,
+              fecha: fechaUtc,
+              esRotacion: false,
+              codigoPrevisto: '',
+              fijada: true,
+            },
+          });
+          asignacionId = created?.id || null;
+        }
+
+        if (fijadaPrevia !== fijada) {
+          const actor = await this.resolverActorAuditoria(req, tx);
+          await tx.auditoriaCambio.create({
+            data: {
+              asignacionTurnoId: asignacionId,
+              servicioId: dto.servicioId,
+              empleadoId: dto.empleadoId,
+              actorId: actor,
+              tipoAccion: 'FIJACION_CELDA',
+              turnoAnterior: codAud,
+              turnoNuevo: codAud,
+              justificacion:
+                String(dto.justificacion || '').trim() ||
+                (fijada
+                  ? `Celda fijada (📌) en Día ${dia} [${codAud}]: protegida frente a lotes, pintado accidental y permutas`
+                  : `Celda desbloqueada (📌 retirado en Día ${dia} [${codAud}])`),
+              fechaObjetivo: fechaUtc,
+              faseCuadrante: this.faseDesdeEstado(cuadrante.estado),
+              origenAccion: 'FIJACION',
+              esDetalleLote: false,
+            },
+          });
+        }
+
+        return { ok: true, id: asignacionId, fijada };
+      },
+      { timeout: 20000 }
+    );
+  }
+
+  /**
+   * 3d. Asigna o libera un apoyo puntual de un día hacia otro servicio compatible.
+   * Restringido para COORDINADOR exclusivamente a servicios dentro de serviciosCoordinados.
+   */
+  @Patch('celda/apoyo')
+  async asignarApoyoDiaCelda(@Body() dto: ApoyoCeldaDto, @Req() req?: any) {
+    const anio = Number(dto.anio);
+    const mes = Number(dto.mes);
+    const dia = Number(dto.dia);
+    if (!dto?.servicioId || !dto?.empleadoId) {
+      throw new BadRequestException('Debe indicar servicioId y empleadoId válidos.');
+    }
+    const fechaUtc = this.construirFechaUtcStrict(anio, mes, dia);
+    await this.festivosService.asegurarAnios([anio - 1, anio, anio + 1]);
+
+    return this.prisma.$transaction(
+      async (tx) => {
+        const emp = await tx.empleado.findUnique({
+          where: { id: dto.empleadoId },
+          include: {
+            empresaContratante: true,
+            categoria: true,
+            servicioBase: { select: { id: true, codigo: true, nombre: true } },
+          },
+        });
+        if (!emp) {
+          throw new NotFoundException(`Colaborador "${dto.empleadoId}" no encontrado.`);
+        }
+
+        const [novedadActiva, asigPrevia] = await Promise.all([
+          tx.novedadAusencia.findFirst({
+            where: {
+              empleadoId: dto.empleadoId,
+              fechaInicio: { lte: fechaUtc },
+              fechaFin: { gte: fechaUtc },
+            },
+          }),
+          tx.asignacionTurno.findUnique({
+            where: {
+              empleadoId_fecha: { empleadoId: dto.empleadoId, fecha: fechaUtc },
+            },
+            include: {
+              tipoTurno: true,
+              servicioEjecutor: { select: { id: true, codigo: true, nombre: true } },
+            },
+          }),
+        ]);
+
+        if (novedadActiva || asigPrevia?.tipoTurno?.esAusencia) {
+          throw new ConflictException(
+            `No es posible reasignar apoyo: existe novedad oficial/ausencia (${novedadActiva?.tipo || asigPrevia?.tipoTurno?.codigo}) en esta fecha.`
+          );
+        }
+        if ((asigPrevia as any)?.fijada) {
+          throw new ConflictException(
+            'Celda fijada (📌): desbloquéala antes de mover o liberar el apoyo puntual.'
+          );
+        }
+
+        const targetRaw = String(dto.servicioDestinoId ?? '').trim();
+        const targetServicioId = targetRaw || emp.servicioBaseId;
+        const srvOrigenReal = asigPrevia?.servicioEjecutorId || dto.servicioId;
+
+        const usuario = req?.usuarioSso;
+        if (usuario?.rol === 'COORDINADOR') {
+          const permitidos = Array.isArray(usuario.serviciosCoordinados)
+            ? usuario.serviciosCoordinados
+            : [];
+          if (!permitidos.includes(dto.servicioId)) {
+            throw new ForbiddenException(
+              `Acceso denegado: no tienes permisos de coordinación sobre el servicio "${dto.servicioId}".`
+            );
+          }
+          if (!permitidos.includes(srvOrigenReal)) {
+            throw new ForbiddenException(
+              `Acceso denegado: el turno pertenece actualmente a un servicio ("${srvOrigenReal}") que no coordinas.`
+            );
+          }
+          if (!permitidos.includes(targetServicioId)) {
+            throw new ForbiddenException(
+              `Acceso denegado: no tienes permisos de coordinación sobre el servicio destino "${targetServicioId}".`
+            );
+          }
+        }
+
+        const srvDestino = await tx.servicio.findUnique({
+          where: { id: targetServicioId },
+          include: {
+            cargosPermitidos: { select: { categoriaId: true } },
+          },
+        });
+        if (!srvDestino) {
+          throw new NotFoundException(`Servicio destino "${targetServicioId}" no encontrado.`);
+        }
+
+        if (
+          targetServicioId !== emp.servicioBaseId &&
+          Array.isArray((srvDestino as any).cargosPermitidos) &&
+          (srvDestino as any).cargosPermitidos.length > 0 &&
+          !(srvDestino as any).cargosPermitidos.some(
+            (cp: any) => cp.categoriaId === emp.categoriaId
+          )
+        ) {
+          throw new ConflictException(
+            `Incompatibilidad de cargo: "${srvDestino.nombre}" no habilita el cargo "${emp.categoria?.nombre || emp.categoriaId}".`
+          );
+        }
+
+        const codigoActualNorm = asigPrevia?.tipoTurno?.codigo || CODIGO_CELDA_VACIA_DB;
+        const codigoPropuesto =
+          dto.codigo !== undefined
+            ? String(dto.codigo).trim().toUpperCase() || CODIGO_CELDA_VACIA_DB
+            : codigoActualNorm;
+
+        if (targetServicioId !== emp.servicioBaseId) {
+          const codCheck = this.normalizarCodigoParaAuditoria(codigoPropuesto);
+          if (codCheck === 'L' || esCodigoExoneracionContrato(codCheck)) {
+            throw new BadRequestException(
+              'Para enviar un día como apoyo a otro servicio debes seleccionar un turno operativo (ej. M8, T8, N12).'
+            );
+          }
+        }
+
+        const tipoTurno = await this.resolverTipoTurno(codigoPropuesto, tx);
+
+        const serviciosChequear = Array.from(
+          new Set([dto.servicioId, srvOrigenReal, targetServicioId, emp.servicioBaseId])
+        );
+        const cuadMap = new Map<string, { id: string; estado: EstadoCuadrante }>();
+        for (const srvCheck of [dto.servicioId, srvOrigenReal]) {
+          const cuad = await tx.cuadrante.findUnique({
+            where: {
+              anio_mes_servicioId: { anio, mes, servicioId: srvCheck },
+            },
+            select: { id: true, estado: true },
+          });
+          if (cuad?.estado === EstadoCuadrante.CERRADO_NOMINA) {
+            throw new ConflictException(
+              'No se puede modificar apoyo porque el cuadrante origen se encuentra CERRADO para nómina.'
+            );
+          }
+          if (cuad) cuadMap.set(srvCheck, cuad);
+        }
+
+        const cuadDestino = await tx.cuadrante.upsert({
+          where: {
+            anio_mes_servicioId: { anio, mes, servicioId: targetServicioId },
+          },
+          update: {},
+          create: {
+            anio,
+            mes,
+            servicioId: targetServicioId,
+            estado: EstadoCuadrante.BORRADOR,
+          },
+        });
+        if (cuadDestino.estado === EstadoCuadrante.CERRADO_NOMINA) {
+          throw new ConflictException(
+            `El cuadrante de "${srvDestino.nombre}" se encuentra CERRADO para nómina.`
+          );
+        }
+        cuadMap.set(targetServicioId, { id: cuadDestino.id, estado: cuadDestino.estado });
+
+        const reglasEmp = this.liquidacionService.resolverReglasEmpleado?.(emp as any);
+        const horas = await this.liquidacionService.calcularHorasPorTipo(
+          tipoTurno,
+          fechaUtc,
+          reglasEmp
+        );
+        const esRotacion = targetServicioId !== emp.servicioBaseId;
+        const codAudAnt = this.normalizarCodigoParaAuditoria(codigoActualNorm);
+        const codAudNue = this.normalizarCodigoParaAuditoria(tipoTurno.codigo);
+        const codigoGuardar =
+          tipoTurno.codigo === CODIGO_CELDA_VACIA_DB ? '' : tipoTurno.codigo;
+
+        const asignacion = await tx.asignacionTurno.upsert({
+          where: {
+            empleadoId_fecha: { empleadoId: dto.empleadoId, fecha: fechaUtc },
+          },
+          update: {
+            cuadranteId: cuadDestino.id,
+            tipoTurnoId: tipoTurno.id,
+            servicioEjecutorId: targetServicioId,
+            esRotacion,
+            ...horas,
+          },
+          create: {
+            cuadranteId: cuadDestino.id,
+            empleadoId: dto.empleadoId,
+            tipoTurnoId: tipoTurno.id,
+            servicioEjecutorId: targetServicioId,
+            fecha: fechaUtc,
+            esRotacion,
+            codigoPrevisto: codigoGuardar,
+            ...horas,
+          },
+        });
+
+        const actor = await this.resolverActorAuditoria(req, tx);
+        const accionTexto = esRotacion
+          ? `Apoyo puntual asignado a "${srvDestino.nombre}" (Día ${dia}: [${codAudNue}])`
+          : `Liberado apoyo puntual, retorna a servicio base "${srvDestino.nombre}" (Día ${dia}: [${codAudNue}])`;
+
+        await tx.auditoriaCambio.create({
+          data: {
+            asignacionTurnoId: asignacion.id,
+            servicioId: targetServicioId,
+            empleadoId: dto.empleadoId,
+            actorId: actor,
+            tipoAccion: 'APOYO_SERVICIO',
+            turnoAnterior: codAudAnt,
+            turnoNuevo: codAudNue,
+            justificacion: String(dto.justificacion || '').trim() || accionTexto,
+            fechaObjetivo: fechaUtc,
+            faseCuadrante: this.faseDesdeEstado(cuadDestino.estado),
+            origenAccion: 'APOYO',
+            esDetalleLote: false,
+          },
+        });
+
+        for (const srvRec of serviciosChequear) {
+          let cuadRec = cuadMap.get(srvRec);
+          if (!cuadRec) {
+            const fetched = await tx.cuadrante.findUnique({
+              where: { anio_mes_servicioId: { anio, mes, servicioId: srvRec } },
+              select: { id: true, estado: true },
+            });
+            if (fetched) cuadRec = fetched;
+          }
+          if (cuadRec && cuadRec.estado !== EstadoCuadrante.BORRADOR) {
+            await this.liquidacionService.consolidarSaldosBancoServicio(
+              srvRec,
+              anio,
+              mes,
+              new Map(),
+              true,
+              tx
+            );
+          }
+        }
+
+        return {
+          ok: true,
+          id: asignacion.id,
+          servicioEjecutorId: targetServicioId,
+          esRotacion,
+          codigo: codigoGuardar,
         };
       },
       { timeout: 20000 }
@@ -920,8 +1568,10 @@ export class CuadrantesController {
                     fecha: { gte: primerDiaMes, lte: ultimoDiaMes },
                   },
                   select: {
+                    id: true,
                     empleadoId: true,
                     fecha: true,
+                    fijada: true,
                     tipoTurno: { select: { codigo: true } },
                   },
                 })
@@ -968,15 +1618,25 @@ export class CuadrantesController {
         }
 
         const mapaPrevio = new Map<string, string>();
-        for (const a of asignacionesPreviasServicio) {
+        const mapaIdPrevio = new Map<string, string>();
+        const celdasFijadas = new Set<string>();
+        for (const a of asignacionesPreviasServicio as any[]) {
           const d = new Date(a.fecha).getUTCDate();
+          const key = `${a.empleadoId}_${d}`;
           mapaPrevio.set(
-            `${a.empleadoId}_${d}`,
+            key,
             this.normalizarCodigoParaAuditoria(a.tipoTurno?.codigo)
           );
+          if (a.id) {
+            mapaIdPrevio.set(key, a.id);
+          }
+          if (a.fijada) {
+            celdasFijadas.add(key);
+          }
         }
 
-        // Normalizar y filtrar celdas protegiendo novedades y Celda Espejo
+        // Normalizar y filtrar celdas protegiendo novedades, Celda Espejo y celdas fijadas (📌)
+        let omitidasFijadas = 0;
         const celdasFiltradas = celdasInput
           .map((c) => ({
             ...c,
@@ -996,6 +1656,10 @@ export class CuadrantesController {
             if (celdasOcupadasOtroServicio.has(key)) {
               return false;
             }
+            if (celdasFijadas.has(key)) {
+              omitidasFijadas++;
+              return false;
+            }
             return true;
           });
 
@@ -1006,7 +1670,14 @@ export class CuadrantesController {
           mapaTipos.set(cod, await this.resolverTipoTurno(cod, tx));
         }
 
-        const cambiosReales: Array<{ anterior: string; nuevo: string; dia: number }> = [];
+        const cambiosReales: Array<{
+          empleadoId: string;
+          asignacionTurnoId: string | null;
+          fechaUtc: Date;
+          anterior: string;
+          nuevo: string;
+          dia: number;
+        }> = [];
         for (const c of celdasFiltradas) {
           const fechaUtc = this.construirFechaUtcStrict(anio, mes, c.dia);
           const tipoTurno = mapaTipos.get(c.codigoNorm)!;
@@ -1017,13 +1688,11 @@ export class CuadrantesController {
           );
           const codPrevGuardar = c.previstoNorm ?? c.codigoNorm;
 
-          const antAud = mapaPrevio.get(`${c.empleadoId}_${c.dia}`) || 'L';
+          const key = `${c.empleadoId}_${c.dia}`;
+          const antAud = mapaPrevio.get(key) || 'L';
           const nueAud = this.normalizarCodigoParaAuditoria(c.codigoNorm);
-          if (antAud !== nueAud) {
-            cambiosReales.push({ anterior: antAud, nuevo: nueAud, dia: c.dia });
-          }
 
-          await tx.asignacionTurno.upsert({
+          const asigGuardada = await tx.asignacionTurno.upsert({
             where: {
               empleadoId_fecha: {
                 empleadoId: c.empleadoId,
@@ -1049,16 +1718,36 @@ export class CuadrantesController {
               ...horas,
             },
           });
+
+          if (antAud !== nueAud) {
+            cambiosReales.push({
+              empleadoId: c.empleadoId,
+              asignacionTurnoId: asigGuardada?.id || mapaIdPrevio.get(key) || null,
+              fechaUtc,
+              anterior: antAud,
+              nuevo: nueAud,
+              dia: c.dia,
+            });
+          }
         }
 
-        if (
-          (cuadrante.estado === EstadoCuadrante.PUBLICADO ||
-            cuadrante.estado === EstadoCuadrante.VALIDADO) &&
-          cambiosReales.length > 0
-        ) {
-          const actor = req?.usuarioSso?.nombre
-            ? `${req.usuarioSso.nombre} (${req.usuarioSso.rol === 'ADMIN_TH' ? 'Talento Humano' : 'Coordinador'})`
-            : 'Supervisión Asistencial';
+        if (cambiosReales.length > 0) {
+          const actor = await this.resolverActorAuditoria(req, tx);
+          const origenNorm = this.normalizarOrigenAccion(dto.origenAccion, 'LOTE');
+          const faseCuad = this.faseDesdeEstado(cuadrante.estado);
+          const faseTxt =
+            faseCuad === 'BORRADOR' ? 'en fase Borrador' : 'sobre cuadrante publicado';
+          const etiquetaOrigen =
+            origenNorm === 'AUTOCOMPLETAR'
+              ? 'Auto-balanceo de huecos'
+              : origenNorm === 'LIMPIAR'
+                ? 'Limpieza de cuadrante'
+                : origenNorm === 'DESHACER'
+                  ? 'Deshacer en lote'
+                  : origenNorm === 'REHACER'
+                    ? 'Rehacer en lote'
+                    : 'Ajuste en bloque';
+
           const anterioresUnicos = Array.from(new Set(cambiosReales.map((x) => x.anterior)))
             .slice(0, 4)
             .join(',');
@@ -1078,9 +1767,35 @@ export class CuadrantesController {
               tipoAccion: 'ACCION_MASIVA',
               turnoAnterior: turnoAntResumen,
               turnoNuevo: turnoNueResumen,
-              justificacion: `Ajuste en bloque sobre cuadrante publicado: ${cambiosReales.length} celda(s) modificada(s) en ${mes}/${anio} (${turnoAntResumen} → ${turnoNueResumen})`,
+              justificacion:
+                String(dto.justificacion || '').trim() ||
+                `${etiquetaOrigen} ${faseTxt}: ${cambiosReales.length} celda(s) modificada(s) en ${mes}/${anio} (${turnoAntResumen} → ${turnoNueResumen})`,
+              faseCuadrante: faseCuad,
+              origenAccion: origenNorm,
+              esDetalleLote: false,
             },
           });
+
+          if (typeof tx.auditoriaCambio?.createMany === 'function') {
+            await tx.auditoriaCambio.createMany({
+              data: cambiosReales.map((ch) => ({
+                asignacionTurnoId: ch.asignacionTurnoId,
+                servicioId: dto.servicioId,
+                empleadoId: ch.empleadoId,
+                actorId: actor,
+                tipoAccion: 'EDICION_TURNO',
+                turnoAnterior: ch.anterior,
+                turnoNuevo: ch.nuevo,
+                justificacion:
+                  String(dto.justificacion || '').trim() ||
+                  `${etiquetaOrigen} ${faseTxt} (Día ${ch.dia}: [${ch.anterior}] → [${ch.nuevo}])`,
+                fechaObjetivo: ch.fechaUtc,
+                faseCuadrante: faseCuad,
+                origenAccion: origenNorm,
+                esDetalleLote: true,
+              })),
+            });
+          }
         }
 
         if (
@@ -1097,7 +1812,7 @@ export class CuadrantesController {
           );
         }
 
-        return { ok: true, totalGuardadas: celdasFiltradas.length };
+        return { ok: true, totalGuardadas: celdasFiltradas.length, omitidasFijadas };
       },
       { timeout: 20000 }
     );
@@ -1155,7 +1870,8 @@ export class CuadrantesController {
    */
   @Post('sincronizar-novedades')
   async sincronizarNovedadesIntranet(
-    @Body() body?: { anio?: number; mes?: number; intranetUrl?: string }
+    @Body() body?: { anio?: number; mes?: number; intranetUrl?: string },
+    @Req() req?: any,
   ) {
     const hoyCo = hoyColombiaIso();
     const anio = Number(body?.anio) || Number(hoyCo.substring(0, 4));
@@ -1324,13 +2040,34 @@ export class CuadrantesController {
 
           // Bloquear todos los días y todos los meses abarcados por [fInicioIso .. fFinIso] (incluye cruces de mes/año)
           let diaIso = fInicioIso;
+          const actorSync = await this.resolverActorAuditoria(
+            req,
+            tx,
+            'Sincronización Intranet RRHH'
+          );
           while (diaIso <= fFinIso) {
             const anioDia = Number(diaIso.substring(0, 4));
             const mesDia = Number(diaIso.substring(5, 7));
             const cuad = await obtenerOCrearCuadranteMes(emp.servicioBaseId, anioDia, mesDia);
             const fechaUtc = new Date(`${diaIso}T00:00:00.000Z`);
 
-            await tx.asignacionTurno.upsert({
+            const asigPreviaNov =
+              typeof tx.asignacionTurno?.findUnique === 'function'
+                ? await tx.asignacionTurno.findUnique({
+                    where: {
+                      empleadoId_fecha: { empleadoId: emp.id, fecha: fechaUtc },
+                    },
+                    select: {
+                      tipoTurno: { select: { codigo: true } },
+                    },
+                  })
+                : null;
+            const codAntNov = this.normalizarCodigoParaAuditoria(
+              asigPreviaNov?.tipoTurno?.codigo
+            );
+            const codNueNov = this.normalizarCodigoParaAuditoria(tipoNov);
+
+            const asigNov = await tx.asignacionTurno.upsert({
               where: {
                 empleadoId_fecha: {
                   empleadoId: emp.id,
@@ -1342,6 +2079,7 @@ export class CuadrantesController {
                 tipoTurnoId,
                 servicioEjecutorId: emp.servicioBaseId,
                 esRotacion: false,
+                fijada: false,
                 codigoPrevisto: tipoNov,
                 hod: 0,
                 hon: 0,
@@ -1367,6 +2105,25 @@ export class CuadrantesController {
               },
             });
             celdasBloqueadas++;
+
+            if (codAntNov !== codNueNov) {
+              await tx.auditoriaCambio.create({
+                data: {
+                  asignacionTurnoId: asigNov?.id || null,
+                  servicioId: emp.servicioBaseId,
+                  empleadoId: emp.id,
+                  actorId: actorSync,
+                  tipoAccion: 'NOVEDAD_INTRANET',
+                  turnoAnterior: codAntNov,
+                  turnoNuevo: codNueNov,
+                  justificacion: `Novedad oficial sincronizada desde Intranet (${tipoNov}: ${fInicioIso} a ${fFinIso})`,
+                  fechaObjetivo: fechaUtc,
+                  faseCuadrante: this.faseDesdeEstado(cuad.estado),
+                  origenAccion: 'INTRANET',
+                  esDetalleLote: false,
+                },
+              });
+            }
 
             if (cuad.estado !== EstadoCuadrante.BORRADOR) {
               serviciosPeriodosPublicados.set(`${emp.servicioBaseId}::${anioDia}-${mesDia}`, {

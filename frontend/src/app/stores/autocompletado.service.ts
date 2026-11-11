@@ -433,6 +433,7 @@ export class AutocompletadoService {
         const franjasTurno = clasificarFranjasTurno(cfgTurno);
 
         const celdaHoy = actualMap[f.empleado.id]?.[d.dia];
+        if (celdaHoy?.fijada) return false;
         const hoy = celdaHoy?.codigo || '';
         if (celdaHoy?.servicioEjecutorId && celdaHoy.servicioEjecutorId !== srv.id && hoy !== '' && hoy !== 'L') {
           return false;
@@ -463,6 +464,7 @@ export class AutocompletadoService {
           if (cfgTurno.esNocturnoPesado) {
             if (
               bloqueadoOtroSig ||
+              (celdaSig?.fijada && !sigCod) ||
               esCodigoExoneracionContrato(sigCod) ||
               cfgSig?.esAusencia ||
               cfgSig?.prorrateaMetaContrato ||
@@ -526,12 +528,14 @@ export class AutocompletadoService {
         const reglasCand = reglasEmpresaDeEmpleado(cand.empleado);
 
         const fila = { ...(actualMap[cand.empleado.id] || {}) };
+        const notaExistente = fila[d.dia]?.nota;
         const prev = enBorradorGlobal ? turnoElegido : (fila[d.dia]?.previsto || turnoElegido);
         fila[d.dia] = {
           codigo: turnoElegido,
           previsto: prev,
           esRotacion: cand.esPersonalRotado,
           servicioEjecutorId: srvId,
+          ...(notaExistente ? { nota: notaExistente } : {}),
         };
         loteParaDb.push({
           empleadoId: cand.empleado.id,
@@ -565,13 +569,14 @@ export class AutocompletadoService {
             celdaSig.servicioEjecutorId !== srvId &&
             sigActual !== '' &&
             sigActual !== 'L';
-          if ((!sigActual || sigActual === 'L') && !bloqueadaOtroSig) {
+          if (!celdaSig?.fijada && (!sigActual || sigActual === 'L') && !bloqueadaOtroSig) {
             const prevSig = enBorradorGlobal ? 'S' : (celdaSig?.previsto || 'S');
             fila[d.dia + 1] = {
               codigo: 'S',
               previsto: prevSig,
               esRotacion: cand.esPersonalRotado,
               servicioEjecutorId: srvId,
+              ...(celdaSig?.nota ? { nota: celdaSig.nota } : {}),
             };
             loteParaDb.push({
               empleadoId: cand.empleado.id,
@@ -735,6 +740,7 @@ export class AutocompletadoService {
         if (horasAsignadas >= horasContratoObjetivo) break;
 
         const celdaHoy = fila[d.dia];
+        if (celdaHoy?.fijada) continue;
         const codHoy = celdaHoy?.codigo || '';
         if (celdaHoy?.servicioEjecutorId && celdaHoy.servicioEjecutorId !== srv.id && codHoy !== '' && codHoy !== 'L') {
           continue;
@@ -778,6 +784,7 @@ export class AutocompletadoService {
           if (
             cfgTurno.esNocturnoPesado &&
             (bloqueadaOtroSig ||
+              (celdaSig?.fijada && !sigCod) ||
               esCodigoExoneracionContrato(sigCod) ||
               cfgSig?.esAusencia ||
               cfgSig?.prorrateaMetaContrato ||
@@ -796,6 +803,7 @@ export class AutocompletadoService {
           previsto: prev,
           esRotacion: f.esPersonalRotado,
           servicioEjecutorId: srvId,
+          ...(celdaHoy?.nota ? { nota: celdaHoy.nota } : {}),
         };
         loteParaDb.push({
           empleadoId: f.empleado.id,
@@ -814,13 +822,14 @@ export class AutocompletadoService {
             celdaSig.servicioEjecutorId !== srv.id &&
             sigActual !== '' &&
             sigActual !== 'L';
-          if ((!sigActual || sigActual === 'L') && !bloqueadaOtroSig) {
+          if (!celdaSig?.fijada && (!sigActual || sigActual === 'L') && !bloqueadaOtroSig) {
             const prevSig = enBorradorGlobal ? 'S' : (celdaSig?.previsto || 'S');
             fila[d.dia + 1] = {
               codigo: 'S',
               previsto: prevSig,
               esRotacion: f.esPersonalRotado,
               servicioEjecutorId: srvId,
+              ...(celdaSig?.nota ? { nota: celdaSig.nota } : {}),
             };
             loteParaDb.push({
               empleadoId: f.empleado.id,
@@ -849,14 +858,17 @@ export class AutocompletadoService {
       const fila = { ...(actualMap[f.empleado.id] || {}) };
       let modificada = false;
       for (const d of dias) {
-        const codActual = fila[d.dia]?.codigo || '';
+        const celdaActual = fila[d.dia];
+        if (celdaActual?.fijada) continue;
+        const codActual = celdaActual?.codigo || '';
         if (codActual === '') {
-          const prevLibre = enBorradorGlobal ? 'L' : (fila[d.dia]?.previsto || 'L');
+          const prevLibre = enBorradorGlobal ? 'L' : (celdaActual?.previsto || 'L');
           fila[d.dia] = {
             codigo: 'L',
             previsto: prevLibre,
             esRotacion: false,
             servicioEjecutorId: undefined,
+            ...(celdaActual?.nota ? { nota: celdaActual.nota } : {}),
           };
           loteParaDb.push({
             empleadoId: f.empleado.id,

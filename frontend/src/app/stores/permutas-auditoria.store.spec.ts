@@ -267,4 +267,59 @@ describe('PermutasAuditoriaStore', () => {
     expect(resDisp.valida).toBeFalse();
     expect(resDisp.motivo).toContain('bloqueo de permutas');
   });
+
+  it('bloquea permutas sobre celdas fijadas 📌 y reenvía incluirBorrador al sincronizar auditorías', () => {
+    const resFijadaOrigen = store.validarReglasPermuta('emp-1', 'emp-2', 5, 'M8', 'T8', {
+      anio: 2026,
+      mes: 11,
+      totalDias: 30,
+      servicioId: 'srv-urg',
+      matriz: {
+        'emp-1': { 5: { codigo: 'M8', fijada: true } },
+        'emp-2': { 5: { codigo: 'T8' } },
+      },
+    });
+    expect(resFijadaOrigen.valida).toBeFalse();
+    expect(resFijadaOrigen.motivo).toContain('Celda fijada');
+
+    const resFijadaDestino = store.validarReglasPermuta('emp-1', 'emp-2', 5, 'M8', 'T8', {
+      anio: 2026,
+      mes: 11,
+      totalDias: 30,
+      servicioId: 'srv-urg',
+      matriz: {
+        'emp-1': { 5: { codigo: 'M8' } },
+        'emp-2': { 5: { codigo: 'T8', fijada: true } },
+      },
+    });
+    expect(resFijadaDestino.valida).toBeFalse();
+    expect(resFijadaDestino.motivo).toContain('Celda fijada');
+
+    catalogos.establecerSesionBasicaSso({
+      empleadoId: 'emp-th',
+      documento: '999',
+      nombre: 'TH',
+      categoria: 'Talento Humano',
+      rol: 'ADMIN_TH',
+      servicioBaseId: 'srv-urg',
+      servicioBaseNombre: 'Urgencias',
+      serviciosPermitidosIds: ['srv-urg', 'srv-uci'],
+    });
+
+    store.sincronizarAuditoriasDesdePostgres({
+      servicioId: 'srv-urg',
+      tipoAccion: 'NOTA_CELDA',
+      incluirBorrador: true,
+    });
+
+    expect(apiSpy.obtenerAuditorias).toHaveBeenCalledWith(
+      'srv-urg',
+      500,
+      'NOTA_CELDA',
+      undefined,
+      undefined,
+      undefined,
+      true
+    );
+  });
 });

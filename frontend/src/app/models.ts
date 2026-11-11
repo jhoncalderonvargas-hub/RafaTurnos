@@ -220,6 +220,7 @@ export interface CeldaAsignacion {
   esRotacion?: boolean;
   servicioEjecutorId?: string;
   nota?: string;
+  fijada?: boolean;
 }
 
 export interface PermutaItem {
@@ -247,7 +248,19 @@ export interface RegistroAuditoria {
   timestamp: string;
   timestampIso?: string;
   actor: string;
-  tipoAccion?: 'EDICION_TURNO' | 'PERMUTA' | 'ESTADO_CUADRANTE' | 'ACCION_MASIVA' | string;
+  tipoAccion?:
+    | 'EDICION_TURNO'
+    | 'PERMUTA'
+    | 'ESTADO_CUADRANTE'
+    | 'ACCION_MASIVA'
+    | 'NOTA_CELDA'
+    | 'FIJACION_CELDA'
+    | 'APOYO_SERVICIO'
+    | 'NOVEDAD_INTRANET'
+    | string;
+  origenAccion?: string;
+  faseCuadrante?: 'BORRADOR' | 'PUBLICADO' | 'CERRADO_NOMINA' | string;
+  esDetalleLote?: boolean;
   empleadoId?: string;
   empleadoNombre: string;
   empleadoDocumento?: string;
@@ -258,6 +271,74 @@ export interface RegistroAuditoria {
   turnoAnterior: CodigoTurno | string;
   turnoNuevo: CodigoTurno | string;
   motivo: string;
+}
+
+export interface AuditoriaCeldaItem {
+  id: string;
+  timestamp: string;
+  timestampIso: string;
+  actor: string;
+  tipoAccion: string;
+  origenAccion: string;
+  faseCuadrante: 'BORRADOR' | 'PUBLICADO' | 'CERRADO_NOMINA' | string;
+  esDetalleLote: boolean;
+  servicioNombre: string;
+  turnoAnterior: string;
+  turnoNuevo: string;
+  justificacion: string;
+}
+
+export interface PermutaCeldaItem {
+  id: string;
+  fechaSolicitud: string;
+  solicitanteId: string;
+  solicitanteNombre: string;
+  receptorId: string;
+  receptorNombre: string;
+  servicioNombre: string;
+  diaOrigen: number;
+  turnoOrigen: string;
+  diaDestino: number;
+  turnoDestino: string;
+  estado: 'PENDIENTE_PAR' | 'PENDIENTE_SUPERVISOR' | 'APROBADA' | 'RECHAZADA' | string;
+  motivoRechazo?: string | null;
+}
+
+export interface AusenciaCeldaInfo {
+  id: string;
+  tipo: string;
+  fechaInicio: string;
+  fechaFin: string;
+  codigoCie10?: string | null;
+}
+
+export interface AuditoriaCeldaRespuesta {
+  empleadoId: string;
+  fecha: string;
+  celda: {
+    nota: string | null;
+    fijada: boolean;
+    codigoPrevisto: string | null;
+    estadoCuadrante: 'SIN_PLANIFICAR' | 'BORRADOR' | 'PUBLICADO' | 'CERRADO_NOMINA' | string;
+  };
+  historial: AuditoriaCeldaItem[];
+  permutas: PermutaCeldaItem[];
+  ausencia: AusenciaCeldaInfo | null;
+}
+
+export interface TargetCeldaInspector {
+  empId: string;
+  dia: number;
+  origenVista: 'PLANIFICADOR' | 'PORTAL';
+  focoSeccion?: 'NOTA' | 'APOYO' | 'EDICION';
+}
+
+export interface MenuContextualCeldaState {
+  empId: string;
+  dia: number;
+  clientX: number;
+  clientY: number;
+  origenVista: 'PLANIFICADOR' | 'PORTAL';
 }
 
 export interface FestivoEntry {

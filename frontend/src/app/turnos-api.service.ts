@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import {
+  AuditoriaCeldaRespuesta,
   CategoriaProfesionalItem,
   EmpleadoHospital,
   EmpresaContratante,
@@ -271,6 +272,8 @@ export class TurnosApiService {
             previsto?: string;
             esRotacion?: boolean;
             servicioEjecutorId?: string;
+            nota?: string;
+            fijada?: boolean;
           }
         >
       >
@@ -308,14 +311,71 @@ export class TurnosApiService {
     previsto?: string;
     esRotacion?: boolean;
     justificacion?: string;
+    origenAccion?: string;
   }): Observable<any> {
     return this.http.put(`${this.baseUrl}/cuadrantes/celda`, payload);
+  }
+
+  guardarNotaCelda(payload: {
+    servicioId: string;
+    anio: number;
+    mes: number;
+    dia: number;
+    empleadoId: string;
+    nota: string | null;
+  }): Observable<{ ok: boolean; id: string | null; nota: string | null }> {
+    return this.http.patch<{ ok: boolean; id: string | null; nota: string | null }>(
+      `${this.baseUrl}/cuadrantes/celda/nota`,
+      payload
+    );
+  }
+
+  alternarFijacionCelda(payload: {
+    servicioId: string;
+    anio: number;
+    mes: number;
+    dia: number;
+    empleadoId: string;
+    fijada: boolean;
+    justificacion?: string;
+  }): Observable<{ ok: boolean; id: string | null; fijada: boolean }> {
+    return this.http.patch<{ ok: boolean; id: string | null; fijada: boolean }>(
+      `${this.baseUrl}/cuadrantes/celda/fijar`,
+      payload
+    );
+  }
+
+  asignarApoyoDiaCelda(payload: {
+    servicioId: string;
+    anio: number;
+    mes: number;
+    dia: number;
+    empleadoId: string;
+    servicioDestinoId?: string | null;
+    codigo?: string;
+    justificacion?: string;
+  }): Observable<{
+    ok: boolean;
+    id: string;
+    servicioEjecutorId: string;
+    esRotacion: boolean;
+    codigo: string;
+  }> {
+    return this.http.patch<{
+      ok: boolean;
+      id: string;
+      servicioEjecutorId: string;
+      esRotacion: boolean;
+      codigo: string;
+    }>(`${this.baseUrl}/cuadrantes/celda/apoyo`, payload);
   }
 
   guardarLoteCuadrante(payload: {
     servicioId: string;
     anio: number;
     mes: number;
+    origenAccion?: string;
+    justificacion?: string;
     celdas: {
       empleadoId: string;
       dia: number;
@@ -435,6 +495,7 @@ export class TurnosApiService {
     fechaInicio?: string,
     fechaFin?: string,
     empleadoId?: string,
+    incluirBorrador = false,
   ): Observable<RegistroAuditoria[]> {
     let url = `${this.baseUrl}/auditorias?limite=${limite}`;
     if (servicioId && servicioId !== 'TODOS') {
@@ -452,6 +513,15 @@ export class TurnosApiService {
     if (empleadoId && empleadoId !== 'TODOS') {
       url += `&empleadoId=${encodeURIComponent(empleadoId)}`;
     }
+    if (incluirBorrador) {
+      url += '&incluirBorrador=true';
+    }
     return this.http.get<RegistroAuditoria[]>(url);
+  }
+
+  obtenerAuditoriaCelda(empleadoId: string, fechaIso: string): Observable<AuditoriaCeldaRespuesta> {
+    return this.http.get<AuditoriaCeldaRespuesta>(
+      `${this.baseUrl}/auditorias/celda?empleadoId=${encodeURIComponent(empleadoId)}&fecha=${encodeURIComponent(fechaIso)}`
+    );
   }
 }

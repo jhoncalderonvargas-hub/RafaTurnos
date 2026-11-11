@@ -291,7 +291,10 @@ export interface DatosEmpleadoPortal {
                 [class.sun-card]="d.esDomingo"
                 [class.holiday-card]="!!d.festivo"
                 [class.support-card]="srvDia?.esRotacion"
+                [class.pinned-card]="!!celdaMia?.fijada"
                 (click)="seleccionarDiaEnPortal.emit(d.dia)"
+                (contextmenu)="onCardContextMenu($event, d.dia)"
+                (keydown.f2)="$event.preventDefault(); $event.stopPropagation(); abrirInspectorDiaPortal.emit(d.dia)"
                 (keydown.enter)="seleccionarDiaEnPortal.emit(d.dia)"
                 (keydown.space)="$event.preventDefault(); seleccionarDiaEnPortal.emit(d.dia)">
                 <div class="emp-day-head">
@@ -301,12 +304,25 @@ export interface DatosEmpleadoPortal {
                       <span class="emp-hoy-tag">Hoy</span>
                     }
                   </span>
-                  @if (d.festivo) {
-                    <span class="emp-festivo-tag" [title]="d.festivo.nombre">🇨🇴 Festivo</span>
-                  }
-                  @if (srvDia?.esRotacion) {
-                    <span class="emp-rot-tag" title="Personal de apoyo en otro servicio">🔄 Apoyo</span>
-                  }
+                  <div class="emp-day-head-tags">
+                    @if (d.festivo) {
+                      <span class="emp-festivo-tag" [title]="d.festivo.nombre">🇨🇴 Festivo</span>
+                    }
+                    @if (srvDia?.esRotacion) {
+                      <span class="emp-rot-tag" title="Personal de apoyo en otro servicio">🔄 Apoyo</span>
+                    }
+                    @if (celdaMia?.fijada) {
+                      <span class="emp-pin-tag" title="📌 Turno fijado por coordinación">📌</span>
+                    }
+                    <button
+                      type="button"
+                      class="btn-emp-day-info"
+                      [attr.aria-label]="'Ver detalle e historial del día ' + d.dia"
+                      title="Ver detalle e historial (F2 o clic derecho)"
+                      (click)="onInfoDiaClick($event, d.dia)">
+                      ℹ️
+                    </button>
+                  </div>
                 </div>
 
                 @if (celdaMia && celdaMia.codigo) {
@@ -333,6 +349,12 @@ export interface DatosEmpleadoPortal {
                   <div class="emp-shift-unassigned">
                     <span class="unassigned-dash">—</span>
                     <span class="unassigned-text">Sin turno</span>
+                  </div>
+                }
+
+                @if (celdaMia?.nota) {
+                  <div class="emp-day-nota" [title]="celdaMia?.nota || ''">
+                    💬 {{ celdaMia?.nota }}
                   </div>
                 }
               </div>
@@ -430,6 +452,10 @@ export interface DatosEmpleadoPortal {
               } @else if (turnoBloqueadoPerm) {
                 <div class="portal-notice-danger">
                   🔒 <strong>Turno restringido para intercambio ({{ celdaDiaPerm?.codigo }}):</strong> Este tipo de turno está configurado en catálogo para bloquear permutas entre compañeros.
+                </div>
+              } @else if (celdaDiaPerm?.fijada) {
+                <div class="portal-notice-danger">
+                  📌 <strong>Celda fijada por coordinación ({{ celdaDiaPerm?.codigo }}):</strong> Este turno está protegido temporalmente por supervisión y no admite propuestas de permuta.
                 </div>
               } @else if (companerosPares.length > 0) {
                 <select
@@ -571,6 +597,29 @@ export class PortalColaboradorComponent {
   @Output() rechazarPropuestaPar = new EventEmitter<string>();
   @Output() cambiarCompaneroPermuta = new EventEmitter<string>();
   @Output() enviarSolicitudPermuta = new EventEmitter<void>();
+  @Output() abrirMenuContextualPortal = new EventEmitter<{
+    dia: number;
+    clientX: number;
+    clientY: number;
+  }>();
+  @Output() abrirInspectorDiaPortal = new EventEmitter<number>();
+
+  onCardContextMenu(event: MouseEvent, dia: number): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.seleccionarDiaEnPortal.emit(dia);
+    this.abrirMenuContextualPortal.emit({
+      dia,
+      clientX: event.clientX,
+      clientY: event.clientY,
+    });
+  }
+
+  onInfoDiaClick(event: MouseEvent, dia: number): void {
+    event.stopPropagation();
+    this.seleccionarDiaEnPortal.emit(dia);
+    this.abrirInspectorDiaPortal.emit(dia);
+  }
 
   get nombreMesSeleccionado(): string {
     const mesObj = this.mesesDisponibles.find((m) => m.valor === this.mesSeleccionado);

@@ -129,6 +129,8 @@
       (dragOverCelda)="cuadrante.onDragOverCelda($event)"
       (dropCelda)="cuadrante.onDropCelda($event.event, $event.empId, $event.dia)"
       (keyDownCelda)="cuadrante.onKeyDownCelda($event.event, $event.empId, $event.dia)"
+      (abrirMenuContextualCelda)="abrirMenuContextualPlanificador($event)"
+      (abrirInspectorCelda)="abrirDrawerPlanificador($event)"
     />
   }
 
@@ -238,13 +240,15 @@
       (cambiarMes)="cambiarMesPortal($event)"
       (cambiarAnio)="cambiarAnioPortal($event)"
       (irAMesActual)="irAMesActualPortal()"
-      (cambiarEmpleadoPortal)="portalReportes.cambiarEmpleadoPortal($event)"
+      (cambiarEmpleadoPortal)="drawerInspectorCelda.set(null); menuContextualCelda.set(null); portalReportes.cambiarEmpleadoPortal($event)"
       (abrirModalIcal)="portalReportes.abrirModalIcal()"
       (seleccionarDiaEnPortal)="portalReportes.seleccionarDiaEnPortal($event)"
       (aceptarPropuestaPar)="permutasAuditoria.aceptarPropuestaPar($event)"
       (rechazarPropuestaPar)="permutasAuditoria.rechazarPropuestaPar($event)"
       (cambiarCompaneroPermuta)="portalReportes.companeroPermutaId.set($event)"
       (enviarSolicitudPermuta)="portalReportes.enviarSolicitudPermutaDesdePortal()"
+      (abrirMenuContextualPortal)="abrirMenuContextualPortal($event)"
+      (abrirInspectorDiaPortal)="abrirDrawerPortalDia($event)"
     />
   }
 
@@ -385,6 +389,62 @@
     (copiar)="portalReportes.copiarEnlaceIcal()"
     (descargar)="portalReportes.descargarArchivoIcal()">
   </app-modal-ical>
+
+  <!-- MENÚ CONTEXTUAL HÍBRIDO DE CELDA (CLIC DERECHO) Y DRAWER INSPECTOR (F2) -->
+  @if (menuContextualCelda(); as menuSt) {
+    @if (menuContextualData(); as ctxMenu) {
+      <app-celda-menu-contextual
+        [menuState]="menuSt"
+        [empleado]="ctxMenu.empleado"
+        [celda]="ctxMenu.celda"
+        [servicioActual]="ctxMenu.servicioActual"
+        [servicios]="catalogos.servicios()"
+        [turnosPaleta]="cuadrante.listaTurnosPaleta()"
+        [catalogoTurnosMap]="catalogos.catalogoTurnosMap()"
+        [estadoCuadrante]="ctxMenu.estadoCuadrante"
+        [esColaborador]="catalogos.esColaborador()"
+        (cerrar)="menuContextualCelda.set(null)"
+        (aplicarTurno)="cuadrante.aplicarTurnoEnCelda($event.empId, $event.dia, $event.codigo, 'Menú contextual celda', { origenAccion: 'INSPECTOR' })"
+        (revertirAPrevisto)="cuadrante.revertirCeldaAPrevisto($event.empId, $event.dia)"
+        (alternarFijacion)="cuadrante.alternarFijacionCelda($event.empId, $event.dia)"
+        (abrirDrawer)="abrirDrawerDesdeMenuContextual($event)"
+        (seleccionarPermutaDia)="irAPermutaDesdeInspector($event)">
+      </app-celda-menu-contextual>
+    }
+  }
+
+  @if (drawerInspectorCelda(); as drawerSt) {
+    @if (drawerInspectorData(); as ctxDrawer) {
+      <app-celda-drawer
+        [target]="drawerSt"
+        [anio]="ctxDrawer.anio"
+        [mes]="ctxDrawer.mes"
+        [diasDelMes]="ctxDrawer.diasDelMes"
+        [empleado]="ctxDrawer.empleado"
+        [celda]="ctxDrawer.celda"
+        [codigoDiaAnterior]="ctxDrawer.codigoDiaAnterior"
+        [celdaDiaSiguiente]="ctxDrawer.celdaDiaSiguiente"
+        [infraccionesActivas]="ctxDrawer.infraccionesActivas"
+        [servicioActual]="ctxDrawer.servicioActual"
+        [servicios]="catalogos.servicios()"
+        [serviciosVisibles]="catalogos.serviciosVisibles()"
+        [turnosPaleta]="cuadrante.listaTurnosPaleta()"
+        [catalogoTurnosMap]="catalogos.catalogoTurnosMap()"
+        [estadoCuadrante]="ctxDrawer.estadoCuadrante"
+        [esAdminTh]="catalogos.esAdminTh()"
+        [esCoordinador]="catalogos.esCoordinador()"
+        [esColaborador]="catalogos.esColaborador()"
+        (cerrar)="drawerInspectorCelda.set(null)"
+        (navegarDia)="navegarDiaDrawer($event)"
+        (aplicarTurno)="cuadrante.aplicarTurnoEnCelda($event.empId, $event.dia, $event.codigo, 'Inspector detallado de celda', { origenAccion: 'INSPECTOR', justificacion: $event.justificacion })"
+        (revertirAPrevisto)="cuadrante.revertirCeldaAPrevisto($event.empId, $event.dia, $event.justificacion)"
+        (guardarNota)="cuadrante.guardarNotaCelda($event.empId, $event.dia, $event.nota)"
+        (alternarFijacion)="cuadrante.alternarFijacionCelda($event.empId, $event.dia)"
+        (asignarApoyo)="cuadrante.asignarApoyoDiaCelda($event.empId, $event.dia, $event.servicioDestinoId, $event.codigoTurno, $event.justificacion)"
+        (irAPermutaDia)="irAPermutaDesdeInspector($event)">
+      </app-celda-drawer>
+    }
+  }
 
   <!-- MODAL DE CONFIRMACIÓN CENTRADO (VIEWPORT FIJO) -->
   <app-modal-confirmacion

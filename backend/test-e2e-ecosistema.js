@@ -176,7 +176,7 @@ async function ejecutarPruebaE2E() {
   const prisma = new PrismaClient();
   const ANIO_TEST = 2026;
   const MES_TEST = 12; // Diciembre 2026 para no colisionar con datos de producción noviembre
-  const SRV_TEST = 'srv-urg';
+  let srvTestId = 'srv-urg-aux';
 
   let emp1 = null;
   let emp2 = null;
@@ -184,7 +184,7 @@ async function ejecutarPruebaE2E() {
   const inicioPrueba = new Date();
 
   try {
-    // 0. Cargar empleados y servicios base
+    // 0. Cargar empleados y servicios base reales desde PostgreSQL
     const resEmps = await fetch(`${BACKEND_URL}/api/v1/servicios-admin/empleados`);
     empleados = await resEmps.json();
     const resSrv = await fetch(`${BACKEND_URL}/api/v1/servicios-admin`);
@@ -193,8 +193,45 @@ async function ejecutarPruebaE2E() {
     assert(empleados.length > 0, `Se cargaron ${empleados.length} empleados desde PostgreSQL`);
     assert(servicios.length > 0, `Se cargaron ${servicios.length} servicios hospitalarios`);
 
-    emp1 = empleados.find((e) => e.servicioBaseId === 'srv-urg') || empleados[0];
-    emp2 = empleados.find((e) => e.servicioBaseId === 'srv-urg' && e.id !== emp1.id) || empleados[1];
+    const buscarParCompatibleEnServicio = (srvId) => {
+      const enSrv = empleados.filter(
+        (e) =>
+          e.servicioBaseId === srvId &&
+          e.empresaContratante?.estadoConfiguracion !== 'PENDIENTE_REGLAS'
+      );
+      for (let i = 0; i < enSrv.length; i++) {
+        for (let j = i + 1; j < enSrv.length; j++) {
+          if (enSrv[i].categoriaId === enSrv[j].categoriaId) {
+            return [enSrv[i], enSrv[j]];
+          }
+        }
+      }
+      return null;
+    };
+
+    const candidatosServicios = [
+      servicios.find((s) => s.id === 'srv-urg-aux'),
+      ...servicios.filter((s) => s.id !== 'srv-urg-aux'),
+    ].filter(Boolean);
+
+    let srvSeleccionado = null;
+    let parSeleccionado = null;
+    for (const srv of candidatosServicios) {
+      const par = buscarParCompatibleEnServicio(srv.id);
+      if (par) {
+        srvSeleccionado = srv;
+        parSeleccionado = par;
+        break;
+      }
+    }
+
+    assert(
+      Boolean(srvSeleccionado && parSeleccionado),
+      `Servicio válido con >=2 colaboradores compatibles encontrado: ${srvSeleccionado?.nombre || 'ninguno'} (${srvSeleccionado?.id || 'N/A'})`
+    );
+
+    srvTestId = srvSeleccionado.id;
+    [emp1, emp2] = parSeleccionado;
 
     const tokensPrevios = await prisma.tokenCalendario.findMany({
       where: { empleadoId: emp1.id },
@@ -204,47 +241,53 @@ async function ejecutarPruebaE2E() {
 
     // Pre-limpieza de seguridad por si una corrida anterior abortó antes de tiempo
     await limpiarArtefactosE2E(prisma, {
-      servicioId: SRV_TEST,
+      servicioId: srvTestId,
       anio: ANIO_TEST,
       mes: MES_TEST,
       extraEmpIds: [emp1.id, emp2.id],
     });
 
+    console.log(`Servicio de prueba: ${srvSeleccionado.nombre} (${srvTestId})`);
     console.log(`Colaborador 1 de prueba: ${emp1.nombre} (Doc: ${emp1.documento})`);
     console.log(`Colaborador 2 de prueba: ${emp2.nombre} (Doc: ${emp2.documento})`);
 
-    // Autenticar perfiles SSO
+    // Autenticar perfiles SSO reales
     const sessionTH = await emitirLoginSSO(emp1.documento, 'ADMIN_TH');
     authTokenTH = sessionTH.token;
     const sessionCoord = await emitirLoginSSO(emp1.documento, 'COORDINADOR');
     authTokenCoord = sessionCoord.token;
+    const sessionColab1 = await emitirLoginSSO(emp1.documento, 'COLABORADOR');
+    const sessionColab2 = await emitirLoginSSO(emp2.documento, 'COLABORADOR');
 
     const authHeaderTH = { 'Content-Type': 'application/json', Authorization: `Bearer ${authTokenTH}` };
     const authHeaderCoord = { 'Content-Type': 'application/json', Authorization: `Bearer ${authTokenCoord}` };
+    const authHeaderColab1 = { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionColab1.token}` };
+    const authHeaderColab2 = { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionColab2.token}` };
 
     // -------------------------------------------------------------
     // 1. DOMINIO PLANIFICACIÓN
     // -------------------------------------------------------------
     logStep('Planificación', 'Borrador, Asignación de Celdas y Publicación Oficial');
 
-    // Asegurar que el mes esté en BORRADOR inicialmente
-    await fetch(`${BACKEND_URL}/api/v1/cuadrantes/estado`, {
+    // Asegurar que el mes esté en BORRADOR inicialmente (operación reservada a ADMIN_TH)
+    const resBorrador = await fetch(`${BACKEND_URL}/api/v1/cuadrantes/estado`, {
       method: 'PUT',
       headers: authHeaderTH,
       body: JSON.stringify({
-        servicioId: SRV_TEST,
+        servicioId: srvTestId,
         anio: ANIO_TEST,
         mes: MES_TEST,
         estado: 'BORRADOR',
       }),
     });
+    assert(resBorrador.ok, `Estado inicial BORRADOR preparado (HTTP ${resBorrador.status})`);
 
     // Asignar turnos iniciales para emp1 (Día 10 = M8) y emp2 (Día 12 = T8)
     const resCelda1 = await fetch(`${BACKEND_URL}/api/v1/cuadrantes/celda`, {
       method: 'PUT',
       headers: authHeaderCoord,
       body: JSON.stringify({
-        servicioId: SRV_TEST,
+        servicioId: srvTestId,
         anio: ANIO_TEST,
         mes: MES_TEST,
         dia: 10,
@@ -259,7 +302,7 @@ async function ejecutarPruebaE2E() {
       method: 'PUT',
       headers: authHeaderCoord,
       body: JSON.stringify({
-        servicioId: SRV_TEST,
+        servicioId: srvTestId,
         anio: ANIO_TEST,
         mes: MES_TEST,
         dia: 12,
@@ -275,7 +318,7 @@ async function ejecutarPruebaE2E() {
       method: 'PUT',
       headers: authHeaderCoord,
       body: JSON.stringify({
-        servicioId: SRV_TEST,
+        servicioId: srvTestId,
         anio: ANIO_TEST,
         mes: MES_TEST,
         estado: 'PUBLICADO',
@@ -287,7 +330,7 @@ async function ejecutarPruebaE2E() {
     // Verificar estado global
     const resGlobal = await fetch(`${BACKEND_URL}/api/v1/cuadrantes/estado-global?anio=${ANIO_TEST}`);
     const dataGlobal = await resGlobal.json();
-    assert(dataGlobal.estados[`${SRV_TEST}::${ANIO_TEST}-${MES_TEST}`] === 'PUBLICADO', 'Estado en estado-global es PUBLICADO');
+    assert(dataGlobal.estados[`${srvTestId}::${ANIO_TEST}-${MES_TEST}`] === 'PUBLICADO', 'Estado en estado-global es PUBLICADO');
 
     resultados.planificacion = true;
 
@@ -301,7 +344,7 @@ async function ejecutarPruebaE2E() {
       method: 'PUT',
       headers: authHeaderCoord,
       body: JSON.stringify({
-        servicioId: SRV_TEST,
+        servicioId: srvTestId,
         anio: ANIO_TEST,
         mes: MES_TEST,
         dia: 10,
@@ -337,7 +380,7 @@ async function ejecutarPruebaE2E() {
       method: 'PUT',
       headers: authHeaderCoord,
       body: JSON.stringify({
-        servicioId: SRV_TEST,
+        servicioId: srvTestId,
         anio: ANIO_TEST,
         mes: MES_TEST,
         dia: 20,
@@ -349,7 +392,7 @@ async function ejecutarPruebaE2E() {
       method: 'PUT',
       headers: authHeaderCoord,
       body: JSON.stringify({
-        servicioId: SRV_TEST,
+        servicioId: srvTestId,
         anio: ANIO_TEST,
         mes: MES_TEST,
         dia: 22,
@@ -358,14 +401,14 @@ async function ejecutarPruebaE2E() {
       }),
     });
 
-    // Paso 3.1: Emp1 solicita permuta con Emp2
+    // Paso 3.1: Emp1 solicita permuta con Emp2 (perfil COLABORADOR)
     const resCrearPermuta = await fetch(`${BACKEND_URL}/api/v1/permutas`, {
       method: 'POST',
-      headers: authHeaderCoord,
+      headers: authHeaderColab1,
       body: JSON.stringify({
         solicitanteId: emp1.id,
         receptorId: emp2.id,
-        servicioId: SRV_TEST,
+        servicioId: srvTestId,
         anio: ANIO_TEST,
         mes: MES_TEST,
         diaOrigen: 20,
@@ -379,10 +422,10 @@ async function ejecutarPruebaE2E() {
     assert(resCrearPermuta.status === 201, `Permuta creada con id ${dataPermuta.id} en estado ${dataPermuta.estado}`);
     assert(dataPermuta.estado === 'PENDIENTE_PAR', 'Estado inicial es PENDIENTE_PAR');
 
-    // Paso 3.2: Emp2 acepta la propuesta
+    // Paso 3.2: Emp2 acepta la propuesta (perfil COLABORADOR)
     const resAceptarPar = await fetch(`${BACKEND_URL}/api/v1/permutas/${dataPermuta.id}/aceptar-par`, {
       method: 'PATCH',
-      headers: authHeaderCoord,
+      headers: authHeaderColab2,
     });
     const dataAceptada = await resAceptarPar.json();
     assert(dataAceptada.estado === 'PENDIENTE_SUPERVISOR', 'Estado tras aceptación par es PENDIENTE_SUPERVISOR');
@@ -423,7 +466,7 @@ async function ejecutarPruebaE2E() {
     logStep('Suscripción iCal', 'Enlace personal y Feed RFC 5545 para Google Calendar / iPhone');
 
     const resEnlace = await fetch(`${BACKEND_URL}/api/v1/calendario/mi-enlace?empleadoId=${emp1.id}`, {
-      headers: authHeaderCoord,
+      headers: authHeaderColab1,
     });
     const dataEnlace = await resEnlace.json();
     assert(Boolean(dataEnlace.token), `Token iCal obtenido: ${dataEnlace.token}`);
@@ -482,7 +525,7 @@ async function ejecutarPruebaE2E() {
       method: 'PUT',
       headers: authHeaderTH,
       body: JSON.stringify({
-        servicioId: SRV_TEST,
+        servicioId: srvTestId,
         anio: ANIO_TEST,
         mes: MES_TEST,
         estado: 'CERRADO_NOMINA',
@@ -507,7 +550,7 @@ async function ejecutarPruebaE2E() {
       method: 'PUT',
       headers: authHeaderCoord,
       body: JSON.stringify({
-        servicioId: SRV_TEST,
+        servicioId: srvTestId,
         anio: ANIO_TEST,
         mes: MES_TEST,
         dia: 10,
@@ -525,7 +568,7 @@ async function ejecutarPruebaE2E() {
       method: 'PUT',
       headers: authHeaderTH,
       body: JSON.stringify({
-        servicioId: SRV_TEST,
+        servicioId: srvTestId,
         anio: ANIO_TEST,
         mes: MES_TEST,
         estado: 'PUBLICADO',
@@ -539,7 +582,7 @@ async function ejecutarPruebaE2E() {
       method: 'PUT',
       headers: authHeaderCoord,
       body: JSON.stringify({
-        servicioId: SRV_TEST,
+        servicioId: srvTestId,
         anio: ANIO_TEST,
         mes: MES_TEST,
         dia: 10,
@@ -568,7 +611,7 @@ async function ejecutarPruebaE2E() {
   } finally {
     try {
       await limpiarArtefactosE2E(prisma, {
-        servicioId: SRV_TEST,
+        servicioId: srvTestId,
         anio: ANIO_TEST,
         mes: MES_TEST,
         desdeFecha: inicioPrueba,

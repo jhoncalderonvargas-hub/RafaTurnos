@@ -139,6 +139,8 @@ export class CuadranteStore {
 
   // Notifica a PermutasAuditoriaStore tras mutaciones sobre cuadrantes publicados sin crear ciclo
   readonly cuadranteEditadoPublicado$ = new Subject<void>();
+  // Notifica al Drawer Inspector de Celda cuando cambia el turno, nota, fijación o apoyo
+  readonly celdaHistorialActualizada$ = new Subject<{ empId?: string; dia?: number }>();
 
   constructor() {
     this.catalogos.empleadosActualizados$
@@ -1233,6 +1235,8 @@ export class CuadranteStore {
                 previsto: ((celdaDb.previsto ?? celdaDb.codigo) || '') as CodigoTurno,
                 esRotacion: celdaDb.esRotacion,
                 servicioEjecutorId: celdaDb.servicioEjecutorId,
+                ...(celdaDb.nota ? { nota: celdaDb.nota } : {}),
+                ...(celdaDb.fijada ? { fijada: true } : {}),
               };
             }
             mapaPeriodo[empId] = filaEmp;
@@ -1531,10 +1535,17 @@ export class CuadranteStore {
     const enBorrador = this.estadoCuadrante() === 'BORRADOR';
     const justificacionAuditoria = '↩️ Deshacer (Ctrl+Z): Reversión inmediata de asignación previa';
     const cambiosRehacer: CambioCeldaHistorial[] = [];
+    const cambiosAplicados: CambioCeldaHistorial[] = [];
+    let celdasFijadasOmitidas = 0;
 
     for (const c of ultimoPaso.cambios) {
       const filaEmp = { ...(actualMap[c.empId] || {}) };
       const celdaPre = filaEmp[c.dia];
+      if (celdaPre?.fijada) {
+        celdasFijadasOmitidas++;
+        continue;
+      }
+      cambiosAplicados.push(c);
       cambiosRehacer.push({
         empId: c.empId,
         dia: c.dia,
@@ -1557,8 +1568,15 @@ export class CuadranteStore {
         previsto: c.previstoAnterior ?? (enBorrador ? c.turnoAnterior : (celdaPre?.previsto ?? c.turnoAnterior)),
         esRotacion: esRotacionDest,
         servicioEjecutorId: liberaPropiedadDia ? undefined : ultimoPaso.servicioId,
+        ...(celdaPre?.nota ? { nota: celdaPre.nota } : {}),
       };
       actualMap[c.empId] = filaEmp;
+    }
+
+    if (cambiosAplicados.length === 0) {
+      this.pilaDeshacer.set(prevDeshacer);
+      this.notificacion.mostrar('📌 No se pudo deshacer: las celdas de esa acción están fijadas.');
+      return;
     }
 
     const pasoInverso: PasoHistorialEdicion = {
@@ -1572,8 +1590,8 @@ export class CuadranteStore {
     this.actualizarAsignacionesMesActual(actualMap);
 
     let persistencia$: Observable<unknown>;
-    if (ultimoPaso.cambios.length > 5) {
-      const loteDb = ultimoPaso.cambios.map((c) => {
+    if (cambiosAplicados.length > 5) {
+      const loteDb = cambiosAplicados.map((c) => {
         const celdaDest = actualMap[c.empId]?.[c.dia];
         return {
           empleadoId: c.empId,
@@ -1587,10 +1605,12 @@ export class CuadranteStore {
         servicioId: ultimoPaso.servicioId,
         anio: ultimoPaso.anio,
         mes: ultimoPaso.mes,
+        origenAccion: 'DESHACER',
+        justificacion: `${justificacionAuditoria} (${ultimoPaso.descripcion})`,
         celdas: loteDb,
       });
     } else {
-      const llamadas = ultimoPaso.cambios.map((c) => {
+      const llamadas = cambiosAplicados.map((c) => {
         const celdaDest = actualMap[c.empId]?.[c.dia];
         return this.api.guardarCeldaCuadrante({
           servicioId: ultimoPaso.servicioId,
@@ -1602,6 +1622,7 @@ export class CuadranteStore {
           previsto: celdaDest?.previsto ?? (enBorrador ? c.turnoAnterior : ''),
           esRotacion: !!celdaDest?.esRotacion,
           justificacion: justificacionAuditoria,
+          origenAccion: 'DESHACER',
         });
       });
       persistencia$ = llamadas.length > 0 ? forkJoin(llamadas) : of(null);
@@ -1612,7 +1633,11 @@ export class CuadranteStore {
         if (this.estadoCuadrante() === 'PUBLICADO') {
           this.cuadranteEditadoPublicado$.next();
         }
-        this.notificacion.mostrar(`↩️ Deshecho: ${ultimoPaso.descripcion}`);
+        this.celdaHistorialActualizada$.next(
+          cambiosAplicados.length === 1 ? { empId: cambiosAplicados[0].empId, dia: cambiosAplicados[0].dia } : {}
+        );
+        const notaOmitidas = celdasFijadasOmitidas > 0 ? ` (${celdasFijadasOmitidas} fijada(s) 📌 omitida(s))` : '';
+        this.notificacion.mostrar(`↩️ Deshecho: ${ultimoPaso.descripcion}${notaOmitidas}`);
       },
       error: (err) => {
         this.asignacionesPorPeriodo.set(prevAsignaciones);
@@ -1656,10 +1681,17 @@ export class CuadranteStore {
     const enBorrador = this.estadoCuadrante() === 'BORRADOR';
     const justificacionAuditoria = '↪️ Rehacer (Ctrl+Y): Reaplicación de asignación';
     const cambiosDeshacer: CambioCeldaHistorial[] = [];
+    const cambiosAplicados: CambioCeldaHistorial[] = [];
+    let celdasFijadasOmitidas = 0;
 
     for (const c of ultimoPaso.cambios) {
       const filaEmp = { ...(actualMap[c.empId] || {}) };
       const celdaPre = filaEmp[c.dia];
+      if (celdaPre?.fijada) {
+        celdasFijadasOmitidas++;
+        continue;
+      }
+      cambiosAplicados.push(c);
       cambiosDeshacer.push({
         empId: c.empId,
         dia: c.dia,
@@ -1682,8 +1714,15 @@ export class CuadranteStore {
         previsto: c.previstoAnterior ?? (enBorrador ? c.turnoAnterior : (celdaPre?.previsto ?? c.turnoAnterior)),
         esRotacion: esRotacionDest,
         servicioEjecutorId: liberaPropiedadDia ? undefined : ultimoPaso.servicioId,
+        ...(celdaPre?.nota ? { nota: celdaPre.nota } : {}),
       };
       actualMap[c.empId] = filaEmp;
+    }
+
+    if (cambiosAplicados.length === 0) {
+      this.pilaRehacer.set(prevRehacer);
+      this.notificacion.mostrar('📌 No se pudo rehacer: las celdas de esa acción están fijadas.');
+      return;
     }
 
     const pasoInverso: PasoHistorialEdicion = {
@@ -1697,8 +1736,8 @@ export class CuadranteStore {
     this.actualizarAsignacionesMesActual(actualMap);
 
     let persistencia$: Observable<unknown>;
-    if (ultimoPaso.cambios.length > 5) {
-      const loteDb = ultimoPaso.cambios.map((c) => {
+    if (cambiosAplicados.length > 5) {
+      const loteDb = cambiosAplicados.map((c) => {
         const celdaDest = actualMap[c.empId]?.[c.dia];
         return {
           empleadoId: c.empId,
@@ -1712,10 +1751,12 @@ export class CuadranteStore {
         servicioId: ultimoPaso.servicioId,
         anio: ultimoPaso.anio,
         mes: ultimoPaso.mes,
+        origenAccion: 'REHACER',
+        justificacion: `${justificacionAuditoria} (${ultimoPaso.descripcion})`,
         celdas: loteDb,
       });
     } else {
-      const llamadas = ultimoPaso.cambios.map((c) => {
+      const llamadas = cambiosAplicados.map((c) => {
         const celdaDest = actualMap[c.empId]?.[c.dia];
         return this.api.guardarCeldaCuadrante({
           servicioId: ultimoPaso.servicioId,
@@ -1727,6 +1768,7 @@ export class CuadranteStore {
           previsto: celdaDest?.previsto ?? (enBorrador ? c.turnoAnterior : ''),
           esRotacion: !!celdaDest?.esRotacion,
           justificacion: justificacionAuditoria,
+          origenAccion: 'REHACER',
         });
       });
       persistencia$ = llamadas.length > 0 ? forkJoin(llamadas) : of(null);
@@ -1737,7 +1779,11 @@ export class CuadranteStore {
         if (this.estadoCuadrante() === 'PUBLICADO') {
           this.cuadranteEditadoPublicado$.next();
         }
-        this.notificacion.mostrar(`↪️ Rehecho: ${ultimoPaso.descripcion}`);
+        this.celdaHistorialActualizada$.next(
+          cambiosAplicados.length === 1 ? { empId: cambiosAplicados[0].empId, dia: cambiosAplicados[0].dia } : {}
+        );
+        const notaOmitidas = celdasFijadasOmitidas > 0 ? ` (${celdasFijadasOmitidas} fijada(s) 📌 omitida(s))` : '';
+        this.notificacion.mostrar(`↪️ Rehecho: ${ultimoPaso.descripcion}${notaOmitidas}`);
       },
       error: (err) => {
         this.asignacionesPorPeriodo.set(prevAsignaciones);
@@ -1808,6 +1854,7 @@ export class CuadranteStore {
   onKeyDownCelda(event: KeyboardEvent, empId: string, dia: number): void {
     const key = event.key;
     const keyUpper = key.toUpperCase();
+    if (key === 'F2') return;
 
     if (key === 'ArrowRight') {
       event.preventDefault();
@@ -1890,7 +1937,21 @@ export class CuadranteStore {
     }
   }
 
-  aplicarTurnoEnCelda(empId: string, dia: number, nuevoCodigo: CodigoTurno, origen: string): void {
+  private inferirOrigenAccion(origen: string): string {
+    const up = (origen || '').toUpperCase();
+    if (up.includes('INSPECTOR') || up.includes('CONTEXTUAL') || up.includes('REVERTIR')) {
+      return 'INSPECTOR';
+    }
+    return 'MANUAL';
+  }
+
+  aplicarTurnoEnCelda(
+    empId: string,
+    dia: number,
+    nuevoCodigo: CodigoTurno,
+    origen: string,
+    opciones?: { origenAccion?: string; justificacion?: string }
+  ): void {
     if (this.estadoCuadrante() === 'CERRADO_NOMINA') {
       this.notificacion.mostrar('⛔ El cuadro de turnos está CERRADO para Nómina. Reábrelo para editar.');
       return;
@@ -1907,6 +1968,14 @@ export class CuadranteStore {
     if (esAusenciaBloqueada && nuevoCodigo !== celdaActual?.codigo) {
       this.notificacion.mostrar(
         `🔒 Celda bloqueada: Novedad oficial de Intranet (${celdaActual?.codigo}). Las ausencias oficiales solo pueden ser gestionadas desde Gestión Humana.`
+      );
+      return;
+    }
+
+    const anterior = (celdaActual?.codigo as CodigoTurno) || '';
+    if (celdaActual?.fijada && anterior !== nuevoCodigo) {
+      this.notificacion.mostrar(
+        `📌 Celda fijada (Día ${dia}): desbloquéala desde el Inspector (Clic derecho / F2) antes de modificarla.`
       );
       return;
     }
@@ -1930,7 +1999,6 @@ export class CuadranteStore {
       return;
     }
 
-    const anterior = (celdaActual?.codigo as CodigoTurno) || '';
     if (anterior === nuevoCodigo) return;
 
     const prevAsignaciones = this.asignacionesPorPeriodo();
@@ -1952,6 +2020,8 @@ export class CuadranteStore {
     const liberaPropiedadDia = nuevoCodigo === '' || (esRotacionBase && nuevoCodigo === 'L');
     const esRotacion = liberaPropiedadDia ? false : esRotacionBase;
     const enBorrador = this.estadoCuadrante() === 'BORRADOR' || necesitaIniciarBorrador;
+    const origenAccion = opciones?.origenAccion || this.inferirOrigenAccion(origen);
+    const justificacionEnviar = opciones?.justificacion?.trim() || origen;
 
     const cambioHistorial: CambioCeldaHistorial = {
       empId,
@@ -1967,6 +2037,7 @@ export class CuadranteStore {
       previsto: enBorrador ? nuevoCodigo : (celdaActual?.previsto ?? (anterior as CodigoTurno)),
       esRotacion,
       servicioEjecutorId: liberaPropiedadDia ? undefined : srvId,
+      ...(celdaActual?.nota ? { nota: celdaActual.nota } : {}),
     };
 
     const cfgNuevo = this.catalogos.catalogoTurnosMap()[nuevoCodigo];
@@ -1980,7 +2051,7 @@ export class CuadranteStore {
         celdaSig.servicioEjecutorId !== srvId &&
         sig !== '' &&
         sig !== 'L';
-      if ((!sig || sig === 'L') && !bloqueadaOtroSrv) {
+      if (!celdaSig?.fijada && (!sig || sig === 'L') && !bloqueadaOtroSrv) {
         cambioSalienteHistorial = {
           empId,
           dia: dia + 1,
@@ -1994,6 +2065,7 @@ export class CuadranteStore {
           previsto: enBorrador ? 'S' : (filaEmp[dia + 1]?.previsto ?? sig),
           esRotacion: esRotacionBase,
           servicioEjecutorId: srvId,
+          ...(celdaSig?.nota ? { nota: celdaSig.nota } : {}),
         };
         seAutoAsignoSaliente = true;
       }
@@ -2046,7 +2118,8 @@ export class CuadranteStore {
         codigo: nuevoCodigo,
         previsto: filaEmp[dia].previsto || '',
         esRotacion,
-        justificacion: origen,
+        justificacion: justificacionEnviar,
+        origenAccion,
       }),
     ];
 
@@ -2061,7 +2134,8 @@ export class CuadranteStore {
           codigo: 'S',
           previsto: filaEmp[dia + 1].previsto || '',
           esRotacion,
-          justificacion: `${origen} (Auto Saliente Post-Guardia)`,
+          justificacion: `${justificacionEnviar} (Auto Saliente Post-Guardia)`,
+          origenAccion,
         })
       );
     }
@@ -2077,6 +2151,10 @@ export class CuadranteStore {
         if (empObj && prevEstados[`${srvId}::${anio}-${mes}`] === 'PUBLICADO') {
           this.cuadranteEditadoPublicado$.next();
         }
+        this.celdaHistorialActualizada$.next({ empId, dia });
+        if (seAutoAsignoSaliente) {
+          this.celdaHistorialActualizada$.next({ empId, dia: dia + 1 });
+        }
       },
       error: (err) => {
         this.asignacionesPorPeriodo.set(prevAsignaciones);
@@ -2091,6 +2169,283 @@ export class CuadranteStore {
         this.notificacion.mostrar(`⛔ ${msg}`);
       },
     });
+  }
+
+  revertirCeldaAPrevisto(empId: string, dia: number, justificacion?: string): void {
+    if (this.catalogos.esColaborador()) return;
+    const celdaActual = this.asignaciones()[empId]?.[dia];
+    if (!celdaActual || celdaActual.previsto === undefined) {
+      this.notificacion.mostrar('ℹ️ Esta celda aún no tiene un turno oficial previsto registrado.');
+      return;
+    }
+    const codPrev = celdaActual.previsto as CodigoTurno;
+    if ((celdaActual.codigo || '') === codPrev) {
+      this.notificacion.mostrar('ℹ️ La celda ya tiene el turno oficial previsto.');
+      return;
+    }
+    this.aplicarTurnoEnCelda(
+      empId,
+      dia,
+      codPrev,
+      '↩️ Revertir a turno oficial previsto',
+      {
+        origenAccion: 'INSPECTOR',
+        justificacion: justificacion?.trim() || '↩️ Revertir a turno oficial previsto',
+      }
+    );
+  }
+
+  guardarNotaCelda(empId: string, dia: number, notaRaw: string): void {
+    if (this.catalogos.esColaborador()) return;
+    if (this.estadoCuadrante() === 'CERRADO_NOMINA') {
+      this.notificacion.mostrar('⛔ El cuadro de turnos está CERRADO para Nómina. Reábrelo para editar notas.');
+      return;
+    }
+
+    const actualMap = { ...this.asignaciones() };
+    const filaEmp = { ...(actualMap[empId] || {}) };
+    const celdaActual = filaEmp[dia];
+    const srvId = this.catalogos.servicioSeleccionadoId();
+    const anio = this.catalogos.anioSeleccionado();
+    const mes = this.catalogos.mesSeleccionado();
+
+    if (
+      celdaActual?.servicioEjecutorId &&
+      celdaActual.servicioEjecutorId !== srvId &&
+      celdaActual.codigo &&
+      celdaActual.codigo !== '' &&
+      celdaActual.codigo !== 'L'
+    ) {
+      const srvOtro = this.catalogos.servicios().find((s) => s.id === celdaActual.servicioEjecutorId);
+      this.notificacion.mostrar(
+        `📍 Celda Espejo bloqueada: edita la nota desde "${srvOtro?.nombre || 'el otro servicio'}".`
+      );
+      return;
+    }
+
+    const notaLim = (notaRaw || '').trim().slice(0, 500);
+    const notaEnviar = notaLim.length > 0 ? notaLim : null;
+    const notaActual = (celdaActual?.nota || '').trim() || null;
+    if (notaActual === notaEnviar) {
+      this.notificacion.mostrar('ℹ️ La nota de la celda no presenta cambios.');
+      return;
+    }
+
+    const prevAsignaciones = this.asignacionesPorPeriodo();
+    const prevEstados = this.estadosPorCuadrante();
+    const key = `${srvId}::${anio}-${mes}`;
+    const necesitaBorrador = this.estadoCuadrante() === 'SIN_PLANIFICAR' && notaEnviar !== null;
+
+    if (necesitaBorrador) {
+      this.estadosPorCuadrante.update((prev) => ({ ...prev, [key]: 'BORRADOR' }));
+    }
+
+    if (celdaActual) {
+      const { nota: _oldNota, ...resto } = celdaActual;
+      filaEmp[dia] = notaEnviar ? { ...resto, nota: notaEnviar } : { ...resto };
+    } else if (notaEnviar) {
+      filaEmp[dia] = { codigo: '' as CodigoTurno, previsto: '' as CodigoTurno, nota: notaEnviar };
+    }
+    actualMap[empId] = filaEmp;
+    this.actualizarAsignacionesMesActual(actualMap);
+
+    this.api
+      .guardarNotaCelda({
+        servicioId: srvId,
+        anio,
+        mes,
+        dia,
+        empleadoId: empId,
+        nota: notaEnviar,
+      })
+      .subscribe({
+        next: () => {
+          if (prevEstados[key] === 'PUBLICADO') {
+            this.cuadranteEditadoPublicado$.next();
+          }
+          this.celdaHistorialActualizada$.next({ empId, dia });
+          this.notificacion.mostrar(
+            notaEnviar ? '💬 Nota de celda guardada (visible para colaborador y .ics).' : '🗑️ Nota de celda eliminada.'
+          );
+        },
+        error: (err) => {
+          this.asignacionesPorPeriodo.set(prevAsignaciones);
+          this.estadosPorCuadrante.set(prevEstados);
+          const msg = err?.error?.message || 'Error al guardar la nota de la celda.';
+          this.notificacion.mostrar(`⛔ ${msg}`);
+        },
+      });
+  }
+
+  alternarFijacionCelda(
+    empId: string,
+    dia: number,
+    fijadaDestino?: boolean,
+    justificacion?: string
+  ): void {
+    if (this.catalogos.esColaborador()) return;
+    if (this.estadoCuadrante() === 'CERRADO_NOMINA') {
+      this.notificacion.mostrar('⛔ El cuadro de turnos está CERRADO para Nómina. Reábrelo para fijar/desbloquear.');
+      return;
+    }
+
+    const actualMap = { ...this.asignaciones() };
+    const filaEmp = { ...(actualMap[empId] || {}) };
+    const celdaActual = filaEmp[dia];
+    const srvId = this.catalogos.servicioSeleccionadoId();
+    const anio = this.catalogos.anioSeleccionado();
+    const mes = this.catalogos.mesSeleccionado();
+
+    const cfgActual = celdaActual?.codigo ? this.catalogos.catalogoTurnosMap()[celdaActual.codigo] : undefined;
+    const esAusenciaBloqueada = cfgActual
+      ? Boolean(cfgActual.esAusencia)
+      : esCodigoExoneracionContrato(celdaActual?.codigo);
+
+    const destino = fijadaDestino !== undefined ? fijadaDestino : !Boolean(celdaActual?.fijada);
+    if (esAusenciaBloqueada && destino) {
+      this.notificacion.mostrar(
+        `🔒 Esta fecha tiene novedad oficial (${celdaActual?.codigo}) con prioridad legal de Intranet.`
+      );
+      return;
+    }
+
+    if (
+      celdaActual?.servicioEjecutorId &&
+      celdaActual.servicioEjecutorId !== srvId &&
+      celdaActual.codigo &&
+      celdaActual.codigo !== '' &&
+      celdaActual.codigo !== 'L'
+    ) {
+      const srvOtro = this.catalogos.servicios().find((s) => s.id === celdaActual.servicioEjecutorId);
+      this.notificacion.mostrar(
+        `📍 Celda Espejo bloqueada: fija o desbloquea la celda desde "${srvOtro?.nombre || 'el otro servicio'}".`
+      );
+      return;
+    }
+
+    if (Boolean(celdaActual?.fijada) === destino) return;
+
+    const prevAsignaciones = this.asignacionesPorPeriodo();
+    const prevEstados = this.estadosPorCuadrante();
+    const key = `${srvId}::${anio}-${mes}`;
+    const necesitaBorrador = this.estadoCuadrante() === 'SIN_PLANIFICAR' && destino;
+
+    if (necesitaBorrador) {
+      this.estadosPorCuadrante.update((prev) => ({ ...prev, [key]: 'BORRADOR' }));
+    }
+
+    if (celdaActual) {
+      const { fijada: _oldFij, ...resto } = celdaActual;
+      filaEmp[dia] = destino ? { ...resto, fijada: true } : { ...resto };
+    } else if (destino) {
+      filaEmp[dia] = { codigo: '' as CodigoTurno, previsto: '' as CodigoTurno, fijada: true };
+    }
+    actualMap[empId] = filaEmp;
+    this.actualizarAsignacionesMesActual(actualMap);
+
+    this.api
+      .alternarFijacionCelda({
+        servicioId: srvId,
+        anio,
+        mes,
+        dia,
+        empleadoId: empId,
+        fijada: destino,
+        justificacion: justificacion?.trim() || undefined,
+      })
+      .subscribe({
+        next: () => {
+          if (prevEstados[key] === 'PUBLICADO') {
+            this.cuadranteEditadoPublicado$.next();
+          }
+          this.celdaHistorialActualizada$.next({ empId, dia });
+          this.notificacion.mostrar(
+            destino
+              ? '📌 Celda fijada: protegida contra autocompletar, limpiar, pintado accidental, Ctrl+Z y permutas.'
+              : '🔓 Protección 📌 retirada de la celda.'
+          );
+        },
+        error: (err) => {
+          this.asignacionesPorPeriodo.set(prevAsignaciones);
+          this.estadosPorCuadrante.set(prevEstados);
+          const msg = err?.error?.message || 'Error al actualizar fijación de la celda.';
+          this.notificacion.mostrar(`⛔ ${msg}`);
+        },
+      });
+  }
+
+  asignarApoyoDiaCelda(
+    empId: string,
+    dia: number,
+    servicioDestinoId: string | null,
+    codigoTurno?: CodigoTurno,
+    justificacion?: string
+  ): void {
+    if (this.catalogos.esColaborador()) return;
+    if (this.estadoCuadrante() === 'CERRADO_NOMINA') {
+      this.notificacion.mostrar('⛔ El cuadro de turnos está CERRADO para Nómina. Reábrelo para editar apoyo.');
+      return;
+    }
+
+    const srvId = this.catalogos.servicioSeleccionadoId();
+    const anio = this.catalogos.anioSeleccionado();
+    const mes = this.catalogos.mesSeleccionado();
+
+    this.api
+      .asignarApoyoDiaCelda({
+        servicioId: srvId,
+        anio,
+        mes,
+        dia,
+        empleadoId: empId,
+        servicioDestinoId: servicioDestinoId || '',
+        codigo: codigoTurno,
+        justificacion: justificacion?.trim() || undefined,
+      })
+      .subscribe({
+        next: (res) => {
+          const actualMap = { ...this.asignaciones() };
+          const filaEmp = { ...(actualMap[empId] || {}) };
+          const celdaPre = filaEmp[dia];
+          filaEmp[dia] = {
+            ...(celdaPre || {}),
+            codigo: (res.codigo || '') as CodigoTurno,
+            previsto: celdaPre?.previsto ?? ((res.codigo || '') as CodigoTurno),
+            esRotacion: res.esRotacion,
+            servicioEjecutorId: res.servicioEjecutorId,
+          };
+          actualMap[empId] = filaEmp;
+          this.actualizarAsignacionesMesActual(actualMap);
+
+          const keyDest = `${res.servicioEjecutorId}::${anio}-${mes}`;
+          if (!this.estadosPorCuadrante()[keyDest]) {
+            this.estadosPorCuadrante.update((prev) => ({ ...prev, [keyDest]: 'BORRADOR' }));
+          }
+
+          if (res.esRotacion && res.servicioEjecutorId) {
+            const mapaRot = { ...this.empleadosRotadosPorServicio() };
+            const lista = mapaRot[res.servicioEjecutorId] || [];
+            if (!lista.includes(empId)) {
+              mapaRot[res.servicioEjecutorId] = [...lista, empId];
+              this.empleadosRotadosPorServicio.set(mapaRot);
+              this.guardarRotadosEnStorage(mapaRot);
+            }
+          }
+
+          this.cuadranteEditadoPublicado$.next();
+          this.celdaHistorialActualizada$.next({ empId, dia });
+          const srvDest = this.catalogos.servicios().find((s) => s.id === res.servicioEjecutorId);
+          this.notificacion.mostrar(
+            res.esRotacion
+              ? `🔄 Apoyo puntual día ${dia} asignado a "${srvDest?.nombre || res.servicioEjecutorId}" [${res.codigo || 'Vacío'}].`
+              : `🏠 Día ${dia} retornado al servicio base "${srvDest?.nombre || res.servicioEjecutorId}".`
+          );
+        },
+        error: (err) => {
+          const msg = err?.error?.message || 'No se pudo actualizar el apoyo puntual de esta celda.';
+          this.notificacion.mostrar(`⛔ ${msg}`);
+        },
+      });
   }
 
   limpiarCuadranteCompleto(): void {
@@ -2121,6 +2476,7 @@ export class CuadranteStore {
     const anio = this.catalogos.anioSeleccionado();
     const mes = this.catalogos.mesSeleccionado();
     let celdasLimpiadas = 0;
+    let celdasFijadasOmitidas = 0;
     const loteParaDb: {
       empleadoId: string;
       dia: number;
@@ -2146,6 +2502,10 @@ export class CuadranteStore {
         if (celda.servicioEjecutorId && celda.servicioEjecutorId !== srvId) {
           continue;
         }
+        if (celda.fijada) {
+          celdasFijadasOmitidas++;
+          continue;
+        }
         const prev = enBorrador ? '' : (celda.previsto ?? celda.codigo);
         cambiosParaHistorial.push({
           empId: emp.id,
@@ -2161,6 +2521,7 @@ export class CuadranteStore {
           previsto: prev,
           esRotacion: false,
           servicioEjecutorId: undefined,
+          ...(celda.nota ? { nota: celda.nota } : {}),
         };
         loteParaDb.push({
           empleadoId: emp.id,
@@ -2198,6 +2559,8 @@ export class CuadranteStore {
           servicioId: srvId,
           anio,
           mes,
+          origenAccion: 'LIMPIAR',
+          justificacion: '🧹 Limpiar cuadrante completo (Dejar en blanco)',
           celdas: loteParaDb,
         })
         .subscribe({
@@ -2205,8 +2568,10 @@ export class CuadranteStore {
             if (this.estadoCuadrante() === 'PUBLICADO') {
               this.cuadranteEditadoPublicado$.next();
             }
+            this.celdaHistorialActualizada$.next({});
+            const extraFij = celdasFijadasOmitidas > 0 ? ` y ${celdasFijadasOmitidas} celda(s) fijada(s) 📌` : '';
             this.notificacion.mostrar(
-              `✅ Cuadro de turnos en blanco: ${celdasLimpiadas} turnos borrados. Novedades oficiales de Intranet (VAC/INC/LIC/FAM) conservadas.`
+              `✅ Cuadro de turnos en blanco: ${celdasLimpiadas} turnos borrados. Novedades oficiales (VAC/INC/LIC/FAM)${extraFij} conservadas.`
             );
           },
           error: (err) => {
@@ -2217,6 +2582,10 @@ export class CuadranteStore {
             this.notificacion.mostrar(`⛔ ${msg}`);
           },
         });
+    } else if (celdasFijadasOmitidas > 0) {
+      this.notificacion.mostrar(
+        `📌 No se limpiaron turnos porque las ${celdasFijadasOmitidas} celda(s) ocupadas están fijadas.`
+      );
     } else {
       this.notificacion.mostrar('ℹ️ No había turnos operativos para limpiar en este servicio.');
     }
@@ -2281,6 +2650,8 @@ export class CuadranteStore {
         servicioId: srvId,
         anio,
         mes,
+        origenAccion: 'AUTOCOMPLETAR',
+        justificacion: '✨ Autocompletado inteligente de huecos',
         celdas: resultado.loteParaDb,
       };
       const guardarObs = necesitaIniciarBorrador
@@ -2294,8 +2665,9 @@ export class CuadranteStore {
           if (prevEstados[`${srvId}::${anio}-${mes}`] === 'PUBLICADO') {
             this.cuadranteEditadoPublicado$.next();
           }
+          this.celdaHistorialActualizada$.next({});
           this.notificacion.mostrar(
-            `✅ Autocompletado por cargo finalizado: ${resultado.totalAsignados} turnos operativos asignados respetando metas por cargo, 12h de descanso y máx. 6 días continuos.`
+            `✅ Autocompletado por cargo finalizado: ${resultado.totalAsignados} turnos operativos asignados respetando metas por cargo, 12h de descanso, celdas fijadas 📌 y máx. 6 días continuos.`
           );
         },
         error: (err) => {
@@ -2379,15 +2751,21 @@ export class CuadranteStore {
       const mapaActualizado = { ...this.asignaciones() };
       const filaEmp = { ...(mapaActualizado[empId] || {}) };
       const loteLimpiar: { empleadoId: string; dia: number; codigo: string; esRotacion: boolean }[] = [];
+      let fijadasOmitidas = 0;
 
       for (const [diaStr, celda] of Object.entries(filaEmp)) {
         if (celda && celda.servicioEjecutorId === srvId && celda.codigo && celda.codigo !== '') {
+          if (celda.fijada) {
+            fijadasOmitidas++;
+            continue;
+          }
           const diaNum = Number(diaStr);
           filaEmp[diaNum] = {
             codigo: '' as CodigoTurno,
             previsto: celda.previsto,
             esRotacion: false,
             servicioEjecutorId: undefined,
+            ...(celda.nota ? { nota: celda.nota } : {}),
           };
           loteLimpiar.push({
             empleadoId: empId,
@@ -2406,11 +2784,15 @@ export class CuadranteStore {
             servicioId: srvId,
             anio,
             mes,
+            origenAccion: 'APOYO',
+            justificacion: `🔄 Retiro de personal de apoyo (${loteLimpiar.length} días liberados)`,
             celdas: loteLimpiar,
           })
           .subscribe({
             next: () => {
-              this.notificacion.mostrar(`✅ ${empObj?.nombre || 'Colaborador'} removido del personal de apoyo.`);
+              this.celdaHistorialActualizada$.next({});
+              const msgFij = fijadasOmitidas > 0 ? ` (${fijadasOmitidas} fijada(s) 📌 conservadas)` : '';
+              this.notificacion.mostrar(`✅ ${empObj?.nombre || 'Colaborador'} removido del personal de apoyo${msgFij}.`);
             },
             error: (err) => {
               this.empleadosRotadosPorServicio.set(prevRot);

@@ -527,12 +527,14 @@ import {
                   [class.cell-holiday]="!!d.festivo"
                   [class.cell-conflict]="conflictos.length > 0"
                   [class.cell-locked]="esCeldaBloqueada(celda?.codigo, cfg)"
+                  [class.cell-pinned]="!!celda?.fijada && !esCeldaBloqueada(celda?.codigo, cfg)"
                   [class.cell-mirror-other-service]="esCeldaEspejo"
                   [class.shift-heavy]="!esCeldaEspejo && cfg && (cfg.horasOrdinarias >= 12 || cfg.codigo === 'G24' || cfg.codigo === 'N12' || cfg.codigo === 'D12')"
                   [class.shift-24]="!esCeldaEspejo && (celda?.codigo === 'G24' || (cfg && cfg.horasOrdinarias >= 24))"
                   [style.background-color]="esCeldaEspejo ? '' : (cfg ? cfg.bgHex : '')"
                   [style.color]="esCeldaEspejo ? '' : (cfg ? cfg.textHex : '')"
                   (mousedown)="iniciarPintadoCelda.emit({ empId: fila.empleado.id, dia: d.dia, event: $event })"
+                  (contextmenu)="onCeldaContextMenu($event, fila.empleado.id, d.dia)"
                   (mouseenter)="onCeldaMouseEnter(fila.empleado.id, d.dia)"
                   (dragover)="onCeldaDragOver($event)"
                   (drop)="onCeldaDrop($event, fila.empleado.id, d.dia)"
@@ -545,13 +547,24 @@ import {
                         <span class="mirror-srv-code">📍{{ obtenerCodigoServicio(celda?.servicioEjecutorId) }}</span>
                         <span class="mirror-shift-code">{{ celda?.codigo }}</span>
                       </div>
+                      @if (celda?.fijada) {
+                        <span class="pin-mini-tag" title="📌 Celda fijada en el servicio ejecutor">📌</span>
+                      }
+                      @if (celda?.nota) {
+                        <span class="nota-mini-tag" [title]="'💬 Nota: ' + celda?.nota">💬</span>
+                      }
                     } @else {
                       <span class="cell-code">{{ celda?.codigo || '' }}</span>
                       @if (esCeldaBloqueada(celda?.codigo, cfg)) {
                         <span class="lock-mini-tag" title="Bloqueado por novedad oficial Intranet">🔒</span>
+                      } @else if (celda?.fijada) {
+                        <span class="pin-mini-tag" title="📌 Celda fijada contra autocompletar, limpiar, pintado accidental y permutas">📌</span>
                       }
                       @if (celda?.esRotacion && celda?.codigo && celda?.codigo !== 'L') {
                         <span class="rotacion-mini-tag" title="Turno de apoyo ejecutado en este servicio">🔄</span>
+                      }
+                      @if (celda?.nota) {
+                        <span class="nota-mini-tag" [title]="'💬 Nota: ' + celda?.nota">💬</span>
                       }
                       @if (cambioDiff) {
                         <span class="diff-triangle" title="Previsto original: {{ celda?.previsto || 'Vacío' }}"></span>
@@ -846,6 +859,13 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
   @Output() dragOverCelda = new EventEmitter<DragEvent>();
   @Output() dropCelda = new EventEmitter<{ event: DragEvent; empId: string; dia: number }>();
   @Output() keyDownCelda = new EventEmitter<{ event: KeyboardEvent; empId: string; dia: number }>();
+  @Output() abrirMenuContextualCelda = new EventEmitter<{
+    empId: string;
+    dia: number;
+    clientX: number;
+    clientY: number;
+  }>();
+  @Output() abrirInspectorCelda = new EventEmitter<{ empId: string; dia: number }>();
 
   celdaHovered: { empId: string; dia: number } | null = null;
   mostrarFranjasLegacy = false;
@@ -924,12 +944,31 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
     this.detenerAutoScroll();
   }
 
+  onCeldaContextMenu(event: MouseEvent, empId: string, dia: number): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.enfocarCelda.emit({ empId, dia });
+    this.abrirMenuContextualCelda.emit({
+      empId,
+      dia,
+      clientX: event.clientX,
+      clientY: event.clientY,
+    });
+  }
+
   onCeldaMouseEnter(empId: string, dia: number): void {
     this.celdaHovered = { empId, dia };
     this.continuarPintadoCelda.emit({ empId, dia });
   }
 
   onCeldaKeyDown(event: KeyboardEvent, empId: string, dia: number): void {
+    if (event.key === 'F2') {
+      event.preventDefault();
+      event.stopPropagation();
+      this.celdaHovered = null;
+      this.abrirInspectorCelda.emit({ empId, dia });
+      return;
+    }
     this.celdaHovered = null;
     this.keyDownCelda.emit({ event, empId, dia });
   }
@@ -1219,6 +1258,12 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
       }
     } else {
       partes.push('Sin turno asignado');
+    }
+    if (celda?.fijada) {
+      partes.push('📌 Celda fijada: protegida contra autocompletar, limpiar, pintado accidental y permutas.');
+    }
+    if (celda?.nota) {
+      partes.push(`💬 Nota: ${celda.nota}`);
     }
     const listaConflictos = Array.isArray(conflictos)
       ? conflictos

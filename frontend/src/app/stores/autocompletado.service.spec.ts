@@ -246,4 +246,50 @@ describe('AutocompletadoService', () => {
     const admDia3 = filas.filter((f) => res.actualMap[f.empleado.id][3]?.codigo === 'ADM').length;
     expect(admDia3).toBeGreaterThanOrEqual(1);
   });
+
+  it('protege celdas fijadas 📌 (vacías y asignadas) evitando sobrescribirlas en Fase 1, 2 y 3', () => {
+    const srv: ServicioHospitalario = {
+      id: 'srv-urg',
+      codigo: 'URG',
+      nombre: 'Urgencias',
+      tipoAsistencia: 'URGENCIAS',
+      reqDia: 2,
+      reqNoche: 0,
+      modalidadDias: 'TODOS_24_7',
+      turnosHabilitados: ['M8', 'T8', 'L'],
+    };
+
+    const filas = [makeFila('e1', { horasContrato: 168 }), makeFila('e2', { horasContrato: 168 })];
+    const prevMap: Record<string, Record<number, CeldaAsignacion>> = {
+      e1: {
+        5: { codigo: '', previsto: '', fijada: true, nota: 'Respetar bloqueo' },
+        6: { codigo: 'M8', previsto: 'M8', fijada: true, servicioEjecutorId: 'srv-urg' },
+      },
+      e2: {},
+    };
+
+    const res = service.generarAutocompletadoCuadrante({
+      srv,
+      srvId: 'srv-urg',
+      dias: diasNoviembre2026(),
+      catalogo: CATALOGO_TURNOS,
+      listaTurnosCatalogo: Object.values(CATALOGO_TURNOS).filter((t) => t.visibleEnPaleta !== false),
+      prevMapSnapshot: prevMap,
+      filasBase: filas,
+      filtroCategoriaActiva: 'TODAS',
+      enBorradorGlobal: true,
+      obtenerMetasDiaServicio: () => ({ reqDia: 2, reqNoche: 0, cerrado: false }),
+    });
+
+    // Día 5 vacío + fijado no se llena ni siquiera con 'L' en Fase 3 y preserva su nota
+    expect(res.actualMap['e1'][5]).toEqual(
+      jasmine.objectContaining({ codigo: '', fijada: true, nota: 'Respetar bloqueo' })
+    );
+    // Día 6 M8 + fijado sigue idéntico
+    expect(res.actualMap['e1'][6]).toEqual(
+      jasmine.objectContaining({ codigo: 'M8', fijada: true, servicioEjecutorId: 'srv-urg' })
+    );
+    // Ninguna de las dos celdas fijadas entra al loteParaDb
+    expect(res.loteParaDb.some((c) => c.empleadoId === 'e1' && (c.dia === 5 || c.dia === 6))).toBeFalse();
+  });
 });

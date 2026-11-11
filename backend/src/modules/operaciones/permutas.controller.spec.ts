@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request = require('supertest');
-import { CalendarioIcalController, PermutasController } from './operaciones.module';
+import { AuditoriasController, CalendarioIcalController, PermutasController } from './operaciones.module';
 import { FestivosColombiaService } from '../festivos/festivos-colombia.service';
 import { LiquidacionService } from '../liquidacion/liquidacion.module';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -97,14 +97,21 @@ describe('PermutasController (Máquina de estados + Concurrencia) & CalendarioIc
   let cuadranteEstadoActual = 'PUBLICADO';
   let snapshotOri = 'M8';
   let snapshotDes = 'N8';
+  let asignacionFijadaOri = false;
+  let asignacionFijadaDes = false;
+  let icalNotaTest: string | null = null;
   let vecinasActuales: any[] = [];
   let novedadesActivas: any[] = [];
+  let auditController: AuditoriasController;
 
   beforeEach(async () => {
     permutasStore = new Map();
     cuadranteEstadoActual = 'PUBLICADO';
     snapshotOri = 'M8';
     snapshotDes = 'N8';
+    asignacionFijadaOri = false;
+    asignacionFijadaDes = false;
+    icalNotaTest = null;
     vecinasActuales = [];
     novedadesActivas = [];
 
@@ -130,11 +137,16 @@ describe('PermutasController (Máquina de estados + Concurrencia) & CalendarioIc
       asignacionTurno: {
         findUnique: jest.fn(async ({ where }: any) => {
           const eid = where?.empleadoId_fecha?.empleadoId;
-          const cod = eid === emp1.id || eid === 'emp-aux' ? snapshotOri : snapshotDes;
+          const esOri = eid === emp1.id || eid === 'emp-aux';
+          const cod = esOri ? snapshotOri : snapshotDes;
           return {
             id: `asig-${eid}`,
             empleadoId: eid,
             servicioEjecutorId: eid === 'emp-aux' || eid === 'emp-tec' ? 'srv-fact' : 'srv-urg',
+            fijada: esOri ? asignacionFijadaOri : asignacionFijadaDes,
+            nota: icalNotaTest,
+            codigoPrevisto: cod,
+            cuadrante: { estado: cuadranteEstadoActual },
             tipoTurno: tiposTurno.find((t) => t.codigo === cod),
           };
         }),
@@ -144,6 +156,7 @@ describe('PermutasController (Máquina de estados + Concurrencia) & CalendarioIc
               {
                 id: 'asig-ical-1',
                 fecha: new Date('2026-11-20T00:00:00.000Z'),
+                nota: icalNotaTest,
                 tipoTurno: tiposTurno.find((t) => t.codigo === 'N8'),
                 servicioEjecutor: { nombre: 'Urgencias' },
               },
@@ -178,6 +191,7 @@ describe('PermutasController (Máquina de estados + Concurrencia) & CalendarioIc
           return rec;
         }),
         findUnique: jest.fn(async ({ where }: any) => permutasStore.get(where.id) || null),
+        findMany: jest.fn(async () => []),
         updateMany: jest.fn(async ({ where, data }: any) => {
           const rec = permutasStore.get(where.id);
           if (!rec) return { count: 0 };
@@ -209,6 +223,7 @@ describe('PermutasController (Máquina de estados + Concurrencia) & CalendarioIc
       },
       auditoriaCambio: {
         createMany: jest.fn(async () => ({ count: 2 })),
+        findMany: jest.fn(async () => []),
       },
       $transaction: jest.fn(async (cb: any) => cb(prismaMock)),
     };
@@ -226,7 +241,7 @@ describe('PermutasController (Máquina de estados + Concurrencia) & CalendarioIc
     };
 
     const moduleRef = await Test.createTestingModule({
-      controllers: [PermutasController, CalendarioIcalController],
+      controllers: [PermutasController, CalendarioIcalController, AuditoriasController],
       providers: [
         FestivosColombiaService,
         { provide: PrismaService, useValue: prismaMock },
@@ -234,6 +249,7 @@ describe('PermutasController (Máquina de estados + Concurrencia) & CalendarioIc
       ],
     }).compile();
 
+    auditController = moduleRef.get(AuditoriasController);
     app = moduleRef.createNestApplication();
     await app.init();
   });
@@ -469,5 +485,169 @@ describe('PermutasController (Máquina de estados + Concurrencia) & CalendarioIc
         turnoOrigen: 'CAP_BLQ',
       })
       .expect(409);
+  });
+
+  it('bloquea permutas si alguna celda está fijada (📌) al crear y al aprobar, e incluye Nota en feed iCal', async () => {
+    asignacionFijadaOri = true;
+    const resPinCreate = await request(app.getHttpServer())
+      .post('/api/v1/permutas')
+      .send(payloadBase)
+      .expect(409);
+    expect(resPinCreate.body.message).toContain('fijada');
+    asignacionFijadaOri = false;
+
+    const creada = await request(app.getHttpServer())
+      .post('/api/v1/permutas')
+      .send(payloadBase)
+      .expect(201);
+    const permId = creada.body.id;
+    await request(app.getHttpServer()).patch(`/api/v1/permutas/${permId}/aceptar-par`).expect(200);
+
+    // Si después de pactar se fijó la celda destino -> aprobarPermuta debe fallar con 409
+    asignacionFijadaDes = true;
+    const resPinApr = await request(app.getHttpServer())
+      .patch(`/api/v1/permutas/${permId}/aprobar`)
+      .expect(409);
+    expect(resPinApr.body.message).toContain('fijada');
+    asignacionFijadaDes = false;
+
+    icalNotaTest = 'Cubre puesto UCI, entregar llaves';
+    const resIcs = await request(app.getHttpServer())
+      .get('/api/v1/calendario/feed/cal_1001_abc123.ics')
+      .expect(200);
+    expect(resIcs.text).toContain('Nota: Cubre puesto UCI\\, entregar llaves');
+  });
+
+  it('GET /auditorias/celda y GET /auditorias aplican RBAC, ocultan BORRADOR a COLABORADOR (manteniendo Opción B) y protegen CIE-10', async () => {
+    // 1. Sin sesión SSO -> 401
+    await request(app.getHttpServer())
+      .get('/api/v1/auditorias/celda?empleadoId=emp-1&fecha=2026-11-20')
+      .expect(401);
+
+    // 2. COLABORADOR intentando ver celda de otro colaborador -> 403
+    await expect(
+      auditController.obtenerAuditoriaCelda('emp-2', '2026-11-20', {
+        usuarioSso: { rol: 'COLABORADOR', empleadoId: 'emp-1', documento: '1001' },
+      })
+    ).rejects.toThrow(/propios turnos/i);
+
+    // 3. COLABORADOR viendo su propia celda -> filtra BORRADOR, mantiene justificación (Opción B) y redacta CIE-10
+    icalNotaTest = 'Turno clave';
+    novedadesActivas = [
+      {
+        id: 'nov-1',
+        tipo: 'INC',
+        fechaInicio: new Date('2026-11-20T00:00:00.000Z'),
+        fechaFin: new Date('2026-11-20T00:00:00.000Z'),
+        codigoCie10: 'J06.9',
+      },
+    ];
+    prismaMock.auditoriaCambio.findMany.mockResolvedValueOnce([
+      {
+        id: 'aud-pub',
+        timestamp: new Date('2026-11-15T14:00:00.000Z'),
+        actorId: 'María Coord (Coordinador)',
+        tipoAccion: 'EDICION_TURNO',
+        origenAccion: 'PANEL_CELDA',
+        faseCuadrante: 'PUBLICADO',
+        esDetalleLote: false,
+        servicio: { nombre: 'Urgencias' },
+        turnoAnterior: 'M8',
+        turnoNuevo: 'T8',
+        justificacion: 'Ajuste por refuerzo vespertino',
+      },
+    ]);
+
+    const resColab = await auditController.obtenerAuditoriaCelda('emp-1', '2026-11-20', {
+      usuarioSso: { rol: 'COLABORADOR', empleadoId: 'emp-1', documento: '1001' },
+    });
+    expect(prismaMock.auditoriaCambio.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          AND: expect.arrayContaining([
+            { faseCuadrante: { not: 'BORRADOR' } },
+          ]),
+        }),
+      })
+    );
+    expect(resColab.celda.nota).toBe('Turno clave');
+    expect(resColab.historial[0].justificacion).toBe('Ajuste por refuerzo vespertino');
+    expect(resColab.ausencia?.codigoCie10).toBeNull();
+
+    // 4. COORDINADOR fuera de servicio -> 403
+    await expect(
+      auditController.obtenerAuditoriaCelda('emp-1', '2026-11-20', {
+        usuarioSso: { rol: 'COORDINADOR', serviciosCoordinados: ['srv-otro'] },
+      })
+    ).rejects.toThrow(/servicios coordinados/i);
+
+    // 5. ADMIN_TH sí ve codigoCie10 e historial completo (sin filtro de BORRADOR)
+    prismaMock.auditoriaCambio.findMany.mockResolvedValueOnce([]);
+    const resTh = await auditController.obtenerAuditoriaCelda('emp-1', '2026-11-20', {
+      usuarioSso: { rol: 'ADMIN_TH' },
+    });
+    expect(resTh.ausencia?.codigoCie10).toBe('J06.9');
+
+    // 6. listarAuditorias excluye esDetalleLote y BORRADOR por defecto, pero incluirBorrador=true funciona para COORDINADOR y no para COLABORADOR
+    await auditController.listarAuditorias('srv-urg', undefined, undefined, undefined, undefined, undefined, undefined, undefined, {
+      usuarioSso: { rol: 'COORDINADOR', serviciosCoordinados: ['srv-urg'] },
+    });
+    expect(prismaMock.auditoriaCambio.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          AND: expect.arrayContaining([
+            { esDetalleLote: false },
+            { faseCuadrante: { not: 'BORRADOR' } },
+          ]),
+        }),
+      })
+    );
+
+    await auditController.listarAuditorias('srv-urg', undefined, undefined, undefined, undefined, undefined, undefined, 'true', {
+      usuarioSso: { rol: 'COLABORADOR', empleadoId: 'emp-1', documento: '1001' },
+    });
+    expect(prismaMock.auditoriaCambio.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          AND: expect.arrayContaining([
+            { esDetalleLote: false },
+            { faseCuadrante: { not: 'BORRADOR' } },
+          ]),
+        }),
+      })
+    );
+
+    // Con incluirBorrador='true' como COORDINADOR, libera tanto BORRADOR como esDetalleLote=true
+    prismaMock.auditoriaCambio.findMany.mockReset();
+    prismaMock.auditoriaCambio.findMany.mockResolvedValueOnce([
+      {
+        id: 'aud-det-1',
+        timestamp: new Date('2026-11-15T14:00:00.000Z'),
+        actorId: 'Coord',
+        tipoAccion: 'EDICION_MASIVA',
+        origenAccion: 'AUTOCOMPLETAR',
+        faseCuadrante: 'BORRADOR',
+        esDetalleLote: true,
+        servicioId: 'srv-urg',
+        servicio: { nombre: 'Urgencias' },
+        empleadoId: 'emp-1',
+        empleado: { id: 'emp-1', nombre: 'Ana', documento: '1001' },
+        turnoAnterior: 'L',
+        turnoNuevo: 'M8',
+        justificacion: 'Autocompletar borrador',
+      },
+    ]);
+    const listaDet = await auditController.listarAuditorias('srv-urg', undefined, undefined, undefined, undefined, undefined, undefined, 'true', {
+      usuarioSso: { rol: 'COORDINADOR', serviciosCoordinados: ['srv-urg'] },
+    });
+    const lastCallWhere = prismaMock.auditoriaCambio.findMany.mock.calls[0][0].where;
+    expect(lastCallWhere.AND).not.toEqual(
+      expect.arrayContaining([{ esDetalleLote: false }])
+    );
+    expect(lastCallWhere.AND).not.toEqual(
+      expect.arrayContaining([{ faseCuadrante: { not: 'BORRADOR' } }])
+    );
+    expect(listaDet[0].esDetalleLote).toBe(true);
+    expect(listaDet[0].faseCuadrante).toBe('BORRADOR');
   });
 });

@@ -32,6 +32,7 @@ export class PermutasAuditoriaStore {
     tipoAccion?: string;
     fechaInicio?: string;
     fechaFin?: string;
+    incluirBorrador?: boolean;
   }>();
 
   // Permutas visibles en la vista de Solicitudes según el rol y servicio activo
@@ -88,6 +89,7 @@ export class PermutasAuditoriaStore {
     tipoAccion?: string;
     fechaInicio?: string;
     fechaFin?: string;
+    incluirBorrador?: boolean;
   }): Observable<RegistroAuditoria[]> {
     const permitidos = new Set(this.catalogos.serviciosVisibles().map((s) => s.id));
     let srvId =
@@ -102,7 +104,15 @@ export class PermutasAuditoriaStore {
     }
 
     return this.api
-      .obtenerAuditorias(srvId, 500, filtros?.tipoAccion, filtros?.fechaInicio, filtros?.fechaFin)
+      .obtenerAuditorias(
+        srvId,
+        500,
+        filtros?.tipoAccion,
+        filtros?.fechaInicio,
+        filtros?.fechaFin,
+        undefined,
+        Boolean(filtros?.incluirBorrador)
+      )
       .pipe(
         map((logs) => {
           const lista = Array.isArray(logs) ? logs : [];
@@ -120,7 +130,15 @@ export class PermutasAuditoriaStore {
   }
 
   sincronizarAuditoriasDesdePostgres(
-    filtroSrv?: string | { servicioId?: string; tipoAccion?: string; fechaInicio?: string; fechaFin?: string }
+    filtroSrv?:
+      | string
+      | {
+          servicioId?: string;
+          tipoAccion?: string;
+          fechaInicio?: string;
+          fechaFin?: string;
+          incluirBorrador?: boolean;
+        }
   ): void {
     const filtrosObj =
       typeof filtroSrv === 'string'
@@ -227,6 +245,13 @@ export class PermutasAuditoriaStore {
     const mesCtx = contexto?.mes ?? this.catalogos.mesSeleccionado();
     const map = contexto?.matriz ?? this.cuadrante.asignaciones();
     const totalDias = contexto?.totalDias ?? this.cuadrante.diasDelMes().length;
+
+    if (map[emp1Id]?.[dia]?.fijada || map[emp2Id]?.[dia]?.fijada) {
+      return {
+        valida: false,
+        motivo: `📌 Celda fijada por coordinación en el día ${dia}. No se permiten permutas mientras permanezca protegida.`,
+      };
+    }
 
     // 1. Simular descanso para Solicitante (emp1) al recibir turno2:
     const codPrev1 =

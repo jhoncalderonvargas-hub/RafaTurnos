@@ -117,6 +117,27 @@ import { hoyColombiaIso } from '../../shared/liquidacion-horas';
                 (click)="onCambiarTipoAccion('ACCION_MASIVA')">
                 ⚡ Ajustes Masivos
               </button>
+              <button
+                type="button"
+                class="pill-tab"
+                [class.active]="tipoAccionFiltro === 'NOTA_CELDA'"
+                (click)="onCambiarTipoAccion('NOTA_CELDA')">
+                💬 Notas
+              </button>
+              <button
+                type="button"
+                class="pill-tab"
+                [class.active]="tipoAccionFiltro === 'FIJACION_CELDA'"
+                (click)="onCambiarTipoAccion('FIJACION_CELDA')">
+                📌 Fijaciones
+              </button>
+              <button
+                type="button"
+                class="pill-tab"
+                [class.active]="tipoAccionFiltro === 'APOYO_SERVICIO'"
+                (click)="onCambiarTipoAccion('APOYO_SERVICIO')">
+                🔄 Apoyos
+              </button>
             </div>
           </div>
 
@@ -194,6 +215,15 @@ import { hoyColombiaIso } from '../../shared/liquidacion-horas';
               </button>
             }
           </div>
+          @if (esAdminTh || esCoordinador) {
+            <label class="audit-borrador-toggle" title="Por defecto se muestra trazabilidad oficial post-publicación (y desglose completo solo al activarlo o desde cada celda).">
+              <input
+                type="checkbox"
+                [(ngModel)]="incluirBorrador"
+                (ngModelChange)="onCambiarIncluirBorrador()" />
+              <span>Incluir fase Borrador y desglose</span>
+            </label>
+          }
           <div class="results-counter">
             Mostrando <strong>{{ auditoriasFiltradas.length }}</strong> de <strong>{{ bitacoraAuditoria.length }}</strong> eventos
           </div>
@@ -259,13 +289,19 @@ import { hoyColombiaIso } from '../../shared/liquidacion-horas';
                     </div>
                   </td>
                   <td class="justificacion-cell">
+                    @if (log.faseCuadrante === 'BORRADOR') {
+                      <span class="audit-draft-tag" title="Cambio ocurrido en fase Borrador">Borrador</span>
+                    }
+                    @if (log.esDetalleLote) {
+                      <span class="audit-batch-tag" title="Detalle por celda de operación masiva">Lote</span>
+                    }
                     {{ limpiarMotivoVisual(log.motivo) }}
                   </td>
                 </tr>
               } @empty {
                 <tr>
                   <td colspan="8" class="text-muted empty-audit-box">
-                    @if (busquedaTexto || tipoAccionFiltro !== 'TODAS' || servicioFiltro !== 'TODOS' || fechaDesde || fechaHasta) {
+                    @if (busquedaTexto || tipoAccionFiltro !== 'TODAS' || servicioFiltro !== 'TODOS' || fechaDesde || fechaHasta || incluirBorrador) {
                       <div>
                         <div class="audit-empty-icon" aria-hidden="true">🔍</div>
                         <strong>No se encontraron registros de auditoría</strong> con los filtros actuales.
@@ -304,14 +340,25 @@ export class AuditoriaTrazabilidadComponent implements OnChanges {
     tipoAccion: string;
     fechaInicio: string;
     fechaFin: string;
+    incluirBorrador: boolean;
   }>();
   @Output() avisoToast = new EventEmitter<string>();
 
-  tipoAccionFiltro: 'TODAS' | 'PERMUTA' | 'EDICION_TURNO' | 'ESTADO_CUADRANTE' | 'ACCION_MASIVA' = 'TODAS';
+  tipoAccionFiltro:
+    | 'TODAS'
+    | 'PERMUTA'
+    | 'EDICION_TURNO'
+    | 'ESTADO_CUADRANTE'
+    | 'ACCION_MASIVA'
+    | 'NOTA_CELDA'
+    | 'FIJACION_CELDA'
+    | 'APOYO_SERVICIO'
+    | 'NOVEDAD_INTRANET' = 'TODAS';
   servicioFiltro = 'TODOS';
   fechaDesde = '';
   fechaHasta = '';
   busquedaTexto = '';
+  incluirBorrador = false;
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['servicios'] || changes['esAdminTh']) {
@@ -333,10 +380,15 @@ export class AuditoriaTrazabilidadComponent implements OnChanges {
       tipoAccion: this.tipoAccionFiltro,
       fechaInicio: this.fechaDesde,
       fechaFin: this.fechaHasta,
+      incluirBorrador: this.incluirBorrador,
     });
   }
 
   onRefrescar(): void {
+    this.emitirFiltros();
+  }
+
+  onCambiarIncluirBorrador(): void {
     this.emitirFiltros();
   }
 
@@ -346,7 +398,16 @@ export class AuditoriaTrazabilidadComponent implements OnChanges {
   }
 
   onCambiarTipoAccion(
-    tipo: 'TODAS' | 'PERMUTA' | 'EDICION_TURNO' | 'ESTADO_CUADRANTE' | 'ACCION_MASIVA'
+    tipo:
+      | 'TODAS'
+      | 'PERMUTA'
+      | 'EDICION_TURNO'
+      | 'ESTADO_CUADRANTE'
+      | 'ACCION_MASIVA'
+      | 'NOTA_CELDA'
+      | 'FIJACION_CELDA'
+      | 'APOYO_SERVICIO'
+      | 'NOVEDAD_INTRANET'
   ): void {
     this.tipoAccionFiltro = tipo;
     this.emitirFiltros();
@@ -368,6 +429,7 @@ export class AuditoriaTrazabilidadComponent implements OnChanges {
     this.fechaDesde = '';
     this.fechaHasta = '';
     this.busquedaTexto = '';
+    this.incluirBorrador = false;
     this.emitirFiltros();
   }
 
@@ -459,6 +521,14 @@ export class AuditoriaTrazabilidadComponent implements OnChanges {
         return '🔒 Estado Cuadrante';
       case 'ACCION_MASIVA':
         return '⚡ Ajuste en Bloque';
+      case 'NOTA_CELDA':
+        return '💬 Nota de Celda';
+      case 'FIJACION_CELDA':
+        return '📌 Fijación Celda';
+      case 'APOYO_SERVICIO':
+        return '🔄 Apoyo 1 Día';
+      case 'NOVEDAD_INTRANET':
+        return '🏥 Novedad Intranet';
       default:
         return '✏️ Modificación';
     }
@@ -474,6 +544,14 @@ export class AuditoriaTrazabilidadComponent implements OnChanges {
         return 'badge-estado';
       case 'ACCION_MASIVA':
         return 'badge-masiva';
+      case 'NOTA_CELDA':
+        return 'badge-nota';
+      case 'FIJACION_CELDA':
+        return 'badge-fijacion';
+      case 'APOYO_SERVICIO':
+        return 'badge-apoyo';
+      case 'NOVEDAD_INTRANET':
+        return 'badge-intranet';
       default:
         return 'badge-edicion';
     }

@@ -258,6 +258,8 @@ model AsignacionTurno {
   fecha              DateTime          @db.Date
   esRotacion         Boolean           @default(false)
   codigoPrevisto     String?
+  nota               String?
+  fijada             Boolean           @default(false)
   hod                Float             @default(0)
   hon                Float             @default(0)
   hdfd               Float             @default(0)
@@ -340,12 +342,18 @@ model AuditoriaCambio {
   turnoAnterior     String?
   turnoNuevo        String?
   justificacion     String
+  fechaObjetivo     DateTime?        @db.Date
+  faseCuadrante     String           @default("PUBLICADO")
+  origenAccion      String           @default("MANUAL")
+  esDetalleLote     Boolean          @default(false)
   timestamp         DateTime         @default(now())
 
   @@index([asignacionTurnoId])
   @@index([servicioId])
   @@index([empleadoId])
+  @@index([empleadoId, fechaObjetivo])
   @@index([tipoAccion])
+  @@index([faseCuadrante, esDetalleLote, timestamp])
   @@index([timestamp])
   @@index([servicioId, timestamp])
   @@map("auditorias_cambio")

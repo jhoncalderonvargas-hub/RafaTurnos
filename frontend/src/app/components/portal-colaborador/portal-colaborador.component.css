@@ -389,6 +389,61 @@
   background: linear-gradient(180deg, #fdf4ff 0%, #ede9fe 100%);
 }
 
+.emp-day-card.pinned-card {
+  box-shadow: inset 0 0 0 1.5px #0284c7;
+}
+
+.emp-day-head-tags {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.emp-pin-tag {
+  font-size: 10px;
+  line-height: 1;
+  background: #e0f2fe;
+  border: 1px solid #7dd3fc;
+  border-radius: 999px;
+  padding: 1px 4px;
+}
+
+.btn-emp-day-info {
+  background: transparent;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  padding: 0 4px;
+  height: 18px;
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  color: #475569;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-emp-day-info:hover {
+  background: #e0f2fe;
+  border-color: #38bdf8;
+  color: #0369a1;
+}
+
+.emp-day-nota {
+  font-size: 10px;
+  line-height: 1.3;
+  color: #854d0e;
+  background: #fef9c3;
+  border: 1px solid #fde047;
+  border-radius: 5px;
+  padding: 2px 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .emp-rot-tag {
   font-size: 9.5px;
   font-weight: 800;
