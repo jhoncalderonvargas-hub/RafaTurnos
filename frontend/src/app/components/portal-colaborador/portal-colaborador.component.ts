@@ -10,7 +10,11 @@ import {
   ServicioHospitalario,
   TipoTurnoConfig,
 } from '../../models';
-import { esCodigoExoneracionContrato, hoyColombiaIso } from '../../shared/liquidacion-horas';
+import {
+  esCodigoExoneracionContrato,
+  hoyColombiaIso,
+} from '../../shared/liquidacion-horas';
+import { obtenerTandasBreakDeTurno } from '../../calculo-turnos.helper';
 
 export interface DatosEmpleadoPortal {
   empleado: EmpleadoHospital;
@@ -339,6 +343,16 @@ export interface DatosEmpleadoPortal {
                     {{ cfgMio ? cfgMio.horario : 'Turno asignado' }}
                   </div>
 
+                  @let brkDia = obtenerBreakPortal(celdaMia, cfgMio);
+                  @if (brkDia) {
+                    <div
+                      class="emp-day-break"
+                      [class.is-paid]="brkDia.remunerado"
+                      [title]="'Break ' + brkDia.etiqueta + ': ' + brkDia.inicio + '–' + brkDia.fin + ' (' + (brkDia.remunerado ? 'Pagado' : 'No computable Art. 167 CST') + ')'">
+                      🍽️ {{ brkDia.etiqueta }} · {{ brkDia.inicio }}–{{ brkDia.fin }}@if (brkDia.remunerado) { · ☕}
+                    </div>
+                  }
+
                   @if (srvDia) {
                     <div class="emp-day-service" [class.srv-rotado]="srvDia.esRotacion" [title]="'Servicio asignado: ' + srvDia.nombre">
                       <span class="srv-icon">{{ srvDia.esRotacion ? '🔄' : '📍' }}</span>
@@ -527,11 +541,13 @@ export interface DatosEmpleadoPortal {
                   <th>Cargo</th>
                   <th>Turno</th>
                   <th>Horario</th>
+                  <th>Break</th>
                 </tr>
               </thead>
               <tbody>
                 @for (eq of equipoDeGuardiaDia; track eq.empleado.id) {
                   @let cfgEq = obtenerConfigTurno(eq.turno);
+                  @let brkEq = obtenerBreakPortal(eq.celda, cfgEq);
                   <tr>
                     <td><strong>{{ eq.empleado.nombre }}</strong></td>
                     <td>{{ eq.empleado.categoria }}</td>
@@ -541,10 +557,22 @@ export interface DatosEmpleadoPortal {
                       </span>
                     </td>
                     <td class="font-mono">{{ cfgEq?.horario }}</td>
+                    <td>
+                      @if (brkEq) {
+                        <span
+                          class="portal-break-pill"
+                          [class.is-paid]="brkEq.remunerado"
+                          [title]="brkEq.remunerado ? 'Break pagado' : 'No computable Art. 167 CST'">
+                          🍽️ {{ brkEq.etiqueta }} · {{ brkEq.inicio }}–{{ brkEq.fin }}
+                        </span>
+                      } @else {
+                        <span class="text-muted">—</span>
+                      }
+                    </td>
                   </tr>
                 } @empty {
                   <tr>
-                    <td colspan="4" class="text-muted table-empty-cell">No hay otros compañeros en turno activo este día.</td>
+                    <td colspan="5" class="text-muted table-empty-cell">No hay otros compañeros en turno activo este día.</td>
                   </tr>
                 }
               </tbody>
@@ -585,7 +613,7 @@ export class PortalColaboradorComponent {
   @Input() companeroPermutaId = '';
   @Input() asignaciones: Record<string, Record<number, CeldaAsignacion>> = {};
   @Input() misSolicitudesEnviadas: PermutaItem[] = [];
-  @Input() equipoDeGuardiaDia: Array<{ empleado: EmpleadoHospital; turno: string }> = [];
+  @Input() equipoDeGuardiaDia: Array<{ empleado: EmpleadoHospital; turno: string; celda?: CeldaAsignacion }> = [];
 
   @Output() cambiarMes = new EventEmitter<number>();
   @Output() cambiarAnio = new EventEmitter<number>();
@@ -733,6 +761,23 @@ export class PortalColaboradorComponent {
     return {
       nombre: servicio?.nombre || 'Servicio Hospitalario',
       esRotacion,
+    };
+  }
+
+  obtenerBreakPortal(
+    celda?: CeldaAsignacion,
+    cfg?: TipoTurnoConfig
+  ): { etiqueta: string; inicio: string; fin: string; remunerado: boolean } | null {
+    if (!celda?.codigo || !cfg || !cfg.recesoHabilitado || cfg.esAusencia) return null;
+    const tandas = obtenerTandasBreakDeTurno(cfg);
+    if (tandas.length === 0) return null;
+    const orden = celda.breakTandaOrden ?? tandas[0].orden;
+    const tMatch = tandas.find((t) => t.orden === orden) || tandas[0];
+    return {
+      etiqueta: tMatch.etiqueta || `T${tMatch.orden}`,
+      inicio: celda.breakInicio || tMatch.inicio,
+      fin: celda.breakFin || tMatch.fin,
+      remunerado: Boolean(cfg.recesoRemunerado),
     };
   }
 }

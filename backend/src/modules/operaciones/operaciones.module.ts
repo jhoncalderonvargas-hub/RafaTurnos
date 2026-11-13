@@ -15,6 +15,7 @@ import {
   DESCANSO_MINIMO_ENTRE_TURNOS_MIN,
   esCodigoExoneracionContrato,
   esFechaIsoValida,
+  normalizarTandasBreak,
   r2,
   sumarDiasIso,
   turnoEsLaborado,
@@ -551,16 +552,57 @@ export class PermutasController {
           return tipo;
         };
 
-        const [tipoObjSol, tipoObjRec] = await Promise.all([
+        const [tipoObjSol, tipoObjRec, prevAsigSol, prevAsigRec] = await Promise.all([
           resolverTipoObj(permuta.turnoDestino),
           resolverTipoObj(permuta.turnoOrigen),
+          typeof tx.asignacionTurno?.findUnique === 'function'
+            ? tx.asignacionTurno.findUnique({
+                where: { empleadoId_fecha: { empleadoId: permuta.solicitanteId, fecha: fechaOrigen } },
+                select: { breakTandaOrden: true, breakInicio: true, breakFin: true },
+              })
+            : Promise.resolve(null),
+          typeof tx.asignacionTurno?.findUnique === 'function'
+            ? tx.asignacionTurno.findUnique({
+                where: { empleadoId_fecha: { empleadoId: permuta.receptorId, fecha: fechaDestino } },
+                select: { breakTandaOrden: true, breakInicio: true, breakFin: true },
+              })
+            : Promise.resolve(null),
         ]);
+
+        const breakParaTurno = (
+          tipo: any,
+          candidato?: { breakTandaOrden?: number | null; breakInicio?: string | null; breakFin?: string | null } | null
+        ) => {
+          if (!tipo?.recesoHabilitado || Number(tipo?.horasOrdinarias || 0) <= 0) {
+            return { breakTandaOrden: null, breakInicio: null, breakFin: null };
+          }
+          if (candidato?.breakInicio && candidato?.breakFin) {
+            return {
+              breakTandaOrden: candidato.breakTandaOrden ?? 1,
+              breakInicio: candidato.breakInicio,
+              breakFin: candidato.breakFin,
+            };
+          }
+          const tandas = normalizarTandasBreak(
+            tipo.recesoTandasJson,
+            tipo.horaInicio || '07:00',
+            tipo.horaFin || '15:00',
+            Number(tipo.horasOrdinarias) >= 24
+          );
+          if (tandas.length > 0) {
+            return { breakTandaOrden: tandas[0].orden, breakInicio: tandas[0].inicio, breakFin: tandas[0].fin };
+          }
+          return { breakTandaOrden: null, breakInicio: null, breakFin: null };
+        };
+
+        const breakSol = breakParaTurno(tipoObjSol, prevAsigRec);
+        const breakRec = breakParaTurno(tipoObjRec, prevAsigSol);
 
         const reglasSol = this.liquidacionService.resolverReglasEmpleado?.(permuta.solicitante as any);
         const reglasRec = this.liquidacionService.resolverReglasEmpleado?.(permuta.receptor as any);
         const [horasSol, horasRec] = await Promise.all([
-          this.liquidacionService.calcularHorasPorTipo(tipoObjSol, fechaOrigen, reglasSol),
-          this.liquidacionService.calcularHorasPorTipo(tipoObjRec, fechaDestino, reglasRec),
+          this.liquidacionService.calcularHorasPorTipo(tipoObjSol, fechaOrigen, reglasSol, breakSol),
+          this.liquidacionService.calcularHorasPorTipo(tipoObjRec, fechaDestino, reglasRec, breakRec),
         ]);
 
         const actualSolicitante = normalizarCodigo(permuta.turnoOrigen);
@@ -571,6 +613,7 @@ export class PermutasController {
           fecha: Date,
           tipoTurnoId: string,
           anterior: string,
+          breakSlot: { breakTandaOrden: number | null; breakInicio: string | null; breakFin: string | null },
           horas: { hod: number; hon: number; hdfd: number; hdfn: number; hed: number; hen: number }
         ) =>
           tx.asignacionTurno.upsert({
@@ -580,6 +623,7 @@ export class PermutasController {
               tipoTurnoId,
               cuadranteId: cuadrante.id,
               servicioEjecutorId: permuta.servicioId,
+              ...breakSlot,
               ...horas,
             },
             create: {
@@ -590,6 +634,7 @@ export class PermutasController {
               fecha,
               esRotacion: false,
               codigoPrevisto: anterior,
+              ...breakSlot,
               ...horas,
             },
           });
@@ -599,6 +644,7 @@ export class PermutasController {
           fechaOrigen,
           tipoObjSol.id,
           actualSolicitante,
+          breakSol,
           horasSol
         );
         const nuevaReceptor = await aplicar(
@@ -606,6 +652,7 @@ export class PermutasController {
           fechaDestino,
           tipoObjRec.id,
           actualReceptor,
+          breakRec,
           horasRec
         );
 
@@ -1291,6 +1338,14 @@ export class CalendarioIcalController {
           const hmsInicio = this.formatearHoraHms(a.tipoTurno.horaInicio, '070000');
           const hmsFin = this.formatearHoraHms(a.tipoTurno.horaFin, '150000');
 
+          const breakInicioAsig = (a as any).breakInicio;
+          const breakFinAsig = (a as any).breakFin;
+          const breakOrdenAsig = (a as any).breakTandaOrden;
+          const lineaBreak =
+            breakInicioAsig && breakFinAsig
+              ? `\\nBreak / Almuerzo: ${breakOrdenAsig ? `T${breakOrdenAsig} ` : ''}${breakInicioAsig}-${breakFinAsig}${tipo.recesoRemunerado ? ' (Pagado)' : ''}`
+              : '';
+
           lineas.push(
             'BEGIN:VEVENT',
             `UID:turno-${a.id}@hospital.gov.co`,
@@ -1298,7 +1353,7 @@ export class CalendarioIcalController {
             `DTSTART;TZID=America/Bogota:${ymdInicio}T${hmsInicio}`,
             `DTEND;TZID=America/Bogota:${ymdFin}T${hmsFin}`,
             `SUMMARY:[${cod}] ${a.tipoTurno.nombre} (${a.tipoTurno.horaInicio}-${a.tipoTurno.horaFin}) - ${srvNombre}`,
-            `DESCRIPTION:Colaborador: ${empleado.nombre} (${catNombre})\\nTurno: ${cod} - ${a.tipoTurno.nombre} (${a.tipoTurno.horasOrdinarias}h)\\nServicio: ${srvNombre}${lineaNota}`,
+            `DESCRIPTION:Colaborador: ${empleado.nombre} (${catNombre})\\nTurno: ${cod} - ${a.tipoTurno.nombre} (${a.tipoTurno.horasOrdinarias}h)\\nServicio: ${srvNombre}${lineaBreak}${lineaNota}`,
             `LOCATION:${srvNombre}`,
             'END:VEVENT'
           );

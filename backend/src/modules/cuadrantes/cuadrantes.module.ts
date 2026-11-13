@@ -28,8 +28,10 @@ import {
   esDomingo,
   esFechaIsoValida,
   hoyColombiaIso,
+  normalizarTandasBreak,
   r2,
   sumarDiasIso,
+  TandaBreakTurno,
   turnoEsLaborado,
 } from '../../shared/liquidacion-horas';
 
@@ -67,6 +69,9 @@ export interface GuardarCeldaCuadranteDto {
   codigo: string;
   previsto?: string;
   esRotacion?: boolean;
+  breakTandaOrden?: number | null;
+  breakInicio?: string | null;
+  breakFin?: string | null;
   justificacion?: string;
   origenAccion?: string;
 }
@@ -83,7 +88,21 @@ export interface GuardarLoteCuadranteDto {
     codigo: string;
     previsto?: string;
     esRotacion?: boolean;
+    breakTandaOrden?: number | null;
+    breakInicio?: string | null;
+    breakFin?: string | null;
   }[];
+}
+
+export interface ActualizarBreakCeldaDto {
+  servicioId: string;
+  anio: number;
+  mes: number;
+  dia: number;
+  empleadoId: string;
+  breakTandaOrden?: number | null;
+  breakInicio?: string | null;
+  breakFin?: string | null;
 }
 
 export interface GuardarNotaCeldaDto {
@@ -348,6 +367,93 @@ export class CuadrantesController {
     return !['L', 'S', CODIGO_CELDA_VACIA_DB, ''].includes(cod) && !esCodigoExoneracionContrato(cod);
   }
 
+  private resolverBreakAsignacion(
+    tipoTurno: Partial<TipoTurnoLiquidableDb> | null | undefined,
+    entrada?: {
+      breakTandaOrden?: number | null;
+      breakInicio?: string | null;
+      breakFin?: string | null;
+    },
+    previa?: {
+      tipoTurnoId?: string;
+      breakTandaOrden?: number | null;
+      breakInicio?: string | null;
+      breakFin?: string | null;
+    } | null
+  ): {
+    breakTandaOrden: number | null;
+    breakInicio: string | null;
+    breakFin: string | null;
+  } {
+    if (
+      !tipoTurno ||
+      !tipoTurno.recesoHabilitado ||
+      Number(tipoTurno.horasOrdinarias || 0) <= 0
+    ) {
+      return { breakTandaOrden: null, breakInicio: null, breakFin: null };
+    }
+
+    const tandas: TandaBreakTurno[] = normalizarTandasBreak(
+      tipoTurno.recesoTandasJson as TandaBreakTurno[] | null | undefined,
+      tipoTurno.horaInicio || '07:00',
+      tipoTurno.horaFin || '15:00',
+      Number(tipoTurno.horasOrdinarias) >= 24
+    );
+
+    const iniStr = typeof entrada?.breakInicio === 'string' ? entrada.breakInicio.trim().slice(0, 5) : '';
+    const finStr = typeof entrada?.breakFin === 'string' ? entrada.breakFin.trim().slice(0, 5) : '';
+    if (/^\d{2}:\d{2}$/.test(iniStr) && /^\d{2}:\d{2}$/.test(finStr)) {
+      const ordenNum =
+        entrada?.breakTandaOrden != null && Number.isFinite(Number(entrada.breakTandaOrden))
+          ? Math.max(1, Math.round(Number(entrada.breakTandaOrden)))
+          : (tandas.find((t) => t.inicio === iniStr && t.fin === finStr)?.orden ?? 1);
+      return {
+        breakTandaOrden: ordenNum,
+        breakInicio: iniStr,
+        breakFin: finStr,
+      };
+    }
+
+    if (entrada?.breakTandaOrden != null && tandas.length > 0) {
+      const tandaByOrd = tandas.find((t) => t.orden === Number(entrada.breakTandaOrden));
+      if (tandaByOrd) {
+        return {
+          breakTandaOrden: tandaByOrd.orden,
+          breakInicio: tandaByOrd.inicio,
+          breakFin: tandaByOrd.fin,
+        };
+      }
+    }
+
+    if (entrada?.breakInicio === null && entrada?.breakFin === null) {
+      return { breakTandaOrden: null, breakInicio: null, breakFin: null };
+    }
+
+    if (
+      previa &&
+      previa.tipoTurnoId &&
+      previa.tipoTurnoId === (tipoTurno as any).id &&
+      previa.breakInicio &&
+      previa.breakFin
+    ) {
+      return {
+        breakTandaOrden: previa.breakTandaOrden ?? 1,
+        breakInicio: previa.breakInicio,
+        breakFin: previa.breakFin,
+      };
+    }
+
+    if (tandas.length > 0) {
+      return {
+        breakTandaOrden: tandas[0].orden,
+        breakInicio: tandas[0].inicio,
+        breakFin: tandas[0].fin,
+      };
+    }
+
+    return { breakTandaOrden: null, breakInicio: null, breakFin: null };
+  }
+
   private async resolverTipoTurno(
     codigo: string,
     tx?: Prisma.TransactionClient
@@ -424,6 +530,9 @@ export class CuadrantesController {
           nota: true,
           fijada: true,
           servicioEjecutorId: true,
+          breakTandaOrden: true,
+          breakInicio: true,
+          breakFin: true,
           tipoTurno: {
             select: { codigo: true },
           },
@@ -464,6 +573,9 @@ export class CuadrantesController {
             servicioEjecutorId?: string;
             nota?: string;
             fijada?: boolean;
+            breakTandaOrden?: number;
+            breakInicio?: string;
+            breakFin?: string;
           }
         >
       >
@@ -495,6 +607,15 @@ export class CuadrantesController {
         servicioEjecutorId: codigoReal === '' ? undefined : a.servicioEjecutorId,
         ...(a.nota ? { nota: a.nota } : {}),
         ...(a.fijada ? { fijada: true } : {}),
+        ...(codigoReal !== '' && (a as any).breakTandaOrden != null
+          ? { breakTandaOrden: (a as any).breakTandaOrden }
+          : {}),
+        ...(codigoReal !== '' && (a as any).breakInicio
+          ? { breakInicio: (a as any).breakInicio }
+          : {}),
+        ...(codigoReal !== '' && (a as any).breakFin
+          ? { breakFin: (a as any).breakFin }
+          : {}),
       };
     }
 
@@ -830,11 +951,21 @@ export class CuadrantesController {
         }
 
         const tipoTurno = await this.resolverTipoTurno(codigoRaw, tx);
+        const breakRes = this.resolverBreakAsignacion(
+          tipoTurno,
+          {
+            breakTandaOrden: dto.breakTandaOrden,
+            breakInicio: dto.breakInicio,
+            breakFin: dto.breakFin,
+          },
+          asigPrevia as any
+        );
         const reglasEmp = this.liquidacionService.resolverReglasEmpleado?.(emp as any);
         const horas = await this.liquidacionService.calcularHorasPorTipo(
           tipoTurno,
           fechaUtc,
-          reglasEmp
+          reglasEmp,
+          breakRes
         );
 
         const validacion = await this.reglasService.validarAsignacionCelda(
@@ -867,6 +998,7 @@ export class CuadrantesController {
             servicioEjecutorId: dto.servicioId,
             esRotacion: Boolean(dto.esRotacion),
             codigoPrevisto: codigoPrevistoGuardar,
+            ...breakRes,
             ...horas,
           },
           create: {
@@ -877,6 +1009,7 @@ export class CuadrantesController {
             fecha: fechaUtc,
             esRotacion: Boolean(dto.esRotacion),
             codigoPrevisto: codigoPrevistoGuardar,
+            ...breakRes,
             ...horas,
           },
         });
@@ -953,6 +1086,153 @@ export class CuadrantesController {
           ok: true,
           id: asignacion.id,
           advertenciasReglas: validacion.alertas,
+        };
+      },
+      { timeout: 20000 }
+    );
+  }
+
+  /**
+   * 3b-bis. Actualiza la tanda / franja de break asignada a una celda existente y recalcula sus horas.
+   */
+  @Patch('celda/break')
+  async guardarBreakCelda(@Body() dto: ActualizarBreakCeldaDto, @Req() req?: any) {
+    const anio = Number(dto.anio);
+    const mes = Number(dto.mes);
+    const dia = Number(dto.dia);
+    if (!dto?.servicioId || !dto?.empleadoId) {
+      throw new BadRequestException('Debe indicar servicioId y empleadoId válidos.');
+    }
+    const usuario = req?.usuarioSso;
+    if (usuario?.rol === 'COORDINADOR') {
+      const permitidos = Array.isArray(usuario.serviciosCoordinados)
+        ? usuario.serviciosCoordinados
+        : [];
+      if (!permitidos.includes(dto.servicioId)) {
+        throw new ForbiddenException(
+          `Acceso denegado: no tienes permisos de coordinación sobre el servicio "${dto.servicioId}".`
+        );
+      }
+    }
+
+    const fechaUtc = this.construirFechaUtcStrict(anio, mes, dia);
+    await this.festivosService.asegurarAnios([anio - 1, anio, anio + 1]);
+
+    return this.prisma.$transaction(
+      async (tx) => {
+        const cuadrante = await tx.cuadrante.findUnique({
+          where: {
+            anio_mes_servicioId: { anio, mes, servicioId: dto.servicioId },
+          },
+          select: { id: true, estado: true },
+        });
+        if (cuadrante?.estado === EstadoCuadrante.CERRADO_NOMINA) {
+          throw new ConflictException(
+            'El cuadrante de este periodo se encuentra CERRADO para nómina. No es posible ajustar breaks.'
+          );
+        }
+
+        const asigPrevia = await tx.asignacionTurno.findUnique({
+          where: {
+            empleadoId_fecha: { empleadoId: dto.empleadoId, fecha: fechaUtc },
+          },
+          include: {
+            tipoTurno: true,
+            servicioEjecutor: { select: { nombre: true } },
+            empleado: { include: { empresaContratante: true } },
+          },
+        });
+
+        if (
+          !asigPrevia ||
+          !asigPrevia.tipoTurno ||
+          Number(asigPrevia.tipoTurno.horasOrdinarias || 0) <= 0
+        ) {
+          throw new BadRequestException(
+            'La celda no tiene un turno laboral asignado para gestionar break.'
+          );
+        }
+
+        if (
+          asigPrevia.servicioEjecutorId &&
+          asigPrevia.servicioEjecutorId !== dto.servicioId &&
+          this.esTurnoOperativoOtroServicio(asigPrevia.tipoTurno)
+        ) {
+          const nombreOtroSrv =
+            asigPrevia.servicioEjecutor?.nombre || asigPrevia.servicioEjecutorId;
+          throw new ConflictException(
+            `Celda Espejo bloqueada: El turno pertenece a "${nombreOtroSrv}". Ajústalo en ese servicio.`
+          );
+        }
+
+        const breakRes = this.resolverBreakAsignacion(asigPrevia.tipoTurno, {
+          breakTandaOrden: dto.breakTandaOrden,
+          breakInicio: dto.breakInicio,
+          breakFin: dto.breakFin,
+        });
+        const reglasEmp = this.liquidacionService.resolverReglasEmpleado?.(
+          asigPrevia.empleado as any
+        );
+        const horas = await this.liquidacionService.calcularHorasPorTipo(
+          asigPrevia.tipoTurno,
+          fechaUtc,
+          reglasEmp,
+          breakRes
+        );
+
+        await tx.asignacionTurno.update({
+          where: { id: asigPrevia.id },
+          data: {
+            ...breakRes,
+            ...horas,
+          },
+        });
+
+        if (
+          cuadrante &&
+          (cuadrante.estado === EstadoCuadrante.PUBLICADO ||
+            cuadrante.estado === EstadoCuadrante.VALIDADO)
+        ) {
+          await this.liquidacionService.consolidarSaldosBancoServicio(
+            dto.servicioId,
+            anio,
+            mes,
+            new Map(),
+            true,
+            tx
+          );
+          if (
+            asigPrevia.empleado &&
+            asigPrevia.empleado.servicioBaseId !== dto.servicioId
+          ) {
+            const cuadBase = await tx.cuadrante.findUnique({
+              where: {
+                anio_mes_servicioId: {
+                  anio,
+                  mes,
+                  servicioId: asigPrevia.empleado.servicioBaseId,
+                },
+              },
+              select: { estado: true },
+            });
+            if (cuadBase && cuadBase.estado !== EstadoCuadrante.BORRADOR) {
+              await this.liquidacionService.consolidarSaldosBancoServicio(
+                asigPrevia.empleado.servicioBaseId,
+                anio,
+                mes,
+                new Map(),
+                true,
+                tx
+              );
+            }
+          }
+        }
+
+        return {
+          ok: true,
+          id: asigPrevia.id,
+          ...breakRes,
+          horas,
         };
       },
       { timeout: 20000 }
@@ -1402,11 +1682,17 @@ export class CuadrantesController {
         }
         cuadMap.set(targetServicioId, { id: cuadDestino.id, estado: cuadDestino.estado });
 
+        const breakResApoyo = this.resolverBreakAsignacion(
+          tipoTurno,
+          undefined,
+          asigPrevia as any
+        );
         const reglasEmp = this.liquidacionService.resolverReglasEmpleado?.(emp as any);
         const horas = await this.liquidacionService.calcularHorasPorTipo(
           tipoTurno,
           fechaUtc,
-          reglasEmp
+          reglasEmp,
+          breakResApoyo
         );
         const esRotacion = targetServicioId !== emp.servicioBaseId;
         const codAudAnt = this.normalizarCodigoParaAuditoria(codigoActualNorm);
@@ -1423,6 +1709,7 @@ export class CuadrantesController {
             tipoTurnoId: tipoTurno.id,
             servicioEjecutorId: targetServicioId,
             esRotacion,
+            ...breakResApoyo,
             ...horas,
           },
           create: {
@@ -1433,6 +1720,7 @@ export class CuadrantesController {
             fecha: fechaUtc,
             esRotacion,
             codigoPrevisto: codigoGuardar,
+            ...breakResApoyo,
             ...horas,
           },
         });
@@ -1572,6 +1860,10 @@ export class CuadrantesController {
                     empleadoId: true,
                     fecha: true,
                     fijada: true,
+                    tipoTurnoId: true,
+                    breakTandaOrden: true,
+                    breakInicio: true,
+                    breakFin: true,
                     tipoTurno: { select: { codigo: true } },
                   },
                 })
@@ -1619,6 +1911,10 @@ export class CuadrantesController {
 
         const mapaPrevio = new Map<string, string>();
         const mapaIdPrevio = new Map<string, string>();
+        const mapaAsigPreviaBreak = new Map<
+          string,
+          { tipoTurnoId?: string; breakTandaOrden?: number | null; breakInicio?: string | null; breakFin?: string | null }
+        >();
         const celdasFijadas = new Set<string>();
         for (const a of asignacionesPreviasServicio as any[]) {
           const d = new Date(a.fecha).getUTCDate();
@@ -1630,6 +1926,12 @@ export class CuadrantesController {
           if (a.id) {
             mapaIdPrevio.set(key, a.id);
           }
+          mapaAsigPreviaBreak.set(key, {
+            tipoTurnoId: a.tipoTurnoId,
+            breakTandaOrden: a.breakTandaOrden ?? null,
+            breakInicio: a.breakInicio ?? null,
+            breakFin: a.breakFin ?? null,
+          });
           if (a.fijada) {
             celdasFijadas.add(key);
           }
@@ -1681,14 +1983,24 @@ export class CuadrantesController {
         for (const c of celdasFiltradas) {
           const fechaUtc = this.construirFechaUtcStrict(anio, mes, c.dia);
           const tipoTurno = mapaTipos.get(c.codigoNorm)!;
+          const key = `${c.empleadoId}_${c.dia}`;
+          const breakRes = this.resolverBreakAsignacion(
+            tipoTurno,
+            {
+              breakTandaOrden: c.breakTandaOrden,
+              breakInicio: c.breakInicio,
+              breakFin: c.breakFin,
+            },
+            mapaAsigPreviaBreak.get(key)
+          );
           const horas = await this.liquidacionService.calcularHorasPorTipo(
             tipoTurno,
             fechaUtc,
-            mapaReglasEmp.get(c.empleadoId)
+            mapaReglasEmp.get(c.empleadoId),
+            breakRes
           );
           const codPrevGuardar = c.previstoNorm ?? c.codigoNorm;
 
-          const key = `${c.empleadoId}_${c.dia}`;
           const antAud = mapaPrevio.get(key) || 'L';
           const nueAud = this.normalizarCodigoParaAuditoria(c.codigoNorm);
 
@@ -1705,6 +2017,7 @@ export class CuadrantesController {
               servicioEjecutorId: dto.servicioId,
               esRotacion: Boolean(c.esRotacion),
               codigoPrevisto: codPrevGuardar,
+              ...breakRes,
               ...horas,
             },
             create: {
@@ -1715,6 +2028,7 @@ export class CuadrantesController {
               fecha: fechaUtc,
               esRotacion: Boolean(c.esRotacion),
               codigoPrevisto: codPrevGuardar,
+              ...breakRes,
               ...horas,
             },
           });
@@ -2081,6 +2395,9 @@ export class CuadrantesController {
                 esRotacion: false,
                 fijada: false,
                 codigoPrevisto: tipoNov,
+                breakTandaOrden: null,
+                breakInicio: null,
+                breakFin: null,
                 hod: 0,
                 hon: 0,
                 hdfd: 0,

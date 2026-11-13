@@ -18,6 +18,18 @@ import {
   imports: [CommonModule, FormsModule],
   styleUrl: './configuracion-empresas.component.css',
   template: `
+    <div class="module-hero-card">
+      <div class="module-hero-brand">
+        <div class="module-hero-icon" aria-hidden="true">🏢</div>
+        <div class="module-hero-titles">
+          <div class="module-hero-title-row">
+            <h2>Gestión de Empresas</h2>
+            <span class="module-hero-badge">{{ empresas.length }} empresas</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Alerta de Empresas Pendientes por Confirmar Reglas -->
     @if (empresasPendientes.length > 0) {
       <div class="emp-pending-banner" role="alert">

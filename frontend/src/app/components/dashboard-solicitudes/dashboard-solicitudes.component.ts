@@ -2,6 +2,7 @@ import { Component, EventEmitter, HostListener, Input, Output } from '@angular/c
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { PermutaItem, RegistroAuditoria, ServicioHospitalario, SesionUsuarioSso } from '../../models';
+import { coincideBusquedaCampos, dividirTerminosBusqueda } from '../../utils/busqueda-texto';
 
 @Component({
   selector: 'app-dashboard-solicitudes',
@@ -378,7 +379,7 @@ export class DashboardSolicitudesComponent {
   }
 
   get permutasFiltradas(): PermutaItem[] {
-    const q = this.busquedaPermuta.trim().toLowerCase();
+    const terminos = dividirTerminosBusqueda(this.busquedaPermuta);
     return this.permutas.filter((p) => {
       // Filtro de Estado
       if (this.filtroEstadoPermuta === 'PENDIENTES') {
@@ -388,16 +389,19 @@ export class DashboardSolicitudesComponent {
       }
 
       // Filtro de Búsqueda
-      if (q) {
-        const match =
-          p.solicitanteNombre?.toLowerCase().includes(q) ||
-          p.receptorNombre?.toLowerCase().includes(q) ||
-          p.categoria?.toLowerCase().includes(q) ||
-          p.turnoOrigen?.toLowerCase().includes(q) ||
-          p.turnoDestino?.toLowerCase().includes(q) ||
-          String(p.diaOrigen).includes(q) ||
-          String(p.diaDestino).includes(q);
-        if (!match) return false;
+      if (
+        terminos.length > 0 &&
+        !coincideBusquedaCampos(terminos, [
+          p.solicitanteNombre,
+          p.receptorNombre,
+          p.categoria,
+          p.turnoOrigen,
+          p.turnoDestino,
+          p.diaOrigen,
+          p.diaDestino,
+        ])
+      ) {
+        return false;
       }
 
       return true;
@@ -405,7 +409,7 @@ export class DashboardSolicitudesComponent {
   }
 
   get auditoriasFiltradas(): RegistroAuditoria[] {
-    const q = this.busquedaAuditoria.trim().toLowerCase();
+    const terminos = dividirTerminosBusqueda(this.busquedaAuditoria);
     let base = this.bitacoraAuditoria;
     if (this.esColaborador) {
       const miId = this.sesionActual?.empleadoId;
@@ -419,15 +423,16 @@ export class DashboardSolicitudesComponent {
       base = base.filter((log) => log.servicioId === this.servicioSeleccionadoId);
     }
     const porServicio = base;
-    if (!q) return porServicio;
-    return porServicio.filter(
-      (log) =>
-        log.empleadoNombre?.toLowerCase().includes(q) ||
-        log.actor?.toLowerCase().includes(q) ||
-        log.motivo?.toLowerCase().includes(q) ||
-        log.turnoNuevo?.toLowerCase().includes(q) ||
-        log.turnoAnterior?.toLowerCase().includes(q) ||
-        String(log.dia).includes(q)
+    if (terminos.length === 0) return porServicio;
+    return porServicio.filter((log) =>
+      coincideBusquedaCampos(terminos, [
+        log.empleadoNombre,
+        log.actor,
+        log.motivo,
+        log.turnoNuevo,
+        log.turnoAnterior,
+        log.dia,
+      ])
     );
   }
 

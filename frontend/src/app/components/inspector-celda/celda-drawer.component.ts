@@ -30,6 +30,7 @@ import {
   TipoTurnoConfig,
 } from '../../models';
 import {
+  obtenerTandasBreakDeTurno,
   predicadoDescansoObligatorio,
   reglasEmpresaDeEmpleado,
 } from '../../calculo-turnos.helper';
@@ -42,7 +43,7 @@ import {
   obtenerHorasAmortizacionTurno,
 } from '../../shared/liquidacion-horas';
 import { TurnosApiService } from '../../turnos-api.service';
-import { CuadranteStore } from '../../stores/cuadrante.store';
+import { CuadranteStore, ResumenTandasBreakDia } from '../../stores/cuadrante.store';
 
 @Component({
   selector: 'app-celda-drawer',
@@ -162,7 +163,9 @@ import { CuadranteStore } from '../../stores/cuadrante.store';
                   <div class="shift-name">{{ cfgActual?.nombre || 'Sin turno asignado' }}</div>
                   <div class="shift-hours-range">
                     {{ cfgActual?.horario || 'Libre / sin asignación operativa' }}
-                    @if (cfgActual?.minutosAlmuerzo) {
+                    @if (infoBreakActual; as brk) {
+                      · Break {{ brk.etiqueta }} ({{ brk.inicio }}–{{ brk.fin }}) · {{ brk.remunerado ? 'Pagado' : 'Art. 167 CST' }}
+                    } @else if (cfgActual?.minutosAlmuerzo) {
                       · -{{ cfgActual?.minutosAlmuerzo }}m almuerzo
                     }
                   </div>
@@ -198,6 +201,52 @@ import { CuadranteStore } from '../../stores/cuadrante.store';
                 </div>
               }
             </div>
+
+            @if (infoBreakActual; as brk) {
+              <div class="drawer-break-card" [class.has-overlap]="resumenTandasBreakDia?.tieneAlerta">
+                <div class="drawer-break-head">
+                  <span class="drawer-break-title">🍽️ Break / Almuerzo asignado</span>
+                  <span class="drawer-break-mode-badge" [class.is-paid]="brk.remunerado">
+                    {{ brk.remunerado ? '☕ Pagado (0h desc.)' : '⏱️ No computable Art. 167 CST' }}
+                  </span>
+                </div>
+                <div class="drawer-break-current font-mono">
+                  <strong>{{ brk.etiqueta }}</strong> · {{ brk.inicio }} – {{ brk.fin }}
+                </div>
+
+                @if (!esSoloLectura && !esCeldaEspejo && resumenTandasBreakDia) {
+                  <div class="drawer-tandas-pills">
+                    @for (t of resumenTandasBreakDia.tandas; track t.orden) {
+                      <button
+                        type="button"
+                        class="drawer-tanda-btn"
+                        [class.is-active]="t.orden === brk.orden"
+                        [class.is-overlap]="t.enAlerta"
+                        [disabled]="!puedeEditarTurno"
+                        (click)="onSeleccionarTandaBreak(t.orden)"
+                        [title]="t.etiqueta + ': ' + t.inicio + '–' + t.fin + ' (' + t.asignados + ' de máx. ' + t.maxSimultaneos + ' simultáneos)'">
+                        <span class="dt-ord">{{ t.etiqueta }}</span>
+                        <span class="dt-time font-mono">{{ t.inicio }}–{{ t.fin }}</span>
+                        <span class="dt-occ" [class.is-over]="t.enAlerta">{{ t.asignados }}/{{ t.maxSimultaneos }}</span>
+                      </button>
+                    }
+                  </div>
+
+                  @if (resumenTandasBreakDia.tandas.length > 1 || resumenTandasBreakDia.tieneAlerta) {
+                    <div class="drawer-break-actions">
+                      <button
+                        type="button"
+                        class="btn-drawer-secondary btn-balance-breaks"
+                        [disabled]="esCerrado"
+                        (click)="onRebalancearBreaksDia()"
+                        title="Redistribuir automáticamente las tandas de break del servicio en este día respetando celdas fijadas">
+                        ⚖️ Balancear tandas del día
+                      </button>
+                    </div>
+                  }
+                }
+              </div>
+            }
 
             <!-- Secuencia Ayer -> Hoy -> Mañana con cálculo exacto de descanso -->
             <div class="sequence-strip">
@@ -663,6 +712,7 @@ export class CeldaDrawerComponent implements OnInit, OnChanges {
   @Input() esAdminTh = false;
   @Input() esCoordinador = false;
   @Input() esColaborador = false;
+  @Input() resumenTandasBreakDia: ResumenTandasBreakDia | null = null;
 
   @Output() cerrar = new EventEmitter<void>();
   @Output() navegarDia = new EventEmitter<number>();
@@ -679,6 +729,8 @@ export class CeldaDrawerComponent implements OnInit, OnChanges {
   }>();
   @Output() guardarNota = new EventEmitter<{ empId: string; dia: number; nota: string }>();
   @Output() alternarFijacion = new EventEmitter<{ empId: string; dia: number }>();
+  @Output() cambiarBreakTanda = new EventEmitter<{ empId: string; dia: number; tandaOrden: number }>();
+  @Output() rebalancearBreaksDia = new EventEmitter<{ dia: number; codigoTurno?: string }>();
   @Output() asignarApoyo = new EventEmitter<{
     empId: string;
     dia: number;
@@ -928,12 +980,43 @@ export class CeldaDrawerComponent implements OnInit, OnChanges {
       return { hod: 0, hon: 0, hdfd: 0, hdfn: 0, total: 0 };
     }
     const reglas = reglasEmpresaDeEmpleado(this.empleado);
+    const turnoEff =
+      this.celda?.breakInicio || this.celda?.breakFin
+        ? {
+            ...this.cfgActual,
+            breakInicio: this.celda.breakInicio ?? null,
+            breakFin: this.celda.breakFin ?? null,
+          }
+        : this.cfgActual;
     return liquidarTurno(
-      this.cfgActual,
+      turnoEff,
       fechaIso,
       predicadoDescansoObligatorio(),
       reglas
     );
+  }
+
+  get infoBreakActual(): {
+    orden: number;
+    etiqueta: string;
+    inicio: string;
+    fin: string;
+    remunerado: boolean;
+  } | null {
+    if (!this.cfgActual || !this.cfgActual.recesoHabilitado || this.esAusencia) {
+      return null;
+    }
+    const tandas = obtenerTandasBreakDeTurno(this.cfgActual);
+    if (tandas.length === 0) return null;
+    const orden = this.celda?.breakTandaOrden ?? tandas[0].orden;
+    const tMatch = tandas.find((t) => t.orden === orden) || tandas[0];
+    return {
+      orden: tMatch.orden,
+      etiqueta: tMatch.etiqueta || `T${tMatch.orden}`,
+      inicio: this.celda?.breakInicio || tMatch.inicio,
+      fin: this.celda?.breakFin || tMatch.fin,
+      remunerado: Boolean(this.cfgActual.recesoRemunerado),
+    };
   }
 
   get horasAmortizacionComp(): number {
@@ -1176,6 +1259,10 @@ export class CeldaDrawerComponent implements OnInit, OnChanges {
         return 'Nota';
       case 'FIJACION':
         return 'Fijación';
+      case 'BREAK':
+        return 'Break';
+      case 'BALANCEAR_BREAKS':
+        return 'Balanceo Breaks';
       default:
         return 'Manual';
     }
@@ -1268,5 +1355,22 @@ export class CeldaDrawerComponent implements OnInit, OnChanges {
     if (!this.target || !this.puedePermutarPortal) return;
     this.irAPermutaDia.emit(this.target.dia);
     this.cerrar.emit();
+  }
+
+  onSeleccionarTandaBreak(tandaOrden: number): void {
+    if (!this.target || !this.puedeEditarTurno) return;
+    this.cambiarBreakTanda.emit({
+      empId: this.target.empId,
+      dia: this.target.dia,
+      tandaOrden,
+    });
+  }
+
+  onRebalancearBreaksDia(): void {
+    if (!this.target || this.esCerrado) return;
+    this.rebalancearBreaksDia.emit({
+      dia: this.target.dia,
+      codigoTurno: this.codigoActual || undefined,
+    });
   }
 }

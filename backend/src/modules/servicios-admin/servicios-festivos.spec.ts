@@ -43,8 +43,9 @@ describe('ServiciosAdminController & FestivosController', () => {
               : null
         ),
         findFirst: jest.fn(async () => null),
-        update: jest.fn(async ({ data }: any) => ({
-          id: 'srv-1',
+        create: jest.fn(async ({ data }: any) => ({ id: 'srv-new', ...data })),
+        update: jest.fn(async ({ where, data }: any) => ({
+          id: where?.id || 'srv-1',
           ...data,
           turnosHabilitadosCodigos: data.turnosHabilitadosCodigos || ['M8', 'T8'],
         })),
@@ -63,6 +64,7 @@ describe('ServiciosAdminController & FestivosController', () => {
         createMany: jest.fn(async () => ({ count: 1 })),
       },
       servicioCargoPermitido: {
+        findMany: jest.fn(async () => []),
         deleteMany: jest.fn(async () => ({ count: 0 })),
         createMany: jest.fn(async () => ({ count: 1 })),
       },
@@ -85,6 +87,13 @@ describe('ServiciosAdminController & FestivosController', () => {
       macroproceso: {
         findFirst: jest.fn(async () => ({ id: 'mp-urg', codigo: 'URGENCIAS' })),
         create: jest.fn(async ({ data }: any) => data),
+      },
+      empresaContratante: {
+        findUnique: jest.fn(async ({ where }: any) =>
+          where.id === 'emp-corp-1'
+            ? { id: 'emp-corp-1', codigo: 'ESE', nombre: 'ESE Planta Pública', horasSemanalesContrato: 44 }
+            : null
+        ),
       },
       festivoColombia: {
         findMany: jest.fn(async () => []),
@@ -385,5 +394,151 @@ describe('ServiciosAdminController & FestivosController', () => {
       .put('/api/v1/servicios-admin/adscribir-lote')
       .send({ empleadoIds: ['emp-1', 'emp-2'], servicioBaseId: 'srv-1' })
       .expect(200);
+
+    // 9. Crear servicio con empleadosIds inicial adscribe personal y reporta advertenciasCargo si aplica
+    prismaMock.empleado.findMany.mockResolvedValueOnce([
+      { id: 'emp-1', nombre: 'Juan', categoriaId: 'cat-1', categoria: { nombre: 'Enfermero(a)' } },
+      { id: 'emp-2', nombre: 'Luis', categoriaId: 'cat-2', categoria: { nombre: 'Bacteriólogo(a)' } },
+    ]);
+    const resCreate = await request(app.getHttpServer())
+      .post('/api/v1/servicios-admin')
+      .send({
+        codigo: 'UCI_N',
+        nombre: 'UCI Neonatal',
+        cargosPermitidosIds: ['cat-1'],
+        empleadosIds: ['emp-1', 'emp-2', 'emp-1'],
+      })
+      .expect(201);
+    expect(resCreate.body.empleadosAdscritos).toBe(2);
+    expect(resCreate.body.advertenciasCargo).toEqual(['Luis (Bacteriólogo(a))']);
+    expect(prismaMock.empleado.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['emp-1', 'emp-2'] } },
+      data: { servicioBaseId: 'srv-new' },
+    });
+
+    // 10. Actualizar servicio incorporando empleadosIds adicionales adscribe personal sobre el servicio existente
+    prismaMock.empleado.findMany.mockResolvedValueOnce([
+      { id: 'emp-3', nombre: 'Marta', categoriaId: 'cat-1', categoria: { nombre: 'Enfermero(a)' } },
+    ]);
+    const resUpdate = await request(app.getHttpServer())
+      .put('/api/v1/servicios-admin/srv-1')
+      .send({
+        codigo: 'URG',
+        nombre: 'Urgencias',
+        empleadosIds: ['emp-3'],
+      })
+      .expect(200);
+    expect(resUpdate.body.empleadosAdscritos).toBe(1);
+    expect(resUpdate.body.advertenciasCargo).toEqual([]);
+    expect(prismaMock.empleado.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['emp-3'] } },
+      data: { servicioBaseId: 'srv-1' },
+    });
+
+    // 11. PUT empleados/:id/condiciones actualiza empresa, override de jornada y valida rangos
+    await request(app.getHttpServer())
+      .put('/api/v1/servicios-admin/empleados/emp-1/condiciones')
+      .send({ horasSemanalesOverride: 0 })
+      .expect(400);
+
+    prismaMock.empleado.update.mockResolvedValueOnce({
+      id: 'emp-1',
+      nombre: 'Juan',
+      empresaContratanteId: 'emp-corp-1',
+      horasSemanalesOverride: 36,
+      horasSemanalesLey: 36,
+    });
+    const resCond = await request(app.getHttpServer())
+      .put('/api/v1/servicios-admin/empleados/emp-1/condiciones')
+      .send({ empresaContratanteId: 'emp-corp-1', horasSemanalesOverride: 36 })
+      .expect(200);
+    expect(resCond.body.horasSemanalesOverride).toBe(36);
+    expect(prismaMock.empleado.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'emp-1' },
+        data: expect.objectContaining({
+          empresaContratanteId: 'emp-corp-1',
+          horasSemanalesOverride: 36,
+          horasSemanalesLey: 36,
+        }),
+      })
+    );
+  });
+
+  it('persiste tandas escalonadas de break, simultaneidad y modo Art. 167 CST vs Receso pagado en POST /turnos', async () => {
+    // 1. Break Art. 167 CST (recesoRemunerado=false) con 2 tandas de 60m y maxSimultaneos=2
+    await request(app.getHttpServer())
+      .post('/api/v1/servicios-admin/turnos')
+      .send({
+        codigo: 'ADM_T',
+        nombre: 'Admin Tandas',
+        horaInicio: '07:00',
+        horaFin: '16:00',
+        horasOrdinarias: 8,
+        horasDiurnas: 8,
+        horasNocturnas: 0,
+        colorHex: '#E0F2FE',
+        modoJornada: 'HORARIO',
+        recesoHabilitado: true,
+        recesoRemunerado: false,
+        recesoMaxSimultaneos: 2,
+        recesoTandasJson: [
+          { orden: 1, etiqueta: 'T1', inicio: '12:00', fin: '13:00', duracionMin: 60 },
+          { orden: 2, etiqueta: 'T2', inicio: '13:00', fin: '14:00', duracionMin: 60 },
+        ],
+      })
+      .expect(201);
+
+    expect(prismaMock.tipoTurno.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          codigo: 'ADM_T',
+          horasOrdinarias: 8,
+          minutosAlmuerzo: 60,
+          recesoHabilitado: true,
+          recesoRemunerado: false,
+          recesoMaxSimultaneos: 2,
+          recesoTandasJson: [
+            expect.objectContaining({ orden: 1, etiqueta: 'T1', inicio: '12:00', fin: '13:00' }),
+            expect.objectContaining({ orden: 2, etiqueta: 'T2', inicio: '13:00', fin: '14:00' }),
+          ],
+        }),
+      })
+    );
+
+    // 2. Break operativo pagado (recesoRemunerado=true) -> 0 min deducidos
+    await request(app.getHttpServer())
+      .post('/api/v1/servicios-admin/turnos')
+      .send({
+        codigo: 'M8P',
+        nombre: 'Mañana con Break Pagado',
+        horaInicio: '07:00',
+        horaFin: '15:00',
+        horasOrdinarias: 8,
+        horasDiurnas: 8,
+        horasNocturnas: 0,
+        colorHex: '#BAE6FD',
+        modoJornada: 'HORARIO',
+        recesoHabilitado: true,
+        recesoRemunerado: true,
+        recesoMaxSimultaneos: 1,
+        recesoTandasJson: [
+          { orden: 1, etiqueta: 'T1', inicio: '10:30', fin: '11:00', duracionMin: 30 },
+        ],
+      })
+      .expect(201);
+
+    expect(prismaMock.tipoTurno.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          codigo: 'M8P',
+          horasOrdinarias: 8,
+          minutosAlmuerzo: 0,
+          recesoHabilitado: true,
+          recesoRemunerado: true,
+          recesoMaxSimultaneos: 1,
+        }),
+      })
+    );
   });
 });

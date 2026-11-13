@@ -10,6 +10,18 @@ import { hoyColombiaIso } from '../../shared/liquidacion-horas';
   imports: [CommonModule, FormsModule],
   styleUrl: './configuracion-festivos.component.css',
   template: `
+    <div class="module-hero-card">
+      <div class="module-hero-brand">
+        <div class="module-hero-icon" aria-hidden="true">🇨🇴</div>
+        <div class="module-hero-titles">
+          <div class="module-hero-title-row">
+            <h2>Festivos y Días Cívicos</h2>
+            <span class="module-hero-badge">Año {{ anioSeleccionado }} · {{ listaFestivosAnio.length }} fechas</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="two-col-panels">
       <div class="panel-card">
         <div class="panel-header festivos-panel-header">

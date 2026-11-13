@@ -23,6 +23,7 @@ import {
 } from '../shared/liquidacion-horas';
 import { CatalogosSsoStore, csvTexto, descargarArchivoCsv, numeroCsv } from './catalogos-sso.store';
 import { CuadranteStore } from './cuadrante.store';
+import { coincideBusquedaCampos, dividirTerminosBusqueda } from '../utils/busqueda-texto';
 import { NotificacionStore } from './notificacion.store';
 import { PermutasAuditoriaStore } from './permutas-auditoria.store';
 
@@ -403,6 +404,7 @@ export class PortalReportesStore {
           empleado: e,
           turno,
           servicioEjecutorId: srvEjeId,
+          celda,
         };
       })
       .filter((x) => {
@@ -432,7 +434,7 @@ export class PortalReportesStore {
     }
     const srvFiltro = this.filtroReporteServicioId();
     const empFiltro = this.filtroReporteEmpresaId();
-    const textoBusqueda = this.busquedaReporteTexto().trim().toLowerCase();
+    const terminosBusqueda = dividirTerminosBusqueda(this.busquedaReporteTexto());
     const dias = this.cuadrante.diasDelMes();
     const matriz = this.cuadrante.asignaciones();
     const empresasMap = new Map(this.catalogos.empresas().map((e) => [e.id, e]));
@@ -464,14 +466,15 @@ export class PortalReportesStore {
         (e) => (e.empresaContratanteId || e.empresaContratante?.id) === empFiltro
       );
     }
-    if (textoBusqueda) {
-      filtrados = filtrados.filter(
-        (e) =>
-          e.nombre.toLowerCase().includes(textoBusqueda) ||
-          e.documento.includes(textoBusqueda) ||
-          e.categoria.toLowerCase().includes(textoBusqueda) ||
-          (e.empresaContratante?.nombre || '').toLowerCase().includes(textoBusqueda) ||
-          (e.empresaContratante?.codigo || '').toLowerCase().includes(textoBusqueda)
+    if (terminosBusqueda.length > 0) {
+      filtrados = filtrados.filter((e) =>
+        coincideBusquedaCampos(terminosBusqueda, [
+          e.nombre,
+          e.documento,
+          e.categoria,
+          e.empresaContratante?.nombre,
+          e.empresaContratante?.codigo,
+        ])
       );
     }
 

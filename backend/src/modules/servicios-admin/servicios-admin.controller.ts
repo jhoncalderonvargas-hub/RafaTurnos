@@ -13,12 +13,16 @@ import {
   Put,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   CODIGOS_TURNOS_SISTEMA_OBLIGATORIOS,
   desglosarHorarioOrdinario,
   esCodigoExoneracionContrato,
+  generarTandasEscalonadasDefault,
   hoyColombiaIso,
+  normalizarTandasBreak,
+  TandaBreakTurno,
   UMBRAL_HORAS_TURNO_NOCTURNO,
 } from '../../shared/liquidacion-horas';
 import {
@@ -492,6 +496,10 @@ export class ServiciosAdminController {
       horasDiurnas: number;
       horasNocturnas: number;
       minutosAlmuerzo?: number;
+      recesoHabilitado?: boolean;
+      recesoRemunerado?: boolean;
+      recesoMaxSimultaneos?: number;
+      recesoTandasJson?: TandaBreakTurno[] | null;
       colorHex: string;
       descuentaBancoHoras?: boolean;
       modoAmortizacionBanco?: 'DIA_HABIL_EMPRESA' | 'HORAS_FIJAS' | string;
@@ -555,6 +563,11 @@ export class ServiciosAdminController {
     }
 
     let finalMinAlmuerzo = minAlmuerzo;
+    let recesoHabilitado = false;
+    let recesoRemunerado = false;
+    let recesoMaxSimultaneos = 1;
+    let recesoTandasFinales: TandaBreakTurno[] = [];
+
     if (modoInferido === 'DESCANSO') {
       horaInicio = '00:00';
       horaFin = '00:00';
@@ -564,12 +577,56 @@ export class ServiciosAdminController {
       finalMinAlmuerzo = 0;
     } else {
       const esGuardia24 = modoInferido === 'GUARDIA_24H' || Number(data.horasOrdinarias) >= 24;
+      const habilitadoReq =
+        data.recesoHabilitado !== undefined
+          ? Boolean(data.recesoHabilitado)
+          : minAlmuerzo > 0 || (Array.isArray(data.recesoTandasJson) && data.recesoTandasJson.length > 0);
+
+      if (habilitadoReq) {
+        recesoHabilitado = true;
+        recesoRemunerado = Boolean(data.recesoRemunerado);
+        const maxSimRaw = Number(data.recesoMaxSimultaneos);
+        recesoMaxSimultaneos =
+          Number.isFinite(maxSimRaw) && maxSimRaw >= 1 ? Math.min(99, Math.round(maxSimRaw)) : 1;
+
+        const durFallback = minAlmuerzo > 0 ? minAlmuerzo : 60;
+        const tandasNormalizadas = normalizarTandasBreak(
+          data.recesoTandasJson,
+          horaInicio,
+          horaFin,
+          esGuardia24
+        );
+        recesoTandasFinales =
+          tandasNormalizadas.length > 0
+            ? tandasNormalizadas
+            : generarTandasEscalonadasDefault(horaInicio, horaFin, 1, durFallback, esGuardia24);
+
+        finalMinAlmuerzo = recesoRemunerado
+          ? 0
+          : (recesoTandasFinales[0]?.duracionMin ?? durFallback);
+      } else {
+        recesoHabilitado = false;
+        recesoRemunerado = false;
+        recesoMaxSimultaneos = 1;
+        recesoTandasFinales = [];
+        finalMinAlmuerzo = 0;
+      }
+
+      const tandaBase = recesoTandasFinales[0];
       const desglose = desglosarHorarioOrdinario(
         horaInicio,
         horaFin,
-        minAlmuerzo,
+        finalMinAlmuerzo,
         hoyColombiaIso(),
-        esGuardia24
+        esGuardia24,
+        null,
+        recesoHabilitado && tandaBase
+          ? {
+              recesoRemunerado,
+              breakInicio: tandaBase.inicio,
+              breakFin: tandaBase.fin,
+            }
+          : { recesoRemunerado }
       );
       if (!desglose) {
         throw new BadRequestException(
@@ -667,6 +724,11 @@ export class ServiciosAdminController {
         horasDiurnas,
         horasNocturnas,
         minutosAlmuerzo: finalMinAlmuerzo,
+        recesoHabilitado,
+        recesoRemunerado,
+        recesoMaxSimultaneos,
+        recesoTandasJson:
+          recesoTandasFinales.length > 0 ? (recesoTandasFinales as any) : Prisma.DbNull,
         colorHex: data.colorHex || '#E0F2FE',
         descuentaBancoHoras,
         modoAmortizacionBanco,
@@ -687,6 +749,11 @@ export class ServiciosAdminController {
         horasDiurnas,
         horasNocturnas,
         minutosAlmuerzo: finalMinAlmuerzo,
+        recesoHabilitado,
+        recesoRemunerado,
+        recesoMaxSimultaneos,
+        recesoTandasJson:
+          recesoTandasFinales.length > 0 ? (recesoTandasFinales as any) : Prisma.DbNull,
         colorHex: data.colorHex || '#E0F2FE',
         descuentaBancoHoras,
         modoAmortizacionBanco,
@@ -1115,6 +1182,57 @@ export class ServiciosAdminController {
     return { totalesDerivados };
   }
 
+  private async adscribirEmpleadosInterno(
+    servicioId: string,
+    empleadosIdsRaw?: string[],
+    cargosPermitidosIdsHint?: string[]
+  ): Promise<{ empleadosAdscritos: number; advertenciasCargo: string[] }> {
+    const ids = Array.isArray(empleadosIdsRaw)
+      ? Array.from(new Set(empleadosIdsRaw.map((id) => String(id).trim()).filter(Boolean)))
+      : [];
+    if (ids.length === 0) {
+      return { empleadosAdscritos: 0, advertenciasCargo: [] };
+    }
+
+    const empleados = await this.prisma.empleado.findMany({
+      where: { id: { in: ids } },
+      include: { categoria: true },
+    });
+    if (empleados.length === 0) {
+      return { empleadosAdscritos: 0, advertenciasCargo: [] };
+    }
+
+    let permitidosIds = Array.isArray(cargosPermitidosIdsHint) ? cargosPermitidosIdsHint : [];
+    if (permitidosIds.length === 0 && (this.prisma as any).servicioCargoPermitido?.findMany) {
+      const cp = await (this.prisma as any).servicioCargoPermitido.findMany({
+        where: { servicioId },
+        select: { categoriaId: true },
+      });
+      if (Array.isArray(cp)) {
+        permitidosIds = cp.map((x: any) => x.categoriaId).filter(Boolean);
+      }
+    }
+
+    const permitidos = new Set(permitidosIds);
+    const advertenciasCargo =
+      permitidos.size > 0
+        ? empleados
+            .filter((e) => !permitidos.has(e.categoriaId))
+            .map((e) => `${e.nombre} (${e.categoria?.nombre || e.categoriaId})`)
+        : [];
+
+    const validIds = empleados.map((e) => e.id);
+    await this.prisma.empleado.updateMany({
+      where: { id: { in: validIds } },
+      data: { servicioBaseId: servicioId },
+    });
+
+    return {
+      empleadosAdscritos: validIds.length,
+      advertenciasCargo,
+    };
+  }
+
   // 2. Crear un servicio nuevo (autónomo en Rafa Turnos)
   @Post()
   async crearServicio(
@@ -1136,6 +1254,7 @@ export class ServiciosAdminController {
       metasPorTurno?: any[];
       turnosHabilitados?: string[];
       reglasPorCargo?: any[];
+      empleadosIds?: string[];
     }
   ) {
     const cod = data.codigo?.trim().toUpperCase();
@@ -1193,13 +1312,20 @@ export class ServiciosAdminController {
       }
     );
 
+    const { empleadosAdscritos, advertenciasCargo } = await this.adscribirEmpleadosInterno(
+      creado.id,
+      data.empleadosIds,
+      data.cargosPermitidosIds
+    );
+
     if (totalesDerivados) {
-      return this.prisma.servicio.update({
+      const actualizado = await this.prisma.servicio.update({
         where: { id: creado.id },
         data: totalesDerivados,
       });
+      return { ...actualizado, empleadosAdscritos, advertenciasCargo };
     }
-    return creado;
+    return { ...creado, empleadosAdscritos, advertenciasCargo };
   }
 
   // 2.0 Adscribir o trasladar colaboradores (siempre registrado ANTES de :id para evitar colisión de rutas)
@@ -1299,6 +1425,118 @@ export class ServiciosAdminController {
     };
   }
 
+  // 2.0b Actualizar condiciones contractuales/adscripción de un colaborador (Gestión de Personal)
+  @Put('empleados/:id/condiciones')
+  async actualizarCondicionesEmpleado(
+    @Param('id') empleadoId: string,
+    @Body()
+    body: {
+      servicioBaseId?: string;
+      empresaContratanteId?: string;
+      horasSemanalesOverride?: number | null;
+    }
+  ) {
+    const id = String(empleadoId || '').trim();
+    if (!id) {
+      throw new BadRequestException('El identificador del colaborador es obligatorio.');
+    }
+
+    const emp = await this.prisma.empleado.findUnique({
+      where: { id },
+      include: { categoria: true, empresaContratante: true, servicioBase: true },
+    });
+    if (!emp) {
+      throw new NotFoundException(`No se encontró el colaborador '${id}'.`);
+    }
+
+    const updateData: any = {};
+    let advertenciaCargoCompatible: string | null = null;
+    let empresaDestino = (emp as any).empresaContratante;
+
+    if (body?.servicioBaseId !== undefined) {
+      const servicioBaseId = String(body.servicioBaseId || '').trim();
+      if (!servicioBaseId) {
+        throw new BadRequestException('servicioBaseId no puede quedar vacío.');
+      }
+      const srv = await this.prisma.servicio.findUnique({
+        where: { id: servicioBaseId },
+        include: { cargosPermitidos: true },
+      });
+      if (!srv) {
+        throw new NotFoundException(`No se encontró el servicio '${servicioBaseId}'.`);
+      }
+      const permitidos = new Set(
+        ((srv as any).cargosPermitidos || []).map((cp: any) => cp.categoriaId)
+      );
+      if (permitidos.size > 0 && !permitidos.has(emp.categoriaId)) {
+        advertenciaCargoCompatible = `Aviso: El cargo "${emp.categoria?.nombre || emp.categoriaId}" aún no figura entre los cargos permitidos de "${srv.nombre}".`;
+      }
+      updateData.servicioBaseId = servicioBaseId;
+    }
+
+    if (body?.empresaContratanteId !== undefined) {
+      const empresaContratanteId = String(body.empresaContratanteId || '').trim();
+      if (!empresaContratanteId) {
+        throw new BadRequestException('empresaContratanteId no puede quedar vacío.');
+      }
+      const empresa = await (this.prisma as any).empresaContratante?.findUnique({
+        where: { id: empresaContratanteId },
+      });
+      if (!empresa) {
+        throw new NotFoundException(`No se encontró la empresa '${empresaContratanteId}'.`);
+      }
+      updateData.empresaContratanteId = empresaContratanteId;
+      empresaDestino = empresa;
+    }
+
+    if (body?.horasSemanalesOverride !== undefined) {
+      if (body.horasSemanalesOverride === null || (body.horasSemanalesOverride as any) === '') {
+        updateData.horasSemanalesOverride = null;
+        const horasEmp = Number(empresaDestino?.horasSemanalesContrato || emp.horasSemanalesLey || 42);
+        updateData.horasSemanalesLey = Math.round(horasEmp);
+      } else {
+        const horas = Number(body.horasSemanalesOverride);
+        if (!Number.isFinite(horas) || horas <= 0 || horas > 72) {
+          throw new BadRequestException(
+            'horasSemanalesOverride debe ser un número válido mayor a 0 y menor o igual a 72 (o null para usar la regla de empresa).'
+          );
+        }
+        updateData.horasSemanalesOverride = horas;
+        updateData.horasSemanalesLey = Math.round(horas);
+      }
+    } else if (updateData.empresaContratanteId && (emp as any).horasSemanalesOverride == null) {
+      const horasEmp = Number(empresaDestino?.horasSemanalesContrato || emp.horasSemanalesLey || 42);
+      updateData.horasSemanalesLey = Math.round(horasEmp);
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      throw new BadRequestException('Debe especificar al menos un campo a actualizar.');
+    }
+
+    const actualizado = await this.prisma.empleado.update({
+      where: { id },
+      data: updateData,
+      include: {
+        categoria: true,
+        servicioBase: true,
+        empresaContratante: true,
+      },
+    });
+
+    if (
+      (updateData.empresaContratanteId || body?.horasSemanalesOverride !== undefined) &&
+      updateData.empresaContratanteId &&
+      typeof (this.liquidacionService as any)?.recalcularPorEmpresa === 'function'
+    ) {
+      await (this.liquidacionService as any).recalcularPorEmpresa(updateData.empresaContratanteId);
+    }
+
+    return {
+      ...actualizado,
+      advertenciaCargoCompatible,
+    };
+  }
+
   // 2.1 Actualizar datos de un servicio existente
   @Put(':id')
   async actualizarServicio(
@@ -1320,6 +1558,7 @@ export class ServiciosAdminController {
       metasPorTurno?: any[];
       turnosHabilitados?: string[];
       reglasPorCargo?: any[];
+      empleadosIds?: string[];
     }
   ) {
     const existente = await this.prisma.servicio.findUnique({ where: { id } });
@@ -1418,14 +1657,25 @@ export class ServiciosAdminController {
       }
     );
 
-    if (totalesDerivados && data.reqDia === undefined && data.reqNoche === undefined) {
-      return this.prisma.servicio.update({
-        where: { id },
-        data: totalesDerivados,
-      });
-    }
+    const resultadoServicio =
+      totalesDerivados && data.reqDia === undefined && data.reqNoche === undefined
+        ? await this.prisma.servicio.update({
+            where: { id },
+            data: totalesDerivados,
+          })
+        : actualizado;
 
-    return actualizado;
+    const { empleadosAdscritos, advertenciasCargo } = await this.adscribirEmpleadosInterno(
+      id,
+      data.empleadosIds,
+      data.cargosPermitidosIds
+    );
+
+    return {
+      ...resultadoServicio,
+      empleadosAdscritos,
+      advertenciasCargo,
+    };
   }
 
   // 2.2 Eliminar un servicio si no tiene restricciones de integridad

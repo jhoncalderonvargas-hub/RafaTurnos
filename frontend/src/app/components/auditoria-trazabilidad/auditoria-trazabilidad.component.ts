@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RegistroAuditoria, SesionUsuarioSso, ServicioHospitalario } from '../../models';
 import { hoyColombiaIso } from '../../shared/liquidacion-horas';
+import { coincideBusquedaCampos, dividirTerminosBusqueda } from '../../utils/busqueda-texto';
 
 @Component({
   selector: 'app-auditoria-trazabilidad',
@@ -454,7 +455,7 @@ export class AuditoriaTrazabilidadComponent implements OnChanges {
   }
 
   get auditoriasFiltradas(): RegistroAuditoria[] {
-    const q = this.busquedaTexto.trim().toLowerCase();
+    const terminos = dividirTerminosBusqueda(this.busquedaTexto);
     const srv = this.servicioFiltro;
     const tipo = this.tipoAccionFiltro;
     const dDesde = this.fechaDesde ? new Date(`${this.fechaDesde}T00:00:00-05:00`).getTime() : null;
@@ -484,25 +485,17 @@ export class AuditoriaTrazabilidadComponent implements OnChanges {
       }
 
       // 4. Búsqueda por Texto Libre
-      if (q) {
-        const colabNom = log.empleadoNombre?.toLowerCase() || '';
-        const colabDoc = log.empleadoDocumento?.toLowerCase() || '';
-        const actor = log.actor?.toLowerCase() || '';
-        const srvNom = log.servicioNombre?.toLowerCase() || '';
-        const motivo = log.motivo?.toLowerCase() || '';
-        const turnoAnt = String(log.turnoAnterior || '').toLowerCase();
-        const turnoNue = String(log.turnoNuevo || '').toLowerCase();
-        const dia = String(log.dia);
-
-        const match =
-          colabNom.includes(q) ||
-          colabDoc.includes(q) ||
-          actor.includes(q) ||
-          srvNom.includes(q) ||
-          motivo.includes(q) ||
-          turnoAnt.includes(q) ||
-          turnoNue.includes(q) ||
-          dia.includes(q);
+      if (terminos.length > 0) {
+        const match = coincideBusquedaCampos(terminos, [
+          log.empleadoNombre,
+          log.empleadoDocumento,
+          log.actor,
+          log.servicioNombre,
+          log.motivo,
+          log.turnoAnterior,
+          log.turnoNuevo,
+          log.dia,
+        ]);
 
         if (!match) return false;
       }

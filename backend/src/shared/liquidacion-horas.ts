@@ -220,6 +220,14 @@ export interface RecargosVigentes {
   extraNocturnaDominical: number;
 }
 
+export interface TandaBreakTurno {
+  orden: number;
+  etiqueta: string;
+  inicio: string;
+  fin: string;
+  duracionMin: number;
+}
+
 export interface TurnoLiquidable {
   codigo?: string;
   horaInicio?: string;
@@ -229,6 +237,13 @@ export interface TurnoLiquidable {
   horasDiurnas?: number;
   horasNocturnas?: number;
   minutosAlmuerzo?: number;
+  recesoHabilitado?: boolean;
+  recesoRemunerado?: boolean;
+  recesoMaxSimultaneos?: number;
+  recesoTandasJson?: TandaBreakTurno[] | null;
+  /** Intervalo real del break/almuerzo asignado a la instancia (si existe, descuenta exactamente esa franja). */
+  breakInicio?: string | null;
+  breakFin?: string | null;
   esAusencia?: boolean;
   prorrateaMetaContrato?: boolean;
   bloqueaPermutas?: boolean;
@@ -712,8 +727,150 @@ export function duracionHorarioMin(
   return e < s ? e + MINUTOS_DIA - s : e - s;
 }
 
+export function formatearHoraMin(minAbs: number): string {
+  const m = ((Math.round(minAbs) % MINUTOS_DIA) + MINUTOS_DIA) % MINUTOS_DIA;
+  const hh = Math.floor(m / 60);
+  const mm = m % 60;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+export function normalizarTandasBreak(
+  tandasRaw: ReadonlyArray<Partial<TandaBreakTurno>> | null | undefined,
+  horaInicio?: string,
+  horaFin?: string,
+  permitirMismaHora24h = true
+): TandaBreakTurno[] {
+  if (!Array.isArray(tandasRaw) || tandasRaw.length === 0) return [];
+  const s = parseHoraMin(horaInicio);
+  const dur = duracionHorarioMin(horaInicio, horaFin, permitirMismaHora24h);
+  if (s === null || dur === null) return [];
+  const e = s + dur;
+
+  const parseadas: Array<{ bStart: number; bEnd: number }> = [];
+  for (const item of tandasRaw) {
+    const iniRaw = parseHoraMin(item?.inicio || undefined);
+    if (iniRaw === null) continue;
+    let bStart = iniRaw;
+    if (bStart < s) bStart += MINUTOS_DIA;
+    let bEnd: number | null = null;
+    const finRaw = parseHoraMin(item?.fin || undefined);
+    if (finRaw !== null) {
+      bEnd = finRaw;
+      if (bEnd <= bStart) bEnd += MINUTOS_DIA;
+    } else if (Number(item?.duracionMin) > 0) {
+      bEnd = bStart + Math.round(Number(item!.duracionMin));
+    }
+    if (bEnd === null || bEnd <= bStart) continue;
+    const clampedStart = Math.max(s, Math.min(e - 5, bStart));
+    const clampedEnd = Math.min(e, Math.max(clampedStart + 5, bEnd));
+    if (clampedEnd <= clampedStart || clampedEnd - clampedStart >= dur) continue;
+    parseadas.push({ bStart: clampedStart, bEnd: clampedEnd });
+  }
+
+  parseadas.sort((a, b) => a.bStart - b.bStart);
+  return parseadas.map((t, idx) => ({
+    orden: idx + 1,
+    etiqueta: `T${idx + 1}`,
+    inicio: formatearHoraMin(t.bStart),
+    fin: formatearHoraMin(t.bEnd),
+    duracionMin: t.bEnd - t.bStart,
+  }));
+}
+
+export function generarTandasEscalonadasDefault(
+  horaInicio?: string,
+  horaFin?: string,
+  cantidad = 1,
+  duracionMin = 60,
+  permitirMismaHora24h = true
+): TandaBreakTurno[] {
+  const s = parseHoraMin(horaInicio);
+  const dur = duracionHorarioMin(horaInicio, horaFin, permitirMismaHora24h);
+  if (s === null || dur === null || dur < 30) return [];
+  const e = s + dur;
+  const cant = Math.max(1, Math.min(8, Math.round(cantidad) || 1));
+  const durStep = Math.max(5, Math.min(Math.floor(dur / cant) - 5, Math.round(duracionMin) || 60));
+  const bloqueTotal = cant * durStep;
+  const puntoMedio = s + Math.floor(dur / 2);
+  let inicioBloque = Math.round((puntoMedio - Math.floor(bloqueTotal / 2)) / 15) * 15;
+  inicioBloque = Math.max(s, Math.min(e - bloqueTotal, inicioBloque));
+
+  const res: TandaBreakTurno[] = [];
+  for (let i = 0; i < cant; i++) {
+    const bStart = inicioBloque + i * durStep;
+    const bEnd = bStart + durStep;
+    res.push({
+      orden: i + 1,
+      etiqueta: `T${i + 1}`,
+      inicio: formatearHoraMin(bStart),
+      fin: formatearHoraMin(bEnd),
+      duracionMin: durStep,
+    });
+  }
+  return res;
+}
+
+export function obtenerIntervaloBreakEfectivo(
+  turno: TurnoLiquidable | undefined | null,
+  permitirMismaHora24h = true
+): { bStart: number; bEnd: number; duracionMin: number } | null {
+  if (!turno || turno.recesoRemunerado) return null;
+  const s = parseHoraMin(turno.horaInicio);
+  const dur = duracionHorarioMin(turno.horaInicio, turno.horaFin, permitirMismaHora24h);
+  if (s === null || dur === null) return null;
+  const e = s + dur;
+
+  let iniStr = turno.breakInicio || undefined;
+  let finStr = turno.breakFin || undefined;
+  if ((!iniStr || !finStr) && turno.recesoHabilitado !== false && Array.isArray(turno.recesoTandasJson) && turno.recesoTandasJson.length > 0) {
+    iniStr = turno.recesoTandasJson[0].inicio;
+    finStr = turno.recesoTandasJson[0].fin;
+  }
+  if (!iniStr || !finStr) return null;
+
+  const iniMin = parseHoraMin(iniStr);
+  const finMin = parseHoraMin(finStr);
+  if (iniMin === null || finMin === null) return null;
+
+  let bStart = iniMin;
+  if (bStart < s) bStart += MINUTOS_DIA;
+  let bEnd = finMin;
+  if (bEnd <= bStart) bEnd += MINUTOS_DIA;
+
+  const clampedStart = Math.max(s, Math.min(e, bStart));
+  const clampedEnd = Math.min(e, Math.max(clampedStart, bEnd));
+  const durReal = clampedEnd - clampedStart;
+  if (durReal <= 0) return null;
+  return { bStart: clampedStart, bEnd: clampedEnd, duracionMin: durReal };
+}
+
+export function seleccionarTandaBreakEquilibrada(
+  tandas: ReadonlyArray<TandaBreakTurno> | null | undefined,
+  conteosPorOrden: ReadonlyMap<number, number> | Record<number, number>,
+  offsetRotacion = 0
+): TandaBreakTurno | null {
+  if (!Array.isArray(tandas) || tandas.length === 0) return null;
+  const getCount = (orden: number) =>
+    conteosPorOrden instanceof Map
+      ? conteosPorOrden.get(orden) || 0
+      : (conteosPorOrden as Record<number, number>)[orden] || 0;
+  let mejor: TandaBreakTurno = tandas[0];
+  let mejorCount = Number.POSITIVE_INFINITY;
+  const n = tandas.length;
+  const start = ((offsetRotacion % n) + n) % n;
+  for (let i = 0; i < n; i++) {
+    const cand = tandas[(start + i) % n];
+    const c = getCount(cand.orden);
+    if (c < mejorCount) {
+      mejorCount = c;
+      mejor = cand;
+    }
+  }
+  return mejor;
+}
+
 type TramoBase = Omit<TramoLiquidado, 'esDescansoObligatorio'>;
-/** Caché de segmentación indexada también por franja nocturna para soportar múltiples empresas sin colisión. */
+/** Caché de segmentación indexada también por franja nocturna e intervalo de break para soportar múltiples empresas sin colisión. */
 const CACHE_TRAMOS = new Map<string, ReadonlyArray<TramoBase>>();
 const CACHE_TRAMOS_MAX = 80000;
 
@@ -738,17 +895,31 @@ function segmentarBase(
   fechaInicioIso: string,
   horaInicio: string,
   horaFin: string,
-  reglas?: Partial<ReglasEmpresaContrato> | null
+  reglas?: Partial<ReglasEmpresaContrato> | null,
+  breakStartAbs?: number,
+  breakEndAbs?: number
 ): ReadonlyArray<TramoBase> {
   const fechaDia1 = sumarDiasIso(fechaInicioIso, 1);
   const ini0 = inicioNocturnoVigente(fechaInicioIso, reglas);
   const ini1 = inicioNocturnoVigente(fechaDia1, reglas);
   const finNoc = finNocturnoVigente(reglas);
 
-  const clave = `${fechaInicioIso}|${horaInicio}|${horaFin}|${ini0}|${ini1}|${finNoc}`;
+  const bKey =
+    breakStartAbs !== undefined && breakEndAbs !== undefined ? `${breakStartAbs}-${breakEndAbs}` : '';
+  const clave = `${fechaInicioIso}|${horaInicio}|${horaFin}|${ini0}|${ini1}|${finNoc}|${bKey}`;
   const cacheado = CACHE_TRAMOS.get(clave);
   if (cacheado) return cacheado;
-  const tramos = calcularTramosBase(fechaInicioIso, fechaDia1, horaInicio, horaFin, ini0, ini1, finNoc);
+  const tramos = calcularTramosBase(
+    fechaInicioIso,
+    fechaDia1,
+    horaInicio,
+    horaFin,
+    ini0,
+    ini1,
+    finNoc,
+    breakStartAbs,
+    breakEndAbs
+  );
   if (CACHE_TRAMOS.size >= CACHE_TRAMOS_MAX) CACHE_TRAMOS.clear();
   CACHE_TRAMOS.set(clave, tramos);
   return tramos;
@@ -761,7 +932,9 @@ function calcularTramosBase(
   horaFin: string,
   ini0: number,
   ini1: number,
-  finNoc: number
+  finNoc: number,
+  breakStartAbs?: number,
+  breakEndAbs?: number
 ): TramoBase[] {
   const s = parseHoraMin(horaInicio);
   const duracion = duracionHorarioMin(horaInicio, horaFin);
@@ -772,12 +945,21 @@ function calcularTramosBase(
   for (const c of [finNoc, ini0, MINUTOS_DIA, MINUTOS_DIA + finNoc, MINUTOS_DIA + ini1]) {
     if (c > s && c < e) cortes.add(c);
   }
+  const hasBreak =
+    breakStartAbs !== undefined && breakEndAbs !== undefined && breakEndAbs > breakStartAbs;
+  if (hasBreak) {
+    if (breakStartAbs! > s && breakStartAbs! < e) cortes.add(breakStartAbs!);
+    if (breakEndAbs! > s && breakEndAbs! < e) cortes.add(breakEndAbs!);
+  }
   const orden = Array.from(cortes).sort((a, b) => a - b);
 
   const acumulado = new Map<string, TramoBase>();
   for (let i = 0; i < orden.length - 1; i++) {
     const a = orden[i];
     const b = orden[i + 1];
+    if (hasBreak && a >= breakStartAbs! && b <= breakEndAbs!) {
+      continue;
+    }
     const isDia0 = a < MINUTOS_DIA;
     const fechaIso = isDia0 ? fechaInicioIso : fechaDia1;
     const minDelDia = a % MINUTOS_DIA;
@@ -844,10 +1026,23 @@ function liquidarTurnoConDetalleTramos(
   const cero: MinutosLiquidados = { hod: 0, hon: 0, hdfd: 0, hdfn: 0 };
   if (!turnoEsLaborado(turno)) return { minutos: cero, netosPorFecha: [] };
 
+  const intervaloBreak = obtenerIntervaloBreakEfectivo(turno, true);
   const tramos =
     turno.horaInicio && turno.horaFin
-      ? segmentarHorario(fechaInicioIso, turno.horaInicio, turno.horaFin, esDescansoObligatorio, reglas)
+      ? segmentarBase(
+          fechaInicioIso,
+          turno.horaInicio,
+          turno.horaFin,
+          reglas,
+          intervaloBreak?.bStart,
+          intervaloBreak?.bEnd
+        ).map((t) => ({
+          ...t,
+          esDescansoObligatorio: esDescansoObligatorio(t.fechaIso),
+        }))
       : [];
+
+  const minAlmuerzoPlano = turno.recesoRemunerado ? 0 : Math.max(0, Math.round(turno.minutosAlmuerzo || 0));
 
   if (tramos.length === 0) {
     const dom = esDescansoObligatorio(fechaInicioIso);
@@ -855,7 +1050,7 @@ function liquidarTurnoConDetalleTramos(
     const n = Math.round((turno.horasNocturnas || 0) * 60);
     const net = descontarAlmuerzo(
       dom ? { hod: 0, hon: 0, hdfd: d, hdfn: n } : { hod: d, hon: n, hdfd: 0, hdfn: 0 },
-      turno.minutosAlmuerzo || 0
+      minAlmuerzoPlano
     );
     const sum = net.hod + net.hon + net.hdfd + net.hdfn;
     return {
@@ -884,7 +1079,8 @@ function liquidarTurnoConDetalleTramos(
     }
   }
 
-  let resto = Math.max(0, Math.round(turno.minutosAlmuerzo || 0));
+  // Si ya se sustrajo el intervalo exacto del break en segmentarBase, no descontar adicionalmente minutosAlmuerzo
+  let resto = intervaloBreak ? 0 : minAlmuerzoPlano;
   for (const concepto of ['hod', 'hon', 'hdfd', 'hdfn'] as const) {
     for (const b of buckets) {
       if (b.concepto !== concepto || resto <= 0) continue;
@@ -943,11 +1139,24 @@ export function desglosarHorarioOrdinario(
   minutosAlmuerzo: number,
   fechaRefIso: string,
   permitirMismaHora24h = true,
-  reglas?: Partial<ReglasEmpresaContrato> | null
+  reglas?: Partial<ReglasEmpresaContrato> | null,
+  opcionesBreak?: {
+    recesoRemunerado?: boolean;
+    breakInicio?: string | null;
+    breakFin?: string | null;
+  }
 ): { ordinarias: number; diurnas: number; nocturnas: number } | null {
   if (duracionHorarioMin(horaInicio, horaFin, permitirMismaHora24h) === null) return null;
   const m = liquidarTurnoMinutos(
-    { horaInicio, horaFin, horasOrdinarias: 1, minutosAlmuerzo },
+    {
+      horaInicio,
+      horaFin,
+      horasOrdinarias: 1,
+      minutosAlmuerzo: opcionesBreak?.recesoRemunerado ? 0 : minutosAlmuerzo,
+      recesoRemunerado: Boolean(opcionesBreak?.recesoRemunerado),
+      breakInicio: opcionesBreak?.breakInicio ?? null,
+      breakFin: opcionesBreak?.breakFin ?? null,
+    },
     fechaRefIso,
     () => false,
     reglas

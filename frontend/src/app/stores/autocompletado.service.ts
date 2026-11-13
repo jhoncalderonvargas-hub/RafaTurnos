@@ -10,6 +10,7 @@ import {
 } from '../models';
 import {
   horasLiquidadasCelda,
+  obtenerTandasBreakDeTurno,
   predicadoDescansoObligatorio,
   reglasEmpresaDeEmpleado,
 } from '../calculo-turnos.helper';
@@ -23,6 +24,8 @@ import {
   esCodigoExoneracionContrato,
   obtenerHorasAmortizacionTurno,
   r2,
+  seleccionarTandaBreakEquilibrada,
+  TurnoLiquidable,
 } from '../shared/liquidacion-horas';
 
 /**
@@ -58,6 +61,9 @@ export interface CeldaLoteAutocompletado {
   codigo: string;
   previsto?: string;
   esRotacion?: boolean;
+  breakTandaOrden?: number | null;
+  breakInicio?: string | null;
+  breakFin?: string | null;
 }
 
 export interface ParametrosAutocompletado {
@@ -379,6 +385,37 @@ export class AutocompletadoService {
       return count;
     };
 
+    const asignarTandaBreakEnDia = (
+      diaNum: number,
+      codigoTurno: string,
+      cfgTurno?: TipoTurnoConfig
+    ): { breakTandaOrden: number; breakInicio: string; breakFin: string } | null => {
+      if (!cfgTurno || !cfgTurno.recesoHabilitado || cfgTurno.esAusencia) {
+        return null;
+      }
+      const tandas = obtenerTandasBreakDeTurno(cfgTurno);
+      if (tandas.length === 0) return null;
+
+      const codTarget = codigoTurno.trim().toUpperCase();
+      const conteos: Record<number, number> = {};
+      for (const f of filasBase) {
+        const c = actualMap[f.empleado.id]?.[diaNum];
+        if (!c) continue;
+        if ((c.codigo || '').trim().toUpperCase() !== codTarget) continue;
+        if (c.servicioEjecutorId && c.servicioEjecutorId !== srv.id) continue;
+        const orden = c.breakTandaOrden ?? tandas[0].orden;
+        conteos[orden] = (conteos[orden] || 0) + 1;
+      }
+
+      const elegida = seleccionarTandaBreakEquilibrada(tandas, conteos, Math.max(0, diaNum - 1));
+      if (!elegida) return null;
+      return {
+        breakTandaOrden: elegida.orden,
+        breakInicio: elegida.inicio,
+        breakFin: elegida.fin,
+      };
+    };
+
     const modServicio = srv.modalidadDias || 'TODOS_24_7';
     const esDiaCerradoServicio = (d: DiaColumna): boolean => {
       const esDomOFest = d.esDomingo || Boolean(d.festivo);
@@ -530,12 +567,20 @@ export class AutocompletadoService {
         const fila = { ...(actualMap[cand.empleado.id] || {}) };
         const notaExistente = fila[d.dia]?.nota;
         const prev = enBorradorGlobal ? turnoElegido : (fila[d.dia]?.previsto || turnoElegido);
+        const breakAsig = asignarTandaBreakEnDia(d.dia, turnoElegido, cfgTurno);
         fila[d.dia] = {
           codigo: turnoElegido,
           previsto: prev,
           esRotacion: cand.esPersonalRotado,
           servicioEjecutorId: srvId,
           ...(notaExistente ? { nota: notaExistente } : {}),
+          ...(breakAsig
+            ? {
+                breakTandaOrden: breakAsig.breakTandaOrden,
+                breakInicio: breakAsig.breakInicio,
+                breakFin: breakAsig.breakFin,
+              }
+            : {}),
         };
         loteParaDb.push({
           empleadoId: cand.empleado.id,
@@ -543,12 +588,15 @@ export class AutocompletadoService {
           codigo: turnoElegido,
           previsto: prev,
           esRotacion: cand.esPersonalRotado,
+          breakTandaOrden: breakAsig?.breakTandaOrden ?? null,
+          breakInicio: breakAsig?.breakInicio ?? null,
+          breakFin: breakAsig?.breakFin ?? null,
         });
         horasExtraLoop.set(
           cand.empleado.id,
           r2(
             (horasExtraLoop.get(cand.empleado.id) || 0) +
-              horasLiquidadasCelda(cfgTurno, d.fechaIso, esDescansoPred, reglasCand)
+              horasLiquidadasCelda(cfgTurno, d.fechaIso, esDescansoPred, reglasCand, fila[d.dia])
           )
         );
         if (franjasTurno.noche) {
@@ -689,13 +737,18 @@ export class AutocompletadoService {
       const fila = { ...(actualMap[f.empleado.id] || {}) };
       let horasAsignadas = 0;
       let horasAmortizadasComp = 0;
-      const itemsEmp: Array<{ fechaIso: string; codigo?: string; turno: TipoTurnoConfig | undefined }> = [];
+      const itemsEmp: Array<{ fechaIso: string; codigo?: string; turno: TurnoLiquidable | undefined }> = [];
 
       for (const dItem of dias) {
-        const c = (fila[dItem.dia]?.codigo || '').trim().toUpperCase();
+        const celdaItem = fila[dItem.dia];
+        const c = (celdaItem?.codigo || '').trim().toUpperCase();
         if (!c || c === 'BLANCO') continue;
         const cfg = catalogo[c];
-        itemsEmp.push({ fechaIso: dItem.fechaIso, codigo: c, turno: cfg });
+        const turnoConBreak: TurnoLiquidable | undefined =
+          cfg && (celdaItem?.breakInicio || celdaItem?.breakFin)
+            ? { ...cfg, breakInicio: celdaItem.breakInicio ?? null, breakFin: celdaItem.breakFin ?? null }
+            : cfg;
+        itemsEmp.push({ fechaIso: dItem.fechaIso, codigo: c, turno: turnoConBreak });
         if (!cfg) continue;
         horasAmortizadasComp = r2(
           horasAmortizadasComp +
@@ -703,7 +756,7 @@ export class AutocompletadoService {
         );
         if (!cfg.esAusencia) {
           horasAsignadas = r2(
-            horasAsignadas + horasLiquidadasCelda(cfg, dItem.fechaIso, esDescansoPred, reglasEmp)
+            horasAsignadas + horasLiquidadasCelda(cfg, dItem.fechaIso, esDescansoPred, reglasEmp, celdaItem)
           );
         }
       }
@@ -798,12 +851,20 @@ export class AutocompletadoService {
         }
 
         const prev = enBorradorGlobal ? turnoAEvaluar : (fila[d.dia]?.previsto || turnoAEvaluar);
+        const breakAsig2 = asignarTandaBreakEnDia(d.dia, turnoAEvaluar, cfgTurno);
         fila[d.dia] = {
           codigo: turnoAEvaluar,
           previsto: prev,
           esRotacion: f.esPersonalRotado,
           servicioEjecutorId: srvId,
           ...(celdaHoy?.nota ? { nota: celdaHoy.nota } : {}),
+          ...(breakAsig2
+            ? {
+                breakTandaOrden: breakAsig2.breakTandaOrden,
+                breakInicio: breakAsig2.breakInicio,
+                breakFin: breakAsig2.breakFin,
+              }
+            : {}),
         };
         loteParaDb.push({
           empleadoId: f.empleado.id,
@@ -811,6 +872,9 @@ export class AutocompletadoService {
           codigo: turnoAEvaluar,
           previsto: prev,
           esRotacion: f.esPersonalRotado,
+          breakTandaOrden: breakAsig2?.breakTandaOrden ?? null,
+          breakInicio: breakAsig2?.breakInicio ?? null,
+          breakFin: breakAsig2?.breakFin ?? null,
         });
 
         // Auto-protección Post-Guardia si Fase 2 asignó nocturno pesado
@@ -837,12 +901,15 @@ export class AutocompletadoService {
               codigo: 'S',
               previsto: prevSig,
               esRotacion: f.esPersonalRotado,
+              breakTandaOrden: null,
+              breakInicio: null,
+              breakFin: null,
             });
           }
         }
 
         horasAsignadas = r2(
-          horasAsignadas + horasLiquidadasCelda(cfgTurno, d.fechaIso, esDescansoPred, reglasEmp)
+          horasAsignadas + horasLiquidadasCelda(cfgTurno, d.fechaIso, esDescansoPred, reglasEmp, fila[d.dia])
         );
         totalAsignados++;
         actualMap[f.empleado.id] = fila;
@@ -876,6 +943,9 @@ export class AutocompletadoService {
             codigo: 'L',
             previsto: prevLibre,
             esRotacion: false,
+            breakTandaOrden: null,
+            breakInicio: null,
+            breakFin: null,
           });
           modificada = true;
         }
@@ -894,6 +964,12 @@ export class AutocompletadoService {
         turnoNuevo: c.codigo as CodigoTurno,
         previstoAnterior: (celdaAntes?.previsto || '') as CodigoTurno,
         esRotacion: c.esRotacion,
+        breakTandaOrdenAnterior: celdaAntes?.breakTandaOrden ?? null,
+        breakInicioAnterior: celdaAntes?.breakInicio ?? null,
+        breakFinAnterior: celdaAntes?.breakFin ?? null,
+        breakTandaOrdenNuevo: c.breakTandaOrden ?? null,
+        breakInicioNuevo: c.breakInicio ?? null,
+        breakFinNuevo: c.breakFin ?? null,
       };
     });
 

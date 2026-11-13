@@ -14,6 +14,7 @@ import {
 } from '../../models';
 import { FestivosColombiaHelper } from '../../festivos-colombia.helper';
 import { hoyColombiaIso, r2 } from '../../shared/liquidacion-horas';
+import { coincideBusquedaCampos, dividirTerminosBusqueda } from '../../utils/busqueda-texto';
 
 @Component({
   selector: 'app-configuracion-servicios',
@@ -21,6 +22,18 @@ import { hoyColombiaIso, r2 } from '../../shared/liquidacion-horas';
   imports: [CommonModule, FormsModule],
   styleUrl: './configuracion-servicios.component.css',
   template: `
+    <div class="module-hero-card">
+      <div class="module-hero-brand">
+        <div class="module-hero-icon" aria-hidden="true">🏥</div>
+        <div class="module-hero-titles">
+          <div class="module-hero-title-row">
+            <h2>Gestión de Servicios</h2>
+            <span class="module-hero-badge">{{ servicios.length }} servicios</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Métricas Resumen de Servicios -->
     <div class="kpi-grid">
       <div class="kpi-card">
@@ -269,6 +282,121 @@ import { hoyColombiaIso, r2 } from '../../shared/liquidacion-horas';
             </label>
           </div>
 
+          <!-- Adscripción Inicial / Incorporación de Colaboradores en el Servicio -->
+          <div class="form-row empleados-adscribir-box">
+            <div class="empleados-adscribir-header">
+              <label class="empleados-adscribir-title">
+                @if (servicioEditandoId) {
+                  👥 Incorporar Colaboradores Adicionales ({{ obtenerEmpleadosDelServicio(servicioEditandoId).length }} ya en servicio):
+                } @else {
+                  👥 Personal Inicial a Adscribir a este Servicio (Opcional):
+                }
+              </label>
+              <span class="empleados-adscribir-counter" [class.has-selection]="nuevoServicioEmpleadosIds.length > 0">
+                {{ nuevoServicioEmpleadosIds.length }} seleccionado(s)
+              </span>
+            </div>
+            <small class="empleados-adscribir-note">
+              ℹ️ Selecciona colaboradores de la nómina para asignarlos o trasladarlos a este servicio al guardar. También podrás mover personal después desde el Directorio.
+            </small>
+
+            <div class="empleados-adscribir-toolbar">
+              <input
+                type="search"
+                class="empleados-adscribir-search"
+                aria-label="Buscar colaborador para adscribir al servicio"
+                placeholder="🔍 Buscar por nombre, cédula o cargo..."
+                [ngModel]="busquedaEmpleadoForm()"
+                (ngModelChange)="busquedaEmpleadoForm.set($event)"
+              />
+              <select
+                class="empleados-adscribir-origin-select"
+                aria-label="Filtrar colaboradores por servicio actual"
+                [ngModel]="filtroOrigenEmpleadoForm()"
+                (ngModelChange)="filtroOrigenEmpleadoForm.set($event)"
+              >
+                <option value="TODOS">Todos los servicios origen</option>
+                @for (srvOrig of servicios; track srvOrig.id) {
+                  @if (srvOrig.id !== servicioEditandoId) {
+                    <option [value]="srvOrig.id">{{ srvOrig.codigo }} — {{ srvOrig.nombre }}</option>
+                  }
+                }
+              </select>
+              @if (nuevoServicioCargosPermitidosIds.length > 0) {
+                <label class="empleados-adscribir-check-compat">
+                  <input
+                    type="checkbox"
+                    [ngModel]="soloCargosPermitidosForm()"
+                    (ngModelChange)="soloCargosPermitidosForm.set($event)"
+                  />
+                  <span>Solo cargos permitidos</span>
+                </label>
+              }
+              <div class="empleados-adscribir-actions">
+                <button
+                  type="button"
+                  class="btn-outline btn-xs"
+                  [disabled]="empleadosCandidatosParaForm.length === 0"
+                  (click)="seleccionarVisiblesEnForm()"
+                >
+                  ✓ Visibles ({{ empleadosCandidatosParaForm.length }})
+                </button>
+                <button
+                  type="button"
+                  class="btn-outline btn-xs"
+                  [disabled]="nuevoServicioEmpleadosIds.length === 0"
+                  (click)="limpiarEmpleadosSeleccionadosForm()"
+                >
+                  Limpiar ({{ nuevoServicioEmpleadosIds.length }})
+                </button>
+              </div>
+            </div>
+
+            <div class="empleados-adscribir-list">
+              @for (emp of empleadosCandidatosParaForm; track emp.id) {
+                @let empSel = esEmpleadoSeleccionadoEnForm(emp.id);
+                @let empCompat = esCargoCompatibleConForm(emp);
+                <label
+                  class="empleado-adscribir-item"
+                  [class.is-selected]="empSel"
+                  [class.is-incompatible]="!empCompat"
+                >
+                  <div class="empleado-adscribir-left">
+                    <input
+                      type="checkbox"
+                      [checked]="empSel"
+                      (change)="alternarEmpleadoEnServicioForm.emit(emp.id)"
+                    />
+                    <div class="empleado-adscribir-ident">
+                      <span class="empleado-adscribir-nombre">{{ emp.nombre }}</span>
+                      <span class="empleado-adscribir-sub">
+                        CC: {{ emp.documento }} · <strong>{{ emp.categoria }}</strong>
+                      </span>
+                    </div>
+                  </div>
+                  <div class="empleado-adscribir-badges">
+                    <span class="badge-origen-srv" title="Servicio base actual del colaborador">
+                      Actual: {{ obtenerNombreServicio(emp.servicioBaseId) }}
+                    </span>
+                    <span class="badge-horas-emp">{{ emp.horasContratoMes }}h/mes</span>
+                    @if (!empCompat) {
+                      <span
+                        class="badge-cargo-warn"
+                        title="Este cargo no está marcado entre los cargos permitidos del servicio (puedes adscribirlo igual con aviso)"
+                      >
+                        ⚠️ Cargo distinto
+                      </span>
+                    }
+                  </div>
+                </label>
+              } @empty {
+                <div class="empleados-adscribir-empty">
+                  No hay colaboradores disponibles con los filtros actuales.
+                </div>
+              }
+            </div>
+          </div>
+
           <!-- Matriz de Metas por Turno Operativo (Esquema B) -->
           @if (nuevoServicioMetasPorTurno.length > 0) {
             @let balanceCap = resumenCapacidadServicioForm;
@@ -367,22 +495,23 @@ import { hoyColombiaIso, r2 } from '../../shared/liquidacion-horas';
               <!-- Pre-check Capacidad vs Demanda Mensual -->
               <div
                 class="capacidad-demanda-banner"
-                [class.cap-deficit]="servicioEditandoId && balanceCap.diferencia < 0"
-                [class.cap-ok]="servicioEditandoId && balanceCap.diferencia >= 0">
+                [class.cap-deficit]="(servicioEditandoId || balanceCap.personas > 0) && balanceCap.diferencia < 0"
+                [class.cap-ok]="(servicioEditandoId || balanceCap.personas > 0) && balanceCap.diferencia >= 0">
                 <div class="cap-row">
                   <span>📊 Demanda esperada ({{ balanceCap.mesNombre }}): <strong>{{ balanceCap.demandaHoras }}h/mes</strong></span>
-                  @if (servicioEditandoId) {
+                  @if (servicioEditandoId || balanceCap.personas > 0) {
                     <span>
-                      👥 Plantilla actual ({{ balanceCap.personas }} colab.): <strong>{{ balanceCap.capacidadHoras }}h/mes</strong>
+                      👥 Plantilla ({{ balanceCap.personas }} colab.@if (balanceCap.personasIncorporadas > 0) { , +{{ balanceCap.personasIncorporadas }} a adscribir }):
+                      <strong>{{ balanceCap.capacidadHoras }}h/mes</strong>
                       ({{ balanceCap.diferencia >= 0 ? '+' : '' }}{{ balanceCap.diferencia }}h)
                     </span>
                   } @else {
                     <span>👥 Personal estimado requerido (~168h/mes): <strong>{{ balanceCap.personasEstimadas }} colab.</strong></span>
                   }
                 </div>
-                @if (servicioEditandoId && balanceCap.diferencia < 0) {
+                @if ((servicioEditandoId || balanceCap.personas > 0) && balanceCap.diferencia < 0) {
                   <small class="cap-alert-text">
-                    ⚠️ La demanda esperada supera la capacidad nominal actual del servicio en {{ -balanceCap.diferencia }}h (requerirá horas extras o personal de apoyo).
+                    ⚠️ La demanda esperada supera la capacidad nominal proyectada del servicio en {{ -balanceCap.diferencia }}h (puedes adscribir más personal abajo o requerirá horas extras/apoyo).
                   </small>
                 }
               </div>
@@ -899,6 +1028,7 @@ export class ConfiguracionServiciosComponent {
   @Input() nuevoServicioModalidadDias: any = 'TODOS_24_7';
   @Input() nuevoServicioPermitePermutaEntreCargos = false;
   @Input() nuevoServicioCargosPermitidosIds: string[] = [];
+  @Input() nuevoServicioEmpleadosIds: string[] = [];
   @Input() nuevoServicioMetasPorTurno: MetaTurnoServicio[] = [];
   @Input() nuevoServicioReqDia = 4;
   @Input() nuevoServicioReqNoche = 2;
@@ -918,6 +1048,8 @@ export class ConfiguracionServiciosComponent {
   @Output() cambiarNuevoServicioModalidadDias = new EventEmitter<any>();
   @Output() cambiarNuevoServicioPermitePermutaEntreCargos = new EventEmitter<boolean>();
   @Output() alternarCargoPermitidoEnServicioForm = new EventEmitter<string>();
+  @Output() alternarEmpleadoEnServicioForm = new EventEmitter<string>();
+  @Output() cambiarNuevoServicioEmpleadosIds = new EventEmitter<string[]>();
   @Output() actualizarMetaTurnoEnServicioForm = new EventEmitter<{
     codigoTurno: string;
     campo: 'minimoBase' | 'esperadoBase' | 'minimoDomFest' | 'esperadoDomFest';
@@ -945,6 +1077,9 @@ export class ConfiguracionServiciosComponent {
 
   serviciosExpandidos = signal<Set<string>>(new Set<string>());
   filtroMacroproceso = signal<string>('TODOS');
+  busquedaEmpleadoForm = signal<string>('');
+  filtroOrigenEmpleadoForm = signal<string>('TODOS');
+  soloCargosPermitidosForm = signal<boolean>(false);
   seleccionadosTraslado = new Set<string>();
   destinoTrasladoPorServicio: Record<string, string> = {};
 
@@ -959,6 +1094,7 @@ export class ConfiguracionServiciosComponent {
     capacidadHoras: number;
     diferencia: number;
     personas: number;
+    personasIncorporadas: number;
     personasEstimadas: number;
     mesNombre: string;
   } {
@@ -1001,9 +1137,15 @@ export class ConfiguracionServiciosComponent {
       }
     }
 
-    const empsSrv = this.servicioEditandoId
+    const existentes = this.servicioEditandoId
       ? this.obtenerEmpleadosDelServicio(this.servicioEditandoId)
       : [];
+    const selSet = new Set(this.nuevoServicioEmpleadosIds || []);
+    const nuevos = (this.empleados || []).filter(
+      (e) => selSet.has(e.id) && e.servicioBaseId !== this.servicioEditandoId
+    );
+    const empsSrv = [...existentes, ...nuevos];
+
     const capacidadHoras = r2(
       empsSrv.reduce((acc, e) => acc + (Number(e.horasContratoMes) || 0), 0)
     );
@@ -1016,9 +1158,75 @@ export class ConfiguracionServiciosComponent {
       capacidadHoras,
       diferencia,
       personas: empsSrv.length,
+      personasIncorporadas: nuevos.length,
       personasEstimadas: Math.max(0, Math.ceil(demandaRed / 168)),
       mesNombre: `${mesesNom[mes] || mes} ${anio}`,
     };
+  }
+
+  get empleadosCandidatosParaForm(): EmpleadoHospital[] {
+    const terminos = dividirTerminosBusqueda(this.busquedaEmpleadoForm());
+    const origenRaw = this.filtroOrigenEmpleadoForm();
+    const origen = origenRaw && origenRaw !== this.servicioEditandoId ? origenRaw : 'TODOS';
+    const soloCompat = this.soloCargosPermitidosForm() && (this.nuevoServicioCargosPermitidosIds || []).length > 0;
+
+    const filtrados = (this.empleados || []).filter((emp) => {
+      if (this.servicioEditandoId && emp.servicioBaseId === this.servicioEditandoId) {
+        return false;
+      }
+      if (origen !== 'TODOS' && emp.servicioBaseId !== origen) {
+        return false;
+      }
+      if (soloCompat && !this.esCargoCompatibleConForm(emp)) {
+        return false;
+      }
+      if (terminos.length > 0) {
+        const srvNom = this.obtenerNombreServicio(emp.servicioBaseId);
+        if (!coincideBusquedaCampos(terminos, [emp.nombre, emp.documento, emp.categoria, srvNom])) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    return filtrados.sort((a, b) => {
+      const ca = this.esCargoCompatibleConForm(a) ? 0 : 1;
+      const cb = this.esCargoCompatibleConForm(b) ? 0 : 1;
+      if (ca !== cb) return ca - cb;
+      return a.nombre.localeCompare(b.nombre);
+    });
+  }
+
+  obtenerNombreServicio(servicioId?: string): string {
+    if (!servicioId) return 'Sin asignar';
+    const srv = (this.servicios || []).find((s) => s.id === servicioId);
+    return srv ? `${srv.codigo} · ${srv.nombre}` : servicioId;
+  }
+
+  esEmpleadoSeleccionadoEnForm(empleadoId: string): boolean {
+    return (this.nuevoServicioEmpleadosIds || []).includes(empleadoId);
+  }
+
+  esCargoCompatibleConForm(emp: EmpleadoHospital): boolean {
+    const permitidos = this.nuevoServicioCargosPermitidosIds || [];
+    if (permitidos.length === 0) return true;
+    if (emp.categoriaId && permitidos.includes(emp.categoriaId)) return true;
+    const nombresPermitidos = new Set(
+      (this.categoriasProfesionales || [])
+        .filter((c) => permitidos.includes(c.id))
+        .map((c) => c.nombre.trim().toLowerCase())
+    );
+    return nombresPermitidos.has((emp.categoria || '').trim().toLowerCase());
+  }
+
+  seleccionarVisiblesEnForm(): void {
+    const visiblesIds = this.empleadosCandidatosParaForm.map((e) => e.id);
+    const combinados = Array.from(new Set([...(this.nuevoServicioEmpleadosIds || []), ...visiblesIds]));
+    this.cambiarNuevoServicioEmpleadosIds.emit(combinados);
+  }
+
+  limpiarEmpleadosSeleccionadosForm(): void {
+    this.cambiarNuevoServicioEmpleadosIds.emit([]);
   }
 
   get catalogoMacroprocesos(): MacroprocesoInfo[] {

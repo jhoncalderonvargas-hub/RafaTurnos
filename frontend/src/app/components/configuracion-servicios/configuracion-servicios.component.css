@@ -868,3 +868,213 @@
   background: #dcfce7;
   color: #15803d;
 }
+
+.empleados-adscribir-box {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.empleados-adscribir-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.empleados-adscribir-title {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.empleados-adscribir-counter {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.empleados-adscribir-counter.has-selection {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.empleados-adscribir-note {
+  font-size: 11px;
+  color: #64748b;
+  line-height: 1.35;
+}
+
+.empleados-adscribir-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.empleados-adscribir-search {
+  flex: 1 1 200px;
+  min-width: 170px;
+  padding: 5px 9px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 12px;
+  background: #ffffff;
+}
+
+.empleados-adscribir-origin-select {
+  flex: 0 1 210px;
+  padding: 5px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 11.5px;
+  background: #ffffff;
+  color: #1e293b;
+}
+
+.empleados-adscribir-check-compat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+  padding: 3px 6px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+}
+
+.empleados-adscribir-actions {
+  display: flex;
+  gap: 5px;
+  margin-left: auto;
+}
+
+.btn-xs {
+  padding: 4px 8px;
+  font-size: 11px;
+  border-radius: 5px;
+}
+
+.empleados-adscribir-list {
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-right: 2px;
+}
+
+.empleado-adscribir-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 9px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.empleado-adscribir-item:hover {
+  border-color: #93c5fd;
+  background: #f0f9ff;
+}
+
+.empleado-adscribir-item.is-selected {
+  background: #eff6ff;
+  border-color: #3b82f6;
+}
+
+.empleado-adscribir-item.is-incompatible:not(.is-selected) {
+  opacity: 0.85;
+}
+
+.empleado-adscribir-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 220px;
+}
+
+.empleado-adscribir-ident {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.empleado-adscribir-nombre {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.empleado-adscribir-sub {
+  font-size: 10.5px;
+  color: #64748b;
+}
+
+.empleado-adscribir-badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.badge-origen-srv {
+  font-size: 10px;
+  font-weight: 600;
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.badge-horas-emp {
+  font-size: 10px;
+  font-weight: 600;
+  background: #ecfeff;
+  color: #0e7490;
+  border: 1px solid #a5f3fc;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.badge-cargo-warn {
+  font-size: 10px;
+  font-weight: 700;
+  background: #fffbeb;
+  color: #b45309;
+  border: 1px solid #fcd34d;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.empleados-adscribir-empty {
+  padding: 16px;
+  text-align: center;
+  font-size: 11.5px;
+  color: #64748b;
+  background: #ffffff;
+  border: 1px dashed #cbd5e1;
+  border-radius: 6px;
+}

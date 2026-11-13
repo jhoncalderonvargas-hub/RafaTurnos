@@ -15,7 +15,7 @@ import {
 import { TurnosApiService } from './turnos-api.service';
 import { NotificacionStore } from './stores/notificacion.store';
 import { CatalogosSsoStore } from './stores/catalogos-sso.store';
-import { CuadranteStore } from './stores/cuadrante.store';
+import { CuadranteStore, ResumenTandasBreakDia } from './stores/cuadrante.store';
 import { PermutasAuditoriaStore } from './stores/permutas-auditoria.store';
 import { PortalReportesStore } from './stores/portal-reportes.store';
 
@@ -25,9 +25,13 @@ import { ModalRotacionComponent } from './components/modales/modal-rotacion.comp
 import { DashboardSolicitudesComponent } from './components/dashboard-solicitudes/dashboard-solicitudes.component';
 import { PortalColaboradorComponent } from './components/portal-colaborador/portal-colaborador.component';
 import { ReportesNominaComponent } from './components/reportes-nomina/reportes-nomina.component';
-import { ConfiguracionGeneralComponent } from './components/configuracion-general/configuracion-general.component';
+import { ConfiguracionServiciosComponent } from './components/configuracion-servicios/configuracion-servicios.component';
+import { GestionPersonalComponent } from './components/gestion-personal/gestion-personal.component';
+import { ConfiguracionEmpresasComponent } from './components/configuracion-empresas/configuracion-empresas.component';
+import { ConfiguracionCatalogoTurnosComponent } from './components/configuracion-catalogo-turnos/configuracion-catalogo-turnos.component';
+import { ConfiguracionFestivosComponent } from './components/configuracion-festivos/configuracion-festivos.component';
 import { PlanificadorCuadranteComponent } from './components/planificador-cuadrante/planificador-cuadrante.component';
-import { SidebarNavegacionComponent } from './components/sidebar-navegacion/sidebar-navegacion.component';
+import { SidebarNavegacionComponent, VistaApp } from './components/sidebar-navegacion/sidebar-navegacion.component';
 import { AuditoriaTrazabilidadComponent } from './components/auditoria-trazabilidad/auditoria-trazabilidad.component';
 import { CeldaMenuContextualComponent } from './components/inspector-celda/celda-menu-contextual.component';
 import { CeldaDrawerComponent } from './components/inspector-celda/celda-drawer.component';
@@ -42,7 +46,11 @@ import { CeldaDrawerComponent } from './components/inspector-celda/celda-drawer.
     DashboardSolicitudesComponent,
     PortalColaboradorComponent,
     ReportesNominaComponent,
-    ConfiguracionGeneralComponent,
+    ConfiguracionServiciosComponent,
+    GestionPersonalComponent,
+    ConfiguracionEmpresasComponent,
+    ConfiguracionCatalogoTurnosComponent,
+    ConfiguracionFestivosComponent,
     PlanificadorCuadranteComponent,
     SidebarNavegacionComponent,
     AuditoriaTrazabilidadComponent,
@@ -63,10 +71,7 @@ export class AppComponent implements OnInit {
   readonly portalReportes = inject(PortalReportesStore);
 
   // Navegación principal (Menú lateral izquierdo colapsable automáticamente por hover)
-  readonly vistaActual = signal<
-    'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'AUDITORIA' | 'PORTAL_EMPLEADO' | 'CONFIGURACION'
-  >('PLANIFICADOR');
-  readonly subVistaConfig = signal<'SERVICIOS' | 'EMPRESAS' | 'CATALOGO_TURNOS' | 'FESTIVOS'>('SERVICIOS');
+  readonly vistaActual = signal<VistaApp>('PLANIFICADOR');
   readonly sidebarFijo = signal<boolean>(false);
   readonly sidebarHovered = signal<boolean>(false);
   readonly sidebarExpandido = computed<boolean>(() => this.sidebarFijo() || this.sidebarHovered());
@@ -101,6 +106,7 @@ export class AppComponent implements OnInit {
     servicioActual: ServicioHospitalario;
     estadoCuadrante: 'BORRADOR' | 'PUBLICADO' | 'CERRADO_NOMINA' | 'SIN_PLANIFICAR';
     infraccionesActivas: InfraccionNormativa[];
+    resumenTandasBreakDia: ResumenTandasBreakDia | null;
   } {
     const anio = this.catalogos.anioSeleccionado();
     if (origenVista === 'PORTAL') {
@@ -145,6 +151,7 @@ export class AppComponent implements OnInit {
         servicioActual,
         estadoCuadrante: this.portalReportes.estadoCuadrantePortal(),
         infraccionesActivas: [],
+        resumenTandasBreakDia: null,
       };
     }
 
@@ -161,6 +168,10 @@ export class AppComponent implements OnInit {
         : celdasEmp[dia - 1]?.codigo || ''
     ) as CodigoTurno;
     const celdaDiaSiguiente = dia < diasDelMes.length ? celdasEmp[dia + 1] : undefined;
+    const srvActual = this.catalogos.servicioActual();
+    const resumenTandasBreakDia = celda?.codigo
+      ? this.cuadrante.obtenerResumenTandasDia(srvActual.id, dia, celda.codigo)
+      : null;
 
     return {
       anio,
@@ -170,9 +181,10 @@ export class AppComponent implements OnInit {
       celda,
       codigoDiaAnterior,
       celdaDiaSiguiente,
-      servicioActual: this.catalogos.servicioActual(),
+      servicioActual: srvActual,
       estadoCuadrante: this.cuadrante.estadoCuadrante(),
       infraccionesActivas: this.cuadrante.infraccionesActivas(),
+      resumenTandasBreakDia,
     };
   }
 
@@ -314,9 +326,19 @@ export class AppComponent implements OnInit {
 
     if (usuario.rol === 'COLABORADOR') {
       this.vistaActual.set('PORTAL_EMPLEADO');
-    } else if (usuario.rol === 'COORDINADOR' && this.vistaActual() === 'CONFIGURACION') {
+    } else if (usuario.rol === 'COORDINADOR' && this.esVistaGestion(this.vistaActual())) {
       this.vistaActual.set('PLANIFICADOR');
     }
+  }
+
+  private esVistaGestion(vista: VistaApp): boolean {
+    return (
+      vista === 'GESTION_SERVICIOS' ||
+      vista === 'GESTION_PERSONAL' ||
+      vista === 'GESTION_TURNOS' ||
+      vista === 'GESTION_EMPRESAS' ||
+      vista === 'GESTION_FESTIVOS'
+    );
   }
 
   cargarDatosDesdeBaseDeDatos(sincronizarIntranetDespues = false): void {
@@ -392,8 +414,7 @@ export class AppComponent implements OnInit {
 
   irAConfigurarServiciosApoyo(): void {
     this.cuadrante.modalRotacionAbierto.set(false);
-    this.subVistaConfig.set('SERVICIOS');
-    this.vistaActual.set('CONFIGURACION');
+    this.vistaActual.set('GESTION_SERVICIOS');
   }
 
   irAConfigurarEmpresas(): void {
@@ -401,8 +422,14 @@ export class AppComponent implements OnInit {
       this.notificacion.mostrar('ℹ️ La gestión de empresas contratantes está reservada a Talento Humano / Admin.');
       return;
     }
-    this.subVistaConfig.set('EMPRESAS');
-    this.vistaActual.set('CONFIGURACION');
+    this.vistaActual.set('GESTION_EMPRESAS');
+  }
+
+  verCalendarioColaborador(empleadoId: string): void {
+    this.menuContextualCelda.set(null);
+    this.drawerInspectorCelda.set(null);
+    this.portalReportes.cambiarEmpleadoPortal(empleadoId);
+    this.vistaActual.set('PORTAL_EMPLEADO');
   }
 
   // Controladores del Menú Lateral (Auto-colapso por Hover y Fijación)
@@ -426,21 +453,19 @@ export class AppComponent implements OnInit {
     }
   }
 
-  onItemNavegacionClick(
-    vista: 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'AUDITORIA' | 'PORTAL_EMPLEADO' | 'CONFIGURACION'
-  ): void {
+  onItemNavegacionClick(vista: VistaApp): void {
     if (
       this.catalogos.esColaborador() &&
-      (vista === 'PLANIFICADOR' || vista === 'REPORTES' || vista === 'CONFIGURACION' || vista === 'AUDITORIA')
+      (vista === 'PLANIFICADOR' || vista === 'REPORTES' || vista === 'AUDITORIA' || this.esVistaGestion(vista))
     ) {
       this.notificacion.mostrar(
         '⛔ Acceso restringido: tu perfil de Colaborador solo tiene acceso a Mi Calendario y Solicitudes.'
       );
       return;
     }
-    if (this.catalogos.esCoordinador() && vista === 'CONFIGURACION') {
+    if (this.catalogos.esCoordinador() && this.esVistaGestion(vista)) {
       this.notificacion.mostrar(
-        '⛔ Acceso restringido: la configuración global está reservada para Talento Humano / Administración.'
+        '⛔ Acceso restringido: los módulos de Gestión están reservados para Talento Humano / Administración.'
       );
       return;
     }

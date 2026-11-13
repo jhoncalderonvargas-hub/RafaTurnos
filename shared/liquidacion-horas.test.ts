@@ -24,6 +24,7 @@ import {
   evaluarEstadoBancoHoras,
   evaluarJornadaSemanalPeriodo,
   formatearPorcentaje,
+  generarTandasEscalonadasDefault,
   HORAS_AMORTIZACION_COMP_DEFAULT,
   hoyColombiaIso,
   inicioNocturnoVigente,
@@ -31,12 +32,14 @@ import {
   liquidarPeriodo,
   liquidarTurno,
   liquidarTurnoMinutos,
+  normalizarTandasBreak,
   obtenerHorasAmortizacionTurno,
   PLANTILLA_CST_LEY_2466,
   PLANTILLA_DECRETO_1042,
   r2,
   recargosVigentes,
   resumenNormativoPeriodo,
+  seleccionarTandaBreakEquilibrada,
   sumarDiasIso,
   TurnoLiquidable,
 } from './liquidacion-horas';
@@ -492,6 +495,79 @@ prueba('Amortización COMP dinámica: DIA_HABIL_EMPRESA (44h→7.33h, 42h→7h) 
 
   const compFijo = { descuentaBancoHoras: true, modoAmortizacionBanco: 'HORAS_FIJAS', horasAmortizacionBanco: 12 };
   assert.strictEqual(obtenerHorasAmortizacionTurno(compFijo, 44, 6), 12);
+});
+
+prueba('Break/Almuerzo: modo pagado no descuenta; modo Art. 167 CST sustrae intervalo exacto (incl. cruce 19:00 y medianoche)', () => {
+  // Receso pagado dentro de 8h (07:00-15:00 con break 12:00-12:30): conserva 8h HOD
+  const turnoPagado = T('07:00', '15:00', 8, {
+    recesoHabilitado: true,
+    recesoRemunerado: true,
+    minutosAlmuerzo: 0,
+    breakInicio: '12:00',
+    breakFin: '12:30',
+  });
+  assert.deepStrictEqual(liquidarTurno(turnoPagado, '2026-11-10', descanso), {
+    hod: 8,
+    hon: 0,
+    hdfd: 0,
+    hdfn: 0,
+    total: 8,
+  });
+
+  // Tarde 14:00-22:00 (bruto CST: 5 HOD + 3 HON), almuerzo/cena 18:30-19:30 no computable -> resta 0.5h HOD y 0.5h HON
+  const turnoTardeBreak = T('14:00', '22:00', 7, {
+    recesoHabilitado: true,
+    recesoRemunerado: false,
+    minutosAlmuerzo: 60,
+    breakInicio: '18:30',
+    breakFin: '19:30',
+  });
+  assert.deepStrictEqual(liquidarTurno(turnoTardeBreak, '2026-11-10', descanso), {
+    hod: 4.5,
+    hon: 2.5,
+    hdfd: 0,
+    hdfn: 0,
+    total: 7,
+  });
+
+  // Sábado 22:00 -> Domingo 06:00 con break 01:30-02:30 -> sábado 2h HON, domingo 5h HDFN (descuenta 1h del domingo)
+  const turnoNocheBreak = T('22:00', '06:00', 7, {
+    recesoHabilitado: true,
+    recesoRemunerado: false,
+    minutosAlmuerzo: 60,
+    breakInicio: '01:30',
+    breakFin: '02:30',
+  });
+  assert.deepStrictEqual(liquidarTurno(turnoNocheBreak, '2026-11-07', descanso), {
+    hod: 0,
+    hon: 2,
+    hdfd: 0,
+    hdfn: 5,
+    total: 7,
+  });
+});
+
+prueba('Tandas de break: generación escalonada, normalización y reparto equitativo', () => {
+  const tandas = generarTandasEscalonadasDefault('07:00', '19:00', 3, 60);
+  assert.strictEqual(tandas.length, 3);
+  assert.deepStrictEqual(
+    tandas.map((t) => `${t.etiqueta}:${t.inicio}-${t.fin}`),
+    ['T1:11:30-12:30', 'T2:12:30-13:30', 'T3:13:30-14:30']
+  );
+
+  const norm = normalizarTandasBreak(
+    [
+      { orden: 2, etiqueta: 'T2', inicio: '13:30', fin: '14:30', duracionMin: 60 },
+      { orden: 1, etiqueta: 'T1', inicio: '11:30', fin: '12:30', duracionMin: 60 },
+    ],
+    '07:00',
+    '19:00'
+  );
+  assert.strictEqual(norm[0].inicio, '11:30');
+  assert.strictEqual(norm[1].etiqueta, 'T2');
+
+  const elegida = seleccionarTandaBreakEquilibrada(tandas, new Map([[1, 2], [2, 0], [3, 1]]), 0);
+  assert.strictEqual(elegida?.orden, 2);
 });
 
 console.log(`\n${ok} pruebas OK${process.exitCode ? ' — HAY FALLOS' : ''}`);

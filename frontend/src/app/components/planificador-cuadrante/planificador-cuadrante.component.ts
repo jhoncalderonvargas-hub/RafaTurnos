@@ -8,6 +8,7 @@ import {
   resumenNormativoPeriodo,
   SEMAFORO_BANCO_HORAS,
 } from '../../shared/liquidacion-horas';
+import { guardarStorageSeguro, leerStorageSeguro, obtenerTandasBreakDeTurno } from '../../calculo-turnos.helper';
 import { FormsModule } from '@angular/forms';
 import {
   CeldaAsignacion,
@@ -17,13 +18,14 @@ import {
   EmpresaContratante,
   InfraccionNormativa,
   MacroprocesoInfo,
-  ReglaCargoServicio,
+  NOMBRES_MESES,
   ServicioHospitalario,
   TipoTurnoConfig,
 } from '../../models';
 import {
   FilaCoberturaTurno,
   ResumenCoberturaTurnosServicio,
+  ResumenSimultaneidadBreaksServicio,
 } from '../../stores/cuadrante.store';
 
 @Component({
@@ -33,7 +35,7 @@ import {
   styleUrl: './planificador-cuadrante.component.css',
   template: `
     <section class="toolbar-controls toolbar-eje3">
-      <!-- BLOQUE 1: CONTEXTO Y ESTADO CLÍNICO (IZQUIERDA) -->
+      <!-- CARRIL IZQUIERDO (FIJO): SERVICIO Y PERIODO -->
       <div class="toolbar-zone toolbar-zone-context">
         <div class="control-item" title="Servicio hospitalario activo (agrupado por Macroproceso del Mapa de Procesos)">
           <select
@@ -60,25 +62,14 @@ import {
             title="Ir al mes anterior">
             ◀
           </button>
-          <select
-            class="select-context select-mes"
-            aria-label="Mes de planificación"
-            [ngModel]="mesSeleccionado"
-            (ngModelChange)="cambiarMes.emit(+$event)">
-            @for (m of mesesDisponibles; track m.valor) {
-              <option [value]="m.valor">{{ m.nombre }}</option>
-            }
-          </select>
-          <select
-            class="select-context select-year"
-            aria-label="Año de planificación"
-            [ngModel]="anioSeleccionado"
-            (ngModelChange)="cambiarAnio.emit(+$event)"
-            title="Año de planificación">
-            @for (a of aniosDisponibles; track a) {
-              <option [value]="a">{{ a }}</option>
-            }
-          </select>
+          <span
+            class="period-compact-display"
+            [class.is-published]="estadoCuadrante === 'PUBLICADO'"
+            [class.is-locked]="estadoCuadrante === 'CERRADO_NOMINA'"
+            [attr.aria-label]="'Periodo de planificación: ' + periodoAbreviado"
+            [title]="tituloPeriodoStepper">
+            {{ periodoAbreviado }}
+          </span>
           <button
             type="button"
             class="btn-nav-month"
@@ -87,17 +78,20 @@ import {
             title="Ir al mes siguiente">
             ▶
           </button>
-          <button
-            type="button"
-            class="btn-hoy-period"
-            [class.is-current]="esPeriodoActual"
-            [disabled]="esPeriodoActual"
-            (click)="irAMesActual.emit()"
-            [title]="esPeriodoActual ? 'Ya estás viendo el mes actual' : 'Volver al mes y año actual'">
-            {{ esPeriodoActual ? '● Hoy' : 'Hoy' }}
-          </button>
+          @if (!esPeriodoActual) {
+            <button
+              type="button"
+              class="btn-hoy-period"
+              (click)="irAMesActual.emit()"
+              title="Volver al mes y año actual">
+              Hoy
+            </button>
+          }
         </div>
+      </div>
 
+      <!-- CARRIL CENTRAL (FIJO): CARGO Y HERRAMIENTAS DE EDICIÓN ASISTIDA -->
+      <div class="toolbar-zone toolbar-zone-tools">
         <div class="control-item" title="Filtrar cuadrante por cargo / especialidad">
           <select
             class="select-context select-cargo"
@@ -111,48 +105,7 @@ import {
           </select>
         </div>
 
-        <div class="estado-cuadrante-badge" [attr.data-estado]="estadoCuadrante" [title]="'Estado legal del cuadro de turnos: ' + estadoCuadrante">
-          @if (estadoCuadrante === 'BORRADOR') {
-            <span class="badge-dot dot-warn"></span>
-            <span>Borrador</span>
-          } @else if (estadoCuadrante === 'PUBLICADO') {
-            <span class="badge-dot dot-success"></span>
-            <span>Publicado</span>
-          } @else if (estadoCuadrante === 'CERRADO_NOMINA') {
-            <span class="badge-dot dot-locked"></span>
-            <span>Cerrado Nómina</span>
-          } @else {
-            <span class="badge-dot dot-neutral"></span>
-            <span>Sin Planificar</span>
-          }
-        </div>
-      </div>
-
-      <div class="toolbar-divider"></div>
-
-      <!-- BLOQUE 2: HERRAMIENTAS DE EDICIÓN ASISTIDA (CENTRO) -->
-      <div class="toolbar-zone toolbar-zone-tools">
-        <!-- Clúster Deshacer / Rehacer -->
-        <div class="undo-redo-cluster">
-          <button
-            type="button"
-            aria-label="Deshacer último cambio"
-            class="btn-undo-action"
-            (click)="deshacerUltimaAccion.emit()"
-            [disabled]="pilaDeshacer.length === 0"
-            title="Deshacer último cambio (Ctrl + Z)">
-            ↩️
-          </button>
-          <button
-            type="button"
-            aria-label="Rehacer cambio revertido"
-            class="btn-undo-action"
-            (click)="rehacerUltimaAccion.emit()"
-            [disabled]="pilaRehacer.length === 0"
-            title="Rehacer cambio revertido (Ctrl + Y)">
-            ↪️
-          </button>
-        </div>
+        <div class="tools-micro-divider"></div>
 
         <!-- Asistente y Acciones de Cuadrante -->
         <button
@@ -160,7 +113,7 @@ import {
           class="btn-tool btn-tool-wizard"
           (click)="ejecutarAutocompletarHuecos.emit()"
           title="Autocompletar turnos faltantes respetando descansos y normativa colombiana">
-          ✨ Autocompletar
+          ✨ Auto
         </button>
 
         <button
@@ -178,40 +131,44 @@ import {
           title="Borra todos los turnos para armar a mano (conserva VAC/INC)">
           🧹 Limpiar
         </button>
-
-        <div class="tools-micro-divider"></div>
-
-        <!-- Modo Auditoría / Comparador Visual -->
-        <label class="toggle-chip" [class.active]="mostrarComparadorPrevisto" title="Muestra triángulo amarillo en celdas modificadas respecto a la versión oficial">
-          <input type="checkbox" class="toggle-hidden-input" [ngModel]="mostrarComparadorPrevisto" (ngModelChange)="cambiarMostrarComparador.emit($event)">
-          <span>🔍 Cambios</span>
-        </label>
       </div>
 
-      <div class="toolbar-divider"></div>
-
-      <!-- BLOQUE 3: GOBERNANZA, INTEGRACIÓN Y ACCIÓN PRINCIPAL (DERECHA) -->
+      <!-- CARRIL DERECHO (FIJO): GOBERNANZA Y ACCIÓN PRINCIPAL -->
       <div class="toolbar-zone toolbar-zone-governance">
-        <div class="intranet-status-box" [title]="'Sincronización automática con Intranet: ' + (ultimaSincronizacionIntranet || 'Activa')">
+        <button
+          type="button"
+          class="intranet-status-pill"
+          aria-label="Estado de sincronización con Intranet (clic para actualizar)"
+          (click)="sincronizarNovedadesIntranet.emit()"
+          [disabled]="sincronizandoNovedades"
+          [title]="'Intranet: sincronización automática activa (' + (ultimaSincronizacionIntranet || 'al día') + ') · Clic para forzar actualización'">
           <span class="live-dot"></span>
-          <span class="intranet-label">Intranet</span>
-          <button
-            type="button"
-            aria-label="Sincronizar novedades con Intranet"
-            class="btn-icon-refresh"
-            (click)="sincronizarNovedadesIntranet.emit()"
-            [disabled]="sincronizandoNovedades"
-            [title]="'Forzar actualización inmediata con Intranet • Última: ' + (ultimaSincronizacionIntranet || 'Activa')">
-            🔄
-          </button>
-        </div>
+          <span class="intranet-sync-glyph" [class.is-spinning]="sincronizandoNovedades" aria-hidden="true">↻</span>
+        </button>
 
         <button
           type="button"
           class="btn-tool btn-tool-excel"
+          aria-label="Exportar pre-nómina y desglose de horas a Excel (.csv)"
           (click)="exportarExcelNomina.emit()"
           title="Exportar pre-nómina y desglose de horas a Excel / CSV (.csv)">
-          📊 Excel
+          <svg
+            class="excel-icon-svg"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden="true">
+            <rect x="8" y="3" width="14" height="18" rx="2" fill="#185c37"/>
+            <path d="M15 3h5a2 2 0 0 1 2 2v3.5h-7V3Z" fill="#33c481"/>
+            <path d="M8 5a2 2 0 0 1 2-2h5v5.5H8V5Z" fill="#21a366"/>
+            <rect x="15" y="8.5" width="7" height="4" fill="#21a366"/>
+            <rect x="15" y="12.5" width="7" height="4" fill="#107c41"/>
+            <path d="M15 16.5h7V19a2 2 0 0 1-2 2h-5v-4.5Z" fill="#185c37"/>
+            <path d="M8 8.5h14M8 12.5h14M8 16.5h14M15 3v18" stroke="#ffffff" stroke-opacity="0.35" stroke-width="0.7"/>
+            <rect x="2" y="6" width="12" height="12" rx="2" fill="#107c41" stroke="#0b5c2e" stroke-width="0.6"/>
+            <path d="M5.3 9.1L10.7 14.9M10.7 9.1L5.3 14.9" stroke="#ffffff" stroke-width="2.1" stroke-linecap="round"/>
+          </svg>
         </button>
 
         @if (!esCoordinador && estadoCuadrante === 'PUBLICADO') {
@@ -244,134 +201,366 @@ import {
       </div>
     </section>
 
-    <!-- PALETA DE TURNOS (1 SOLA FILA COMPACTA) -->
-    <section class="thurni-palette-bar" aria-label="Paleta de turnos">
-      <div class="palette-clusters-wrapper">
-        <!-- BLOQUE 1: HERRAMIENTAS (PUNTERO Y BORRADOR) -->
-        <div class="palette-cluster cluster-tools">
-          <span class="cluster-tag" title="Herramientas de navegación y limpieza" aria-hidden="true">🛠️</span>
-          <button
-            type="button"
-            class="shift-chip pointer-chip"
-            aria-label="Herramienta Puntero: Navegar e inspeccionar celdas"
-            [attr.aria-pressed]="turnoPincelActivo === 'POINTER'"
-            [class.selected]="turnoPincelActivo === 'POINTER'"
-            (click)="seleccionarPincel.emit('POINTER')"
-            title="Puntero: Navegar e inspeccionar celdas (Usa teclado 1-8, M, T, N, etc.)">
-            <span class="chip-code">👆</span>
-          </button>
+    <!-- PALETA DE TURNOS (COMPACTA 1 FILA ↔ DETALLADA CON DESCRIPCIÓN Y HORARIO EN FLUJO) -->
+    <section class="thurni-palette-bar" [class.is-detailed]="paletaDetallada" aria-label="Paleta de turnos">
+      @if (!paletaDetallada) {
+        <div class="palette-compact-row">
+          <div class="palette-clusters-scroll">
+            <div class="palette-clusters-wrapper">
+              <!-- BLOQUE 1: HERRAMIENTAS (PUNTERO Y BORRADOR) -->
+              <div class="palette-cluster cluster-tools">
+                <span class="cluster-tag" title="Herramientas de navegación y limpieza" aria-hidden="true">🛠️</span>
+                <button
+                  type="button"
+                  class="shift-chip pointer-chip"
+                  aria-label="Herramienta Puntero: Navegar e inspeccionar celdas"
+                  [attr.aria-pressed]="turnoPincelActivo === 'POINTER'"
+                  [class.selected]="turnoPincelActivo === 'POINTER'"
+                  (click)="seleccionarPincel.emit('POINTER')"
+                  title="Puntero: Navegar e inspeccionar celdas (Usa teclado 1-8, M, T, N, etc.)">
+                  <span class="chip-code">👆</span>
+                </button>
 
-          <button
-            type="button"
-            class="shift-chip eraser-chip"
-            aria-label="Herramienta Borrador: Limpiar turno asignado"
-            [attr.aria-pressed]="turnoPincelActivo === ''"
-            [class.selected]="turnoPincelActivo === ''"
-            draggable="true"
-            (dragstart)="onDragStartPaleta('', $event)"
-            (click)="seleccionarPincel.emit('')"
-            title="Borrador: Limpiar turno asignado (Tecla Supr / Delete)">
-            <span class="chip-code">🧽</span>
-          </button>
+                <button
+                  type="button"
+                  class="shift-chip eraser-chip"
+                  aria-label="Herramienta Borrador: Limpiar turno asignado"
+                  [attr.aria-pressed]="turnoPincelActivo === ''"
+                  [class.selected]="turnoPincelActivo === ''"
+                  draggable="true"
+                  (dragstart)="onDragStartPaleta('', $event)"
+                  (click)="seleccionarPincel.emit('')"
+                  title="Borrador: Limpiar turno asignado (Tecla Supr / Delete)">
+                  <span class="chip-code">🧽</span>
+                </button>
+              </div>
+
+              <!-- BLOQUE 2: OPERATIVOS DIURNOS -->
+              @if (turnosDiurnos.length > 0) {
+                <div class="palette-cluster cluster-diurnos">
+                  <span class="cluster-tag tag-diurno" title="Familia Diurna (Horas ordinarias solares)" aria-hidden="true">☀️</span>
+                  @for (t of turnosDiurnos; track t.codigo) {
+                    <button
+                      type="button"
+                      class="shift-chip"
+                      [attr.aria-pressed]="turnoPincelActivo === t.codigo"
+                      [attr.aria-label]="'Turno ' + t.codigo + ': ' + t.nombre"
+                      [class.selected]="turnoPincelActivo === t.codigo"
+                      [style.background-color]="t.bgHex"
+                      [style.color]="t.textHex"
+                      [style.border-color]="t.borderHex"
+                      draggable="true"
+                      (dragstart)="onDragStartPaleta(t.codigo, $event)"
+                      (click)="seleccionarPincel.emit(t.codigo)"
+                      [title]="construirTooltipPaleta(t)">
+                      <span class="chip-code">{{ t.codigo }}</span>
+                    </button>
+                  }
+                </div>
+              }
+
+              <!-- BLOQUE 3: GUARDIAS Y NOCHES -->
+              @if (turnosGuardiasNoches.length > 0) {
+                <div class="palette-cluster cluster-guardias">
+                  <span class="cluster-tag tag-guardia" title="Familia Guardias & Noches (Recargo nocturno y dominical)" aria-hidden="true">🌙</span>
+                  @for (t of turnosGuardiasNoches; track t.codigo) {
+                    <button
+                      type="button"
+                      class="shift-chip chip-heavy"
+                      [attr.aria-pressed]="turnoPincelActivo === t.codigo"
+                      [attr.aria-label]="'Turno ' + t.codigo + ': ' + t.nombre"
+                      [class.selected]="turnoPincelActivo === t.codigo"
+                      [class.chip-24]="t.codigo === 'G24' || t.horasOrdinarias >= 24"
+                      [style.background-color]="t.bgHex"
+                      [style.color]="t.textHex"
+                      [style.border-color]="t.borderHex"
+                      draggable="true"
+                      (dragstart)="onDragStartPaleta(t.codigo, $event)"
+                      (click)="seleccionarPincel.emit(t.codigo)"
+                      [title]="construirTooltipPaleta(t)">
+                      <span class="chip-code">{{ t.codigo }}</span>
+                    </button>
+                  }
+                </div>
+              }
+
+              <!-- BLOQUE 4: DESCANSOS Y BANCO -->
+              @if (turnosDescansos.length > 0) {
+                <div class="palette-cluster cluster-descansos">
+                  <span class="cluster-tag tag-descanso" title="Familia Descanso Legal y Banco de Horas" aria-hidden="true">☕</span>
+                  @for (t of turnosDescansos; track t.codigo) {
+                    <button
+                      type="button"
+                      class="shift-chip"
+                      [attr.aria-pressed]="turnoPincelActivo === t.codigo"
+                      [attr.aria-label]="'Turno ' + t.codigo + ': ' + t.nombre"
+                      [class.selected]="turnoPincelActivo === t.codigo"
+                      [style.background-color]="t.bgHex"
+                      [style.color]="t.textHex"
+                      [style.border-color]="t.borderHex"
+                      draggable="true"
+                      (dragstart)="onDragStartPaleta(t.codigo, $event)"
+                      (click)="seleccionarPincel.emit(t.codigo)"
+                      [title]="construirTooltipPaleta(t)">
+                      <span class="chip-code">{{ t.codigo }}</span>
+                    </button>
+                  }
+                </div>
+              }
+
+              <!-- BLOQUE 5: AUSENCIAS OFICIALES INTRANET -->
+              @if (turnosAusencias.length > 0) {
+                <div class="palette-cluster cluster-ausencias">
+                  <span class="cluster-tag tag-ausencia" title="Novedades oficiales bloqueadas por Intranet" aria-hidden="true">🔒</span>
+                  @for (t of turnosAusencias; track t.codigo) {
+                    <button
+                      type="button"
+                      class="shift-chip"
+                      [attr.aria-pressed]="turnoPincelActivo === t.codigo"
+                      [attr.aria-label]="'Novedad ' + t.codigo + ': ' + t.nombre"
+                      [class.selected]="turnoPincelActivo === t.codigo"
+                      [style.background-color]="t.bgHex"
+                      [style.color]="t.textHex"
+                      [style.border-color]="t.borderHex"
+                      draggable="true"
+                      (dragstart)="onDragStartPaleta(t.codigo, $event)"
+                      (click)="seleccionarPincel.emit(t.codigo)"
+                      [title]="construirTooltipPaleta(t)">
+                      <span class="chip-code">{{ t.codigo }}</span>
+                    </button>
+                  }
+                </div>
+              }
+            </div>
+          </div>
+
+          <div class="palette-mode-actions">
+            <button
+              type="button"
+              class="btn-palette-toggle"
+              [attr.aria-pressed]="false"
+              (click)="alternarPaletaDetallada()"
+              title="Cambiar a vista extendida con descripción y franja horaria de cada turno">
+              ↓ Vista extendida
+            </button>
+            <div class="undo-redo-cluster">
+              <button
+                type="button"
+                aria-label="Deshacer último cambio"
+                class="btn-undo-action"
+                (click)="deshacerUltimaAccion.emit()"
+                [disabled]="pilaDeshacer.length === 0"
+                title="Deshacer último cambio (Ctrl + Z)">
+                ↩️
+              </button>
+              <button
+                type="button"
+                aria-label="Rehacer cambio revertido"
+                class="btn-undo-action"
+                (click)="rehacerUltimaAccion.emit()"
+                [disabled]="pilaRehacer.length === 0"
+                title="Rehacer cambio revertido (Ctrl + Y)">
+                ↪️
+              </button>
+            </div>
+          </div>
         </div>
+      } @else {
+        <div
+          class="palette-detail-panel"
+          role="region"
+          aria-label="Paleta extendida de herramientas y turnos">
+          <div class="palette-detail-left-tools">
+            <button
+              type="button"
+              class="detail-tool-card pointer-tool"
+              [class.selected]="turnoPincelActivo === 'POINTER'"
+              [attr.aria-pressed]="turnoPincelActivo === 'POINTER'"
+              (click)="seleccionarPincel.emit('POINTER')"
+              title="Puntero: Navegar e inspeccionar celdas">
+              <span class="detail-tool-title">👆 Puntero</span>
+              <span class="detail-tool-sub">Seleccionar</span>
+            </button>
+            <button
+              type="button"
+              class="detail-tool-card eraser-tool"
+              [class.selected]="turnoPincelActivo === ''"
+              [attr.aria-pressed]="turnoPincelActivo === ''"
+              draggable="true"
+              (dragstart)="onDragStartPaleta('', $event)"
+              (click)="seleccionarPincel.emit('')"
+              title="Borrador: Limpiar turno asignado (Supr / Delete)">
+              <span class="detail-tool-title">🧽 Borrador</span>
+              <span class="detail-tool-sub">Limpiar · Supr</span>
+            </button>
+          </div>
 
-        <!-- BLOQUE 2: OPERATIVOS DIURNOS -->
-        @if (turnosDiurnos.length > 0) {
-          <div class="palette-cluster cluster-diurnos">
-            <span class="cluster-tag tag-diurno" title="Familia Diurna (Horas ordinarias solares)" aria-hidden="true">☀️</span>
-            @for (t of turnosDiurnos; track t.codigo) {
-              <button
-                type="button"
-                class="shift-chip"
-                [attr.aria-pressed]="turnoPincelActivo === t.codigo"
-                [attr.aria-label]="'Turno ' + t.codigo + ': ' + t.nombre"
-                [class.selected]="turnoPincelActivo === t.codigo"
-                [style.background-color]="t.bgHex"
-                [style.color]="t.textHex"
-                [style.border-color]="t.borderHex"
-                draggable="true"
-                (dragstart)="onDragStartPaleta(t.codigo, $event)"
-                (click)="seleccionarPincel.emit(t.codigo)"
-                [title]="construirTooltipPaleta(t)">
-                <span class="chip-code">{{ t.codigo }}</span>
-              </button>
+          <div class="palette-detail-groups">
+            @if (turnosDiurnos.length > 0) {
+              <div class="detail-family-group group-diurno">
+                <span class="detail-family-label tag-diurno">☀️ Diurnos</span>
+                <div class="detail-cards-wrap">
+                  @for (t of turnosDiurnos; track t.codigo) {
+                    <button
+                      type="button"
+                      class="shift-detail-card"
+                      [class.selected]="turnoPincelActivo === t.codigo"
+                      [attr.aria-pressed]="turnoPincelActivo === t.codigo"
+                      [style.background-color]="mezclarConBlanco(t.bgHex, 0.48, '#f8fafc')"
+                      [style.border-color]="mezclarColores(t.borderHex, t.textHex, 0.45, '#94a3b8')"
+                      draggable="true"
+                      (dragstart)="onDragStartPaleta(t.codigo, $event)"
+                      (click)="seleccionarPincel.emit(t.codigo)"
+                      [title]="construirTooltipPaleta(t)">
+                      <div class="detail-card-top">
+                        <span
+                          class="detail-code-badge"
+                          [style.background-color]="t.bgHex"
+                          [style.color]="t.textHex"
+                          [style.border-color]="mezclarColores(t.borderHex, t.textHex, 0.48, '#64748b')">
+                          {{ t.codigo }}
+                        </span>
+                        <span class="detail-name">{{ t.nombre }}</span>
+                      </div>
+                      <span class="detail-schedule">{{ obtenerSubtextoHorarioPaleta(t) }}</span>
+                    </button>
+                  }
+                </div>
+              </div>
+            }
+
+            @if (turnosGuardiasNoches.length > 0) {
+              <div class="detail-family-group group-guardia">
+                <span class="detail-family-label tag-guardia">🌙 Guardias & Noches</span>
+                <div class="detail-cards-wrap">
+                  @for (t of turnosGuardiasNoches; track t.codigo) {
+                    <button
+                      type="button"
+                      class="shift-detail-card is-heavy"
+                      [class.selected]="turnoPincelActivo === t.codigo"
+                      [attr.aria-pressed]="turnoPincelActivo === t.codigo"
+                      [style.background-color]="mezclarConBlanco(t.bgHex, 0.48, '#f8fafc')"
+                      [style.border-color]="mezclarColores(t.borderHex, t.textHex, 0.45, '#94a3b8')"
+                      draggable="true"
+                      (dragstart)="onDragStartPaleta(t.codigo, $event)"
+                      (click)="seleccionarPincel.emit(t.codigo)"
+                      [title]="construirTooltipPaleta(t)">
+                      <div class="detail-card-top">
+                        <span
+                          class="detail-code-badge"
+                          [style.background-color]="t.bgHex"
+                          [style.color]="t.textHex"
+                          [style.border-color]="mezclarColores(t.borderHex, t.textHex, 0.48, '#64748b')">
+                          {{ t.codigo }}
+                        </span>
+                        <span class="detail-name">{{ t.nombre }}</span>
+                      </div>
+                      <span class="detail-schedule">{{ obtenerSubtextoHorarioPaleta(t) }}</span>
+                    </button>
+                  }
+                </div>
+              </div>
+            }
+
+            @if (turnosDescansos.length > 0) {
+              <div class="detail-family-group group-descanso">
+                <span class="detail-family-label tag-descanso">☕ Descansos y Banco</span>
+                <div class="detail-cards-wrap">
+                  @for (t of turnosDescansos; track t.codigo) {
+                    <button
+                      type="button"
+                      class="shift-detail-card"
+                      [class.selected]="turnoPincelActivo === t.codigo"
+                      [attr.aria-pressed]="turnoPincelActivo === t.codigo"
+                      [style.background-color]="mezclarConBlanco(t.bgHex, 0.48, '#f8fafc')"
+                      [style.border-color]="mezclarColores(t.borderHex, t.textHex, 0.45, '#94a3b8')"
+                      draggable="true"
+                      (dragstart)="onDragStartPaleta(t.codigo, $event)"
+                      (click)="seleccionarPincel.emit(t.codigo)"
+                      [title]="construirTooltipPaleta(t)">
+                      <div class="detail-card-top">
+                        <span
+                          class="detail-code-badge"
+                          [style.background-color]="t.bgHex"
+                          [style.color]="t.textHex"
+                          [style.border-color]="mezclarColores(t.borderHex, t.textHex, 0.48, '#64748b')">
+                          {{ t.codigo }}
+                        </span>
+                        <span class="detail-name">{{ t.nombre }}</span>
+                      </div>
+                      <span class="detail-schedule">{{ obtenerSubtextoHorarioPaleta(t) }}</span>
+                    </button>
+                  }
+                </div>
+              </div>
+            }
+
+            @if (turnosAusencias.length > 0) {
+              <div class="detail-family-group group-ausencia">
+                <span class="detail-family-label tag-ausencia">🔒 Novedades Intranet</span>
+                <div class="detail-cards-wrap">
+                  @for (t of turnosAusencias; track t.codigo) {
+                    <button
+                      type="button"
+                      class="shift-detail-card"
+                      [class.selected]="turnoPincelActivo === t.codigo"
+                      [attr.aria-pressed]="turnoPincelActivo === t.codigo"
+                      [style.background-color]="mezclarConBlanco(t.bgHex, 0.48, '#f8fafc')"
+                      [style.border-color]="mezclarColores(t.borderHex, t.textHex, 0.45, '#94a3b8')"
+                      draggable="true"
+                      (dragstart)="onDragStartPaleta(t.codigo, $event)"
+                      (click)="seleccionarPincel.emit(t.codigo)"
+                      [title]="construirTooltipPaleta(t)">
+                      <div class="detail-card-top">
+                        <span
+                          class="detail-code-badge"
+                          [style.background-color]="t.bgHex"
+                          [style.color]="t.textHex"
+                          [style.border-color]="mezclarColores(t.borderHex, t.textHex, 0.48, '#64748b')">
+                          {{ t.codigo }}
+                        </span>
+                        <span class="detail-name">{{ t.nombre }}</span>
+                      </div>
+                      <span class="detail-schedule">{{ obtenerSubtextoHorarioPaleta(t) }}</span>
+                    </button>
+                  }
+                </div>
+              </div>
             }
           </div>
-        }
 
-        <!-- BLOQUE 3: GUARDIAS Y NOCHES -->
-        @if (turnosGuardiasNoches.length > 0) {
-          <div class="palette-cluster cluster-guardias">
-            <span class="cluster-tag tag-guardia" title="Familia Guardias & Noches (Recargo nocturno y dominical)" aria-hidden="true">🌙</span>
-            @for (t of turnosGuardiasNoches; track t.codigo) {
+          <div class="palette-detail-actions">
+            <button
+              type="button"
+              class="btn-palette-toggle active"
+              [attr.aria-pressed]="true"
+              (click)="alternarPaletaDetallada()"
+              title="Volver a la paleta compacta de 1 fila">
+              ↑ Vista compacta
+            </button>
+            <div class="undo-redo-cluster">
               <button
                 type="button"
-                class="shift-chip chip-heavy"
-                [attr.aria-pressed]="turnoPincelActivo === t.codigo"
-                [attr.aria-label]="'Turno ' + t.codigo + ': ' + t.nombre"
-                [class.selected]="turnoPincelActivo === t.codigo"
-                [class.chip-24]="t.codigo === 'G24' || t.horasOrdinarias >= 24"
-                [style.background-color]="t.bgHex"
-                [style.color]="t.textHex"
-                [style.border-color]="t.borderHex"
-                draggable="true"
-                (dragstart)="onDragStartPaleta(t.codigo, $event)"
-                (click)="seleccionarPincel.emit(t.codigo)"
-                [title]="construirTooltipPaleta(t)">
-                <span class="chip-code">{{ t.codigo }}</span>
+                aria-label="Deshacer último cambio"
+                class="btn-undo-action"
+                (click)="deshacerUltimaAccion.emit()"
+                [disabled]="pilaDeshacer.length === 0"
+                title="Deshacer último cambio (Ctrl + Z)">
+                ↩️
               </button>
-            }
-          </div>
-        }
-
-        <!-- BLOQUE 4: DESCANSOS Y BANCO -->
-        @if (turnosDescansos.length > 0) {
-          <div class="palette-cluster cluster-descansos">
-            <span class="cluster-tag tag-descanso" title="Familia Descanso Legal y Banco de Horas" aria-hidden="true">☕</span>
-            @for (t of turnosDescansos; track t.codigo) {
               <button
                 type="button"
-                class="shift-chip"
-                [attr.aria-pressed]="turnoPincelActivo === t.codigo"
-                [attr.aria-label]="'Turno ' + t.codigo + ': ' + t.nombre"
-                [class.selected]="turnoPincelActivo === t.codigo"
-                [style.background-color]="t.bgHex"
-                [style.color]="t.textHex"
-                [style.border-color]="t.borderHex"
-                draggable="true"
-                (dragstart)="onDragStartPaleta(t.codigo, $event)"
-                (click)="seleccionarPincel.emit(t.codigo)"
-                [title]="construirTooltipPaleta(t)">
-                <span class="chip-code">{{ t.codigo }}</span>
+                aria-label="Rehacer cambio revertido"
+                class="btn-undo-action"
+                (click)="rehacerUltimaAccion.emit()"
+                [disabled]="pilaRehacer.length === 0"
+                title="Rehacer cambio revertido (Ctrl + Y)">
+                ↪️
               </button>
-            }
+            </div>
           </div>
-        }
-
-        <!-- BLOQUE 5: AUSENCIAS OFICIALES INTRANET -->
-        @if (turnosAusencias.length > 0) {
-          <div class="palette-cluster cluster-ausencias">
-            <span class="cluster-tag tag-ausencia" title="Novedades oficiales bloqueadas por Intranet" aria-hidden="true">🔒</span>
-            @for (t of turnosAusencias; track t.codigo) {
-              <button
-                type="button"
-                class="shift-chip"
-                [attr.aria-pressed]="turnoPincelActivo === t.codigo"
-                [attr.aria-label]="'Novedad ' + t.codigo + ': ' + t.nombre"
-                [class.selected]="turnoPincelActivo === t.codigo"
-                [style.background-color]="t.bgHex"
-                [style.color]="t.textHex"
-                [style.border-color]="t.borderHex"
-                draggable="true"
-                (dragstart)="onDragStartPaleta(t.codigo, $event)"
-                (click)="seleccionarPincel.emit(t.codigo)"
-                [title]="construirTooltipPaleta(t)">
-                <span class="chip-code">{{ t.codigo }}</span>
-              </button>
-            }
-          </div>
-        }
-      </div>
+        </div>
+      }
     </section>
 
     <!-- ALERTA DE EMPRESAS CONTRATANTES PENDIENTES DE CONFIRMAR REGLAS -->
@@ -422,7 +611,7 @@ import {
       <table class="schedule-matrix">
         <thead>
           <tr>
-            <th class="col-sticky-emp">Colaborador / Cargo</th>
+            <th class="col-sticky-emp">Colaborador</th>
             <th class="col-empalme" title="Último turno del mes anterior (Protección de Empalme)">Emp.<br>Ant</th>
             @for (d of diasDelMes; track d.dia) {
               <th
@@ -454,17 +643,7 @@ import {
         </thead>
 
         <tbody>
-          @for (fila of filasCuadrante; track fila.empleado.id; let i = $index) {
-            <!-- Separador de grupo por categoría (evita repetir el rol en cada fila) -->
-            @if (i === 0 || filasCuadrante[i - 1].empleado.categoria !== fila.empleado.categoria) {
-              <tr class="group-row">
-                <td class="col-sticky-emp group-label">
-                  {{ fila.empleado.categoria }}
-                  <span class="group-count">{{ conteoPorCategoriaCuadrante[fila.empleado.categoria] }}</span>
-                </td>
-                <td class="group-fill" [attr.colspan]="diasDelMes.length + 10"></td>
-              </tr>
-            }
+          @for (fila of filasCuadrante; track fila.empleado.id) {
             <tr
               [class.row-rotacion]="fila.esPersonalRotado"
               [class.row-hovered]="celdaGuiaLaser?.empId === fila.empleado.id">
@@ -479,7 +658,7 @@ import {
                     class="emp-empresa-chip"
                     [class.is-pendiente]="fila.empresaEstadoConfiguracion === 'PENDIENTE_REGLAS'"
                     [title]="(fila.empresaNombre || 'Empresa') + ' · Régimen ' + (fila.horasSemanalesAplicadas ?? 42) + 'h/sem'">
-                    {{ fila.empresaCodigo || 'CST' }}·{{ fila.horasSemanalesAplicadas ?? 42 }}h
+                    {{ fila.empresaCodigo || 'CST' }}
                   </span>
                   @if (fila.esPersonalRotado) {
                     <span
@@ -512,7 +691,7 @@ import {
                 @let cfg = obtenerConfigTurno(celda?.codigo || '');
                 @let conflictos = obtenerConflictosCelda(fila.empleado.id, d.dia);
                 @let esCeldaEspejo = esTurnoOtroServicio(celda);
-                @let cambioDiff = mostrarComparadorPrevisto && celda?.previsto !== undefined && celda?.previsto !== celda?.codigo;
+                @let brkInfo = !esCeldaEspejo ? obtenerInfoBreakCelda(d.dia, celda, cfg) : null;
 
                 <td
                   [id]="'celda-' + fila.empleado.id + '-' + d.dia"
@@ -555,6 +734,14 @@ import {
                       }
                     } @else {
                       <span class="cell-code">{{ celda?.codigo || '' }}</span>
+                      @if (brkInfo && brkInfo.mostrarBadge) {
+                        <span
+                          class="break-mini-tag"
+                          [class.is-overlap]="brkInfo.enAlerta"
+                          [title]="'Break ' + brkInfo.etiqueta + ': ' + brkInfo.inicio + '–' + brkInfo.fin + ' (' + brkInfo.asignados + '/' + brkInfo.maxSimultaneos + ' máx.)'">
+                          {{ brkInfo.etiqueta }}
+                        </span>
+                      }
                       @if (esCeldaBloqueada(celda?.codigo, cfg)) {
                         <span class="lock-mini-tag" title="Bloqueado por novedad oficial Intranet">🔒</span>
                       } @else if (celda?.fijada) {
@@ -565,9 +752,6 @@ import {
                       }
                       @if (celda?.nota) {
                         <span class="nota-mini-tag" [title]="'💬 Nota: ' + celda?.nota">💬</span>
-                      }
-                      @if (cambioDiff) {
-                        <span class="diff-triangle" title="Previsto original: {{ celda?.previsto || 'Vacío' }}"></span>
                       }
                     }
                   </div>
@@ -668,13 +852,14 @@ import {
                       +{{ resumenCoberturaTurnos?.excedentes }} excedentes
                     </span>
                   }
+                  @if ((resumenSimultaneidadBreaks?.totalAlertas ?? 0) > 0) {
+                    <span
+                      class="cov-kpi-pill kpi-break-alerta"
+                      [title]="construirTooltipAlertasBreaks()">
+                      ⚠️ {{ resumenSimultaneidadBreaks?.totalAlertas }} traslape(s) break
+                    </span>
+                  }
                 </div>
-                <button
-                  type="button"
-                  class="btn-toggle-legacy-cov"
-                  (click)="mostrarFranjasLegacy = !mostrarFranjasLegacy">
-                  {{ mostrarFranjasLegacy ? '▲ Ocultar franjas Día/Noche' : '▼ Ver franjas Día/Noche' }}
-                </button>
               </div>
             </td>
           </tr>
@@ -725,65 +910,6 @@ import {
               </td>
             </tr>
           }
-
-          @if (mostrarFranjasLegacy) {
-            @let reglaFiltroFoot = reglaCargoActivaEnCuadrante;
-            <tr class="coverage-row coverage-legacy-row">
-              <td class="col-sticky-emp coverage-label">
-                ☀️ Resumen Día • <strong>Mín: {{ reglaFiltroFoot ? reglaFiltroFoot.reqDia : servicioActual.reqDia }}</strong>
-                @if (servicioActual.modalidadDias === 'TODOS_GUARDIA_FDS') {
-                  <span class="coverage-fds-note">
-                    (Dom/Fest: {{ reglaFiltroFoot ? (reglaFiltroFoot.reqDiaDomFest ?? reglaFiltroFoot.reqDia) : (servicioActual.reqDiaDomFest ?? servicioActual.reqDia) }})
-                  </span>
-                }
-              </td>
-              <td class="col-empalme coverage-off">—</td>
-              @for (d of diasDelMes; track d.dia) {
-                @let cob = coberturaPorDia[d.dia];
-                @let metas = obtenerMetasDiaServicio(servicioActual, d);
-                @if (metas.cerrado || metas.reqDia === 0) {
-                  <td class="coverage-cell coverage-off" [class.cell-week-end]="d.esDomingo" title="Servicio sin requerimiento en esta franja / día">
-                    —
-                  </td>
-                } @else {
-                  <td class="coverage-cell" [class.cell-week-end]="d.esDomingo" [class.cov-ok]="cob.dia >= metas.reqDia" [class.cov-deficit]="cob.dia < metas.reqDia">
-                    {{ cob.dia }}/{{ metas.reqDia }}
-                  </td>
-                }
-              }
-              <td colspan="9" class="coverage-summary-note">
-                Vista general Día ({{ etiquetaModalidadDias(servicioActual.modalidadDias) }})
-              </td>
-            </tr>
-
-            <tr class="coverage-row coverage-legacy-row">
-              <td class="col-sticky-emp coverage-label">
-                🌙 Resumen Noche • <strong>Mín: {{ reglaFiltroFoot ? reglaFiltroFoot.reqNoche : servicioActual.reqNoche }}</strong>
-                @if (servicioActual.modalidadDias === 'TODOS_GUARDIA_FDS') {
-                  <span class="coverage-fds-note">
-                    (Dom/Fest: {{ reglaFiltroFoot ? (reglaFiltroFoot.reqNocheDomFest ?? reglaFiltroFoot.reqNoche) : (servicioActual.reqNocheDomFest ?? servicioActual.reqNoche) }})
-                  </span>
-                }
-              </td>
-              <td class="col-empalme coverage-off">—</td>
-              @for (d of diasDelMes; track d.dia) {
-                @let cob = coberturaPorDia[d.dia];
-                @let metas = obtenerMetasDiaServicio(servicioActual, d);
-                @if (metas.cerrado || metas.reqNoche === 0) {
-                  <td class="coverage-cell coverage-off" [class.cell-week-end]="d.esDomingo" title="Servicio sin requerimiento en esta franja / día">
-                    —
-                  </td>
-                } @else {
-                  <td class="coverage-cell" [class.cell-week-end]="d.esDomingo" [class.cov-ok]="cob.noche >= metas.reqNoche" [class.cov-deficit]="cob.noche < metas.reqNoche">
-                    {{ cob.noche }}/{{ metas.reqNoche }}
-                  </td>
-                }
-              }
-              <td colspan="9" class="coverage-summary-note">
-                Vista general Noche • ⚖️ {{ resumenRegimenesCuadrante }}
-              </td>
-            </tr>
-          }
         </tfoot>
       </table>
     </div>
@@ -791,6 +917,9 @@ import {
 })
 export class PlanificadorCuadranteComponent implements OnDestroy {
   @ViewChild('gridContainer') gridContainerRef?: ElementRef<HTMLDivElement>;
+
+  private readonly storageKeyPaletaDetallada = 'rafa_turnos_paleta_detallada';
+  paletaDetallada = leerStorageSeguro<boolean>(this.storageKeyPaletaDetallada, false);
 
   private autoScrollAnimationId: number | null = null;
   private autoScrollVelocidadY = 0;
@@ -800,16 +929,13 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
   @Input() serviciosVisibles: ServicioHospitalario[] = [];
   @Input() servicios: ServicioHospitalario[] = [];
   @Input() mesSeleccionado = 1;
-  @Input() mesesDisponibles: Array<{ valor: number; nombre: string }> = [];
   @Input() anioSeleccionado = Number(hoyColombiaIso().substring(0, 4));
   readonly semaforo = SEMAFORO_BANCO_HORAS;
-  @Input() aniosDisponibles: number[] = [];
   @Input() esPeriodoActual = true;
   @Input() filtroCategoriaActiva = 'TODAS';
   @Input() categoriasEnServicioActual: string[] = [];
   @Input() estadoCuadrante = 'BORRADOR';
   @Input() autoAvanzarAlTeclear = false;
-  @Input() mostrarComparadorPrevisto = false;
   @Input() ultimaSincronizacionIntranet = '';
   @Input() sincronizandoNovedades = false;
   @Input() pilaDeshacer: any[] = [];
@@ -824,23 +950,18 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
   @Input() diasDelMes: DiaColumna[] = [];
   @Input() celdaEnfocada: { empId: string; dia: number } | null = null;
   @Input() filasCuadrante: any[] = [];
-  @Input() conteoPorCategoriaCuadrante: Record<string, number> = {};
   @Input() catalogoTurnosMap: Record<string, TipoTurnoConfig> = {};
-  @Input() reglaCargoActivaEnCuadrante: ReglaCargoServicio | null | undefined = null;
   @Input({ required: true }) servicioActual!: ServicioHospitalario;
-  @Input() coberturaPorDia: Record<number, { dia: number; noche: number }> = {};
   @Input() resumenCoberturaTurnos?: ResumenCoberturaTurnosServicio;
+  @Input() resumenSimultaneidadBreaks?: ResumenSimultaneidadBreaksServicio;
   @Input() empresasPendientes: EmpresaContratante[] = [];
 
   @Output() irAConfigurarEmpresas = new EventEmitter<void>();
   @Output() cambiarServicio = new EventEmitter<string>();
-  @Output() cambiarMes = new EventEmitter<number>();
-  @Output() cambiarAnio = new EventEmitter<number>();
   @Output() navegarMes = new EventEmitter<-1 | 1>();
   @Output() irAMesActual = new EventEmitter<void>();
   @Output() cambiarFiltroCategoria = new EventEmitter<string>();
   @Output() cambiarAutoAvanzar = new EventEmitter<boolean>();
-  @Output() cambiarMostrarComparador = new EventEmitter<boolean>();
   @Output() sincronizarNovedadesIntranet = new EventEmitter<void>();
   @Output() abrirModalRotacion = new EventEmitter<void>();
   @Output() ejecutarAutocompletarHuecos = new EventEmitter<void>();
@@ -868,7 +989,74 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
   @Output() abrirInspectorCelda = new EventEmitter<{ empId: string; dia: number }>();
 
   celdaHovered: { empId: string; dia: number } | null = null;
-  mostrarFranjasLegacy = false;
+
+  get periodoAbreviado(): string {
+    const nombreMes = NOMBRES_MESES[this.mesSeleccionado] || String(this.mesSeleccionado);
+    const mesCorto = nombreMes.slice(0, 3);
+    return `${mesCorto} ${this.anioSeleccionado}`;
+  }
+
+  get tituloPeriodoStepper(): string {
+    const nombreMes = NOMBRES_MESES[this.mesSeleccionado] || String(this.mesSeleccionado);
+    const base = `${nombreMes} ${this.anioSeleccionado}`;
+    if (this.estadoCuadrante === 'PUBLICADO') return `${base} · Publicado oficialmente`;
+    if (this.estadoCuadrante === 'CERRADO_NOMINA') return `${base} · Cerrado para nómina`;
+    return base;
+  }
+
+  alternarPaletaDetallada(): void {
+    this.paletaDetallada = !this.paletaDetallada;
+    guardarStorageSeguro(this.storageKeyPaletaDetallada, this.paletaDetallada);
+  }
+
+  mezclarColores(
+    hexBase: string | undefined,
+    hexMezcla: string | undefined,
+    proporcionMezcla: number,
+    fallback: string,
+  ): string {
+    const normalizar = (hex: string | undefined): string | null => {
+      const limpio = (hex || '').trim().replace(/^#/, '');
+      const full =
+        limpio.length === 3
+          ? limpio
+              .split('')
+              .map((c) => c + c)
+              .join('')
+          : limpio;
+      return /^[0-9a-fA-F]{6}$/.test(full) ? full : null;
+    };
+    const a = normalizar(hexBase);
+    const b = normalizar(hexMezcla);
+    if (!a && !b) return fallback;
+    if (!a || !b) return `#${a || b}`;
+    const p = Math.min(1, Math.max(0, proporcionMezcla));
+    const r = Math.round(parseInt(a.slice(0, 2), 16) * (1 - p) + parseInt(b.slice(0, 2), 16) * p);
+    const g = Math.round(parseInt(a.slice(2, 4), 16) * (1 - p) + parseInt(b.slice(2, 4), 16) * p);
+    const bl = Math.round(parseInt(a.slice(4, 6), 16) * (1 - p) + parseInt(b.slice(4, 6), 16) * p);
+    return `rgb(${r}, ${g}, ${bl})`;
+  }
+
+  mezclarConBlanco(hex: string | undefined, proporcionColor: number, fallback: string): string {
+    return this.mezclarColores(hex, '#ffffff', 1 - Math.min(1, Math.max(0, proporcionColor)), fallback);
+  }
+
+  obtenerSubtextoHorarioPaleta(t: TipoTurnoConfig): string {
+    const horario = (t.horario || '').trim();
+    if (t.horasOrdinarias > 0) {
+      return horario ? `${horario} · ${t.horasOrdinarias}h` : `${t.horasOrdinarias}h ord.`;
+    }
+    if (t.esAusencia || esCodigoExoneracionContrato(t.codigo)) {
+      return horario && horario !== '00:00 - 00:00' ? `${horario} · Intranet` : 'Novedad Intranet';
+    }
+    if (t.descuentaBancoHoras) {
+      const amort = obtenerHorasAmortizacionTurno(t);
+      return horario && horario !== '00:00 - 00:00'
+        ? `${horario} · Banco -${amort}h`
+        : `Amortiza ${amort}h banco`;
+    }
+    return horario && horario !== '00:00 - 00:00' ? horario : 'Descanso no laborado';
+  }
 
   get resumenRegimenesCuadrante(): string {
     const regs = Array.from(
@@ -1161,7 +1349,14 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
     if (t.horasOrdinarias > 0) {
       partes.push(`${t.horasOrdinarias}h ordinarias`);
       if (t.horasNocturnas > 0) partes.push(`${t.horasNocturnas}h nocturnas (Recargo ${this.pct(this.normativa.recargos.nocturno)})`);
-      if (t.minutosAlmuerzo && t.minutosAlmuerzo > 0) partes.push(`${t.minutosAlmuerzo}m almuerzo`);
+      if (t.recesoHabilitado) {
+        const tandas = obtenerTandasBreakDeTurno(t);
+        const tandasTxt = tandas.map((tb) => `${tb.etiqueta || 'T' + tb.orden} ${tb.inicio}–${tb.fin}`).join(', ');
+        const modoTxt = t.recesoRemunerado ? 'Pagado' : 'No computable Art. 167 CST';
+        partes.push(`Break [${tandasTxt}] · Máx ${t.recesoMaxSimultaneos || 1} simult. · ${modoTxt}`);
+      } else if (t.minutosAlmuerzo && t.minutosAlmuerzo > 0) {
+        partes.push(`${t.minutosAlmuerzo}m almuerzo`);
+      }
     } else if (t.esAusencia || esCodigoExoneracionContrato(t.codigo)) {
       partes.push('Novedad Oficial Intranet (Bloqueo Legal)');
     } else if (t.descuentaBancoHoras) {
@@ -1170,6 +1365,69 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
       partes.push('Descanso no laborado');
     }
     return partes.join(' | ');
+  }
+
+  obtenerInfoBreakCelda(
+    dia: number,
+    celda?: CeldaAsignacion,
+    cfg?: TipoTurnoConfig
+  ): {
+    etiqueta: string;
+    orden: number;
+    inicio: string;
+    fin: string;
+    asignados: number;
+    maxSimultaneos: number;
+    enAlerta: boolean;
+    mostrarBadge: boolean;
+    remunerado: boolean;
+  } | null {
+    if (!celda?.codigo || !cfg || !cfg.recesoHabilitado || cfg.esAusencia) return null;
+    if (this.esTurnoOtroServicio(celda)) return null;
+
+    const tandas = obtenerTandasBreakDeTurno(cfg);
+    if (tandas.length === 0) return null;
+
+    const orden = celda.breakTandaOrden ?? tandas[0].orden;
+    const tMatch = tandas.find((t) => t.orden === orden) || tandas[0];
+    const inicio = celda.breakInicio || tMatch.inicio;
+    const fin = celda.breakFin || tMatch.fin;
+    const codUpper = celda.codigo.trim().toUpperCase();
+    const ocup = this.resumenSimultaneidadBreaks?.ocupacionPorClave?.[`${dia}::${codUpper}::${tMatch.orden}`];
+    const maxSimultaneos = ocup?.maxSimultaneos ?? Math.max(1, Number(cfg.recesoMaxSimultaneos || 1));
+    const asignados = ocup?.asignados ?? 1;
+    const enAlerta = Boolean(ocup ? ocup.enAlerta : asignados > maxSimultaneos);
+    const mostrarBadge = Boolean(tandas.length > 1 || enAlerta);
+
+    return {
+      etiqueta: tMatch.etiqueta || `T${tMatch.orden}`,
+      orden: tMatch.orden,
+      inicio,
+      fin,
+      asignados,
+      maxSimultaneos,
+      enAlerta,
+      mostrarBadge,
+      remunerado: Boolean(cfg.recesoRemunerado),
+    };
+  }
+
+  construirTooltipAlertasBreaks(): string {
+    const porDia = this.resumenSimultaneidadBreaks?.alertasPorDia;
+    if (!porDia) return '';
+    const lineas: string[] = [];
+    for (const [diaStr, lista] of Object.entries(porDia)) {
+      for (const a of lista) {
+        lineas.push(
+          `Día ${diaStr} · ${a.codigoTurno} ${a.etiqueta} (${a.inicio}–${a.fin}): ${a.asignados}/${a.maxSimultaneos} simult.`
+        );
+      }
+    }
+    const muestra = lineas.slice(0, 6);
+    if (lineas.length > 6) {
+      muestra.push(`... y ${lineas.length - 6} traslape(s) más.`);
+    }
+    return `Traslapes de break que exceden el límite simultáneo:\n${muestra.join('\n')}`;
   }
 
   esTurnoOtroServicio(celda?: CeldaAsignacion): boolean {
@@ -1256,6 +1514,18 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
       if (celda.esRotacion && celda.codigo !== 'L') {
         partes.push(`🔄 Turno de apoyo ejecutado en ${this.servicioActual?.nombre || 'este servicio'}`);
       }
+      const brkInfo = this.obtenerInfoBreakCelda(d.dia, celda, cfg);
+      if (brkInfo) {
+        const modoTxt = brkInfo.remunerado ? 'Pagado' : 'No computable (Art. 167 CST)';
+        partes.push(
+          `🍽️ Break ${brkInfo.etiqueta}: ${brkInfo.inicio}–${brkInfo.fin} · ${modoTxt} (${brkInfo.asignados}/${brkInfo.maxSimultaneos} simult.)`
+        );
+        if (brkInfo.enAlerta) {
+          partes.push(
+            `⚠️ TRASLAPE BREAK: Supera máximo simultáneo (${brkInfo.asignados} de ${brkInfo.maxSimultaneos})`
+          );
+        }
+      }
     } else {
       partes.push('Sin turno asignado');
     }
@@ -1274,111 +1544,5 @@ export class PlanificadorCuadranteComponent implements OnDestroy {
       partes.push(`⚠️ ALERTA: ${c.mensaje}`);
     }
     return partes.join('\n');
-  }
-
-  private clasificarFranjasTurnoLocal(cfg?: TipoTurnoConfig): { dia: boolean; noche: boolean } {
-    if (!cfg || cfg.horasOrdinarias <= 0 || cfg.esAusencia) {
-      return { dia: false, noche: false };
-    }
-    if (cfg.horasOrdinarias >= 24) {
-      return { dia: true, noche: true };
-    }
-    const noche = Boolean(cfg.esNocturnoPesado || cfg.horasNocturnas >= 6);
-    return { dia: !noche, noche };
-  }
-
-  obtenerMetasDiaServicio(
-    srv: ServicioHospitalario,
-    d: DiaColumna,
-    categoriaEspecifica?: string
-  ): { reqDia: number; reqNoche: number; cerrado: boolean } {
-    const mod = srv.modalidadDias || 'TODOS_24_7';
-    const esDomOFest = d.esDomingo || !!d.festivo;
-
-    const catFiltro =
-      categoriaEspecifica !== undefined
-        ? categoriaEspecifica
-        : this.filtroCategoriaActiva !== 'TODAS'
-          ? this.filtroCategoriaActiva
-          : undefined;
-
-    const reglaCargo = catFiltro
-      ? (srv.reglasPorCargo || []).find((r) => r.categoriaNombre === catFiltro)
-      : undefined;
-
-    if (catFiltro && (srv.reglasPorCargo?.length || 0) > 0 && !reglaCargo) {
-      return { reqDia: 0, reqNoche: 0, cerrado: false };
-    }
-
-    const baseD = reglaCargo ? reglaCargo.reqDia : srv.reqDia;
-    const baseN = reglaCargo ? reglaCargo.reqNoche : srv.reqNoche;
-    const domFestD = reglaCargo ? (reglaCargo.reqDiaDomFest ?? baseD) : (srv.reqDiaDomFest ?? baseD);
-    const domFestN = reglaCargo ? (reglaCargo.reqNocheDomFest ?? baseN) : (srv.reqNocheDomFest ?? baseN);
-
-    const turnosHab =
-      reglaCargo?.turnosHabilitados && reglaCargo.turnosHabilitados.length > 0
-        ? reglaCargo.turnosHabilitados
-        : srv.turnosHabilitados && srv.turnosHabilitados.length > 0
-          ? srv.turnosHabilitados
-          : [];
-
-    const tieneDia =
-      turnosHab.length === 0 ||
-      turnosHab.some((c) => {
-        const cfg = this.catalogoTurnosMap[c.toUpperCase()];
-        return cfg && this.clasificarFranjasTurnoLocal(cfg).dia;
-      });
-    const tieneNoche =
-      turnosHab.length === 0 ||
-      turnosHab.some((c) => {
-        const cfg = this.catalogoTurnosMap[c.toUpperCase()];
-        return cfg && this.clasificarFranjasTurnoLocal(cfg).noche;
-      });
-
-    const efD = tieneDia ? baseD : 0;
-    const efN = tieneNoche ? baseN : 0;
-    const efDomFestD = tieneDia ? domFestD : 0;
-    const efDomFestN = tieneNoche ? domFestN : 0;
-
-    if (esDomOFest) {
-      if (mod === 'LUN_VIE_HABILES' || mod === 'LUN_SAB_SIN_FESTIVOS') {
-        return { reqDia: 0, reqNoche: 0, cerrado: true };
-      }
-      if (mod === 'TODOS_GUARDIA_FDS') {
-        return {
-          reqDia: efDomFestD,
-          reqNoche: efDomFestN,
-          cerrado: false,
-        };
-      }
-      return {
-        reqDia: efD,
-        reqNoche: efN,
-        cerrado: false,
-      };
-    }
-
-    if (d.esSabado && mod === 'LUN_VIE_HABILES') {
-      return { reqDia: 0, reqNoche: 0, cerrado: true };
-    }
-
-    return {
-      reqDia: efD,
-      reqNoche: efN,
-      cerrado: false,
-    };
-  }
-
-  etiquetaModalidadDias(mod?: string): string {
-    switch (mod) {
-      case 'TODOS_GUARDIA_FDS':
-        return '24/7 (Lun–Sáb y Dom/Fest diferenciado)';
-      case 'LUN_SAB_SIN_FESTIVOS':
-        return 'Lun–Sáb (Cierra Dom/Fest)';
-      case 'LUN_VIE_HABILES':
-        return 'Lun–Vie Hábiles';
-      default:
-        return 'Todos los días 24/7';
-    }
   }
 }

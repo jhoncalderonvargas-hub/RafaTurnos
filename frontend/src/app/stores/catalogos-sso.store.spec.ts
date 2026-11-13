@@ -24,12 +24,19 @@ describe('CatalogosSsoStore', () => {
       'crearServicio',
       'actualizarServicio',
       'eliminarServicio',
+      'adscribirEmpleado',
+      'adscribirLote',
+      'actualizarCondicionesEmpleado',
+      'sincronizarEmpleadosIntranet',
       'getEmpresas',
       'confirmarReglasEmpresa',
       'getEmpleados',
+      'getCategorias',
     ]);
+    apiSpy.getServicios.and.returnValue(of([]));
     apiSpy.getEmpresas.and.returnValue(of([]));
     apiSpy.getEmpleados.and.returnValue(of([]));
+    apiSpy.getCategorias.and.returnValue(of([]));
 
     TestBed.configureTestingModule({
       providers: [{ provide: TurnosApiService, useValue: apiSpy }],
@@ -244,5 +251,152 @@ describe('CatalogosSsoStore', () => {
     expect(store.empresasPendientes().length).toBe(0);
     expect(store.empresas()[0].horasSemanalesContrato).toBe(44);
     expect(notifCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it('selecciona empleados iniciales al crear o editar servicio, los envia al guardar, recarga nomina y limpia al cancelar', () => {
+    store.nuevoServicioCodigo.set('UCI_NEO');
+    store.nuevoServicioNombre.set('UCI Neonatal');
+    store.alternarEmpleadoEnServicioForm('emp-1');
+    store.alternarEmpleadoEnServicioForm('emp-2');
+    store.alternarEmpleadoEnServicioForm('emp-1'); // alterna off
+    expect(store.nuevoServicioEmpleadosIds()).toEqual(['emp-2']);
+
+    store.cambiarNuevoServicioEmpleadosIds(['emp-1', 'emp-2', 'emp-1']);
+    expect(store.nuevoServicioEmpleadosIds()).toEqual(['emp-1', 'emp-2']);
+
+    apiSpy.crearServicio.and.returnValue(
+      of({ id: 'srv-new', codigo: 'UCI_NEO', nombre: 'UCI Neonatal', empleadosAdscritos: 2, advertenciasCargo: [] })
+    );
+    const empleadosPrevCalls = apiSpy.getEmpleados.calls.count();
+    const serviciosPrevCalls = apiSpy.getServicios.calls.count();
+
+    store.guardarServicioAutonomo();
+
+    expect(apiSpy.crearServicio).toHaveBeenCalledWith(
+      jasmine.objectContaining({
+        codigo: 'UCI_NEO',
+        nombre: 'UCI Neonatal',
+        empleadosIds: ['emp-1', 'emp-2'],
+      })
+    );
+    expect(store.nuevoServicioEmpleadosIds()).toEqual([]);
+    expect(apiSpy.getServicios.calls.count()).toBe(serviciosPrevCalls + 1);
+    expect(apiSpy.getEmpleados.calls.count()).toBe(empleadosPrevCalls + 1);
+
+    // Al cargar un servicio en edicion o cancelar, limpia seleccion pendiente
+    store.cambiarNuevoServicioEmpleadosIds(['emp-3']);
+    store.cargarServicioParaEdicion({
+      id: 'srv-1',
+      codigo: 'URG',
+      nombre: 'Urgencias',
+      tipoAsistencia: 'URGENCIAS',
+      reqDia: 2,
+      reqNoche: 1,
+    });
+    expect(store.nuevoServicioEmpleadosIds()).toEqual([]);
+
+    store.cambiarNuevoServicioEmpleadosIds(['emp-4']);
+    store.cancelarEdicionServicio();
+    expect(store.nuevoServicioEmpleadosIds()).toEqual([]);
+  });
+
+  it('permite sincronizar nomina desde Intranet y actualizar condiciones individuales de colaborador', () => {
+    apiSpy.sincronizarEmpleadosIntranet.and.returnValue(
+      of({ ok: true, mensaje: 'OK', total: 10, creados: 2, actualizados: 8, empresasPendientes: [] })
+    );
+    const empPrev = apiSpy.getEmpleados.calls.count();
+    store.sincronizarNominaIntranet();
+    expect(apiSpy.sincronizarEmpleadosIntranet).toHaveBeenCalled();
+    expect(store.sincronizandoNominaIntranet()).toBeFalse();
+    expect(apiSpy.getEmpleados.calls.count()).toBe(empPrev + 1);
+
+    let empNotif = 0;
+    store.empresasActualizadas$.subscribe(() => empNotif++);
+    apiSpy.actualizarCondicionesEmpleado.and.returnValue(
+      of({ id: 'emp-1', empresaContratanteId: 'emp-corp-1', horasSemanalesOverride: 36 })
+    );
+    store.actualizarCondicionesEmpleado('emp-1', {
+      empresaContratanteId: 'emp-corp-1',
+      horasSemanalesOverride: 36,
+    });
+    expect(apiSpy.actualizarCondicionesEmpleado).toHaveBeenCalledWith('emp-1', {
+      empresaContratanteId: 'emp-corp-1',
+      horasSemanalesOverride: 36,
+    });
+    expect(empNotif).toBeGreaterThanOrEqual(1);
+  });
+
+  it('gestiona tandas de break en linea temporal, modo CST vs pagado y persiste recesoTandasJson en catalogo', () => {
+    store.turnoFormCodigo.set('DIUR9');
+    store.turnoFormNombre.set('Diurno 9h con Tandas');
+    store.cambiarTurnoModoJornadaForm('HORARIO');
+    store.cambiarTurnoHoraInicioForm('07:00');
+    store.cambiarTurnoHoraFinForm('16:00');
+
+    // Activar break (Art. 167 CST por defecto) y ajustar duracion + simultaneidad
+    store.cambiarTurnoRecesoHabilitadoForm(true);
+    store.cambiarTurnoRecesoRemuneradoForm(false);
+    store.cambiarTurnoDuracionBreakForm(60);
+    store.cambiarTurnoRecesoMaxSimultaneosForm(2);
+
+    expect(store.turnoFormRecesoTandas().length).toBe(1);
+    expect(store.calculoAutomaticoHorasTurno().ordinarias).toBe(8);
+    expect(store.calculoAutomaticoHorasTurno().minutosAlmuerzo).toBe(60);
+
+    // Agregar segunda tanda, mover con snap de 15m y probar reindexado al eliminar/agregar
+    store.agregarTandaBreakForm();
+    expect(store.turnoFormRecesoTandas().length).toBe(2);
+    expect(store.turnoFormRecesoTandas()[1].etiqueta).toBe('T2');
+
+    // Mover T1 a 242 min relativos -> snap a 240 min (07:00 + 4h = 11:00..12:00) y 249 -> snap a 255 (11:15..12:15)
+    store.moverTandaBreakForm(1, 242);
+    expect(store.turnoFormRecesoTandas()[0].inicio).toBe('11:00');
+    expect(store.turnoFormRecesoTandas()[0].fin).toBe('12:00');
+    store.moverTandaBreakForm(1, 249);
+    expect(store.turnoFormRecesoTandas()[0].inicio).toBe('11:15');
+    expect(store.turnoFormRecesoTandas()[0].fin).toBe('12:15');
+
+    // Eliminar T1 -> T2 se reindexa a T1 y agregar de nuevo crea T2
+    store.eliminarTandaBreakForm(1);
+    expect(store.turnoFormRecesoTandas().length).toBe(1);
+    expect(store.turnoFormRecesoTandas()[0].etiqueta).toBe('T1');
+    store.escalonarTandasBreakAutomaticoForm();
+
+    // Cambiar a Receso pagado -> 0h de descuento y preserva las 9h
+    store.cambiarTurnoRecesoRemuneradoForm(true);
+    expect(store.calculoAutomaticoHorasTurno().ordinarias).toBe(9);
+    expect(store.calculoAutomaticoHorasTurno().minutosAlmuerzo).toBe(0);
+
+    // Volver a Art. 167 CST y guardar en catalogo
+    store.cambiarTurnoRecesoRemuneradoForm(false);
+    apiSpy.guardarTipoTurno.and.returnValue(
+      of({
+        codigo: 'DIUR9',
+        nombre: 'Diurno 9h con Tandas',
+        horaInicio: '07:00',
+        horaFin: '16:00',
+        horasOrdinarias: 8,
+        horasDiurnas: 8,
+        horasNocturnas: 0,
+        minutosAlmuerzo: 60,
+        recesoHabilitado: true,
+        recesoRemunerado: false,
+        recesoMaxSimultaneos: 2,
+        recesoTandasJson: store.turnoFormRecesoTandas(),
+        activo: true,
+      })
+    );
+
+    store.guardarTurnoEnCatalogo();
+    expect(apiSpy.guardarTipoTurno).toHaveBeenCalledWith(
+      jasmine.objectContaining({
+        codigo: 'DIUR9',
+        recesoHabilitado: true,
+        recesoRemunerado: false,
+        recesoMaxSimultaneos: 2,
+        minutosAlmuerzo: 60,
+      })
+    );
+    expect(store.catalogoTurnosMap()['DIUR9']?.recesoMaxSimultaneos).toBe(2);
   });
 });

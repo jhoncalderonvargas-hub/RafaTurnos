@@ -26,6 +26,7 @@ import {
   guardarStorageSeguro,
   horasLiquidadasCelda,
   leerStorageSeguro,
+  obtenerTandasBreakDeTurno,
   predicadoDescansoObligatorio,
   reglasEmpresaDeEmpleado,
   resumirHorasPeriodo,
@@ -39,6 +40,8 @@ import {
   evaluarJornadaSemanalPeriodo,
   formatearPorcentaje,
   r2,
+  seleccionarTandaBreakEquilibrada,
+  TurnoLiquidable,
 } from '../shared/liquidacion-horas';
 import { AutocompletadoService, clasificarFranjasTurno } from './autocompletado.service';
 import { CatalogosSsoStore, csvTexto, descargarArchivoCsv, numeroCsv } from './catalogos-sso.store';
@@ -58,6 +61,45 @@ export interface FilaCoberturaTurno {
   esOperativoDia: boolean;
   esNocturno: boolean;
   dias: Record<number, CoberturaTurnoDia>;
+}
+
+export interface OcupacionTandaBreak {
+  orden: number;
+  etiqueta: string;
+  inicio: string;
+  fin: string;
+  asignados: number;
+  maxSimultaneos: number;
+  enAlerta: boolean;
+  empleadosIds: string[];
+}
+
+export interface ResumenTandasBreakDia {
+  dia: number;
+  codigoTurno: string;
+  recesoHabilitado: boolean;
+  recesoRemunerado: boolean;
+  maxSimultaneos: number;
+  totalColaboradoresTurno: number;
+  tandas: OcupacionTandaBreak[];
+  tieneAlerta: boolean;
+}
+
+export interface AlertaSimultaneidadBreak {
+  dia: number;
+  codigoTurno: string;
+  tandaOrden: number;
+  etiqueta: string;
+  inicio: string;
+  fin: string;
+  asignados: number;
+  maxSimultaneos: number;
+}
+
+export interface ResumenSimultaneidadBreaksServicio {
+  totalAlertas: number;
+  alertasPorDia: Record<number, AlertaSimultaneidadBreak[]>;
+  ocupacionPorClave: Record<string, OcupacionTandaBreak>;
 }
 
 export interface ResumenCoberturaTurnosServicio {
@@ -99,7 +141,6 @@ export class CuadranteStore {
   readonly mesesDisponiblesPlanificador = computed<Array<{ valor: number; nombre: string }>>(() => TODOS_LOS_MESES);
   readonly mesesDisponiblesReportes = computed<Array<{ valor: number; nombre: string }>>(() => TODOS_LOS_MESES);
 
-  readonly mostrarComparadorPrevisto = signal<boolean>(false);
   readonly filtroCategoriaActiva = signal<string>('TODAS');
   readonly modalRotacionAbierto = signal<boolean>(false);
 
@@ -438,19 +479,60 @@ export class CuadranteStore {
     const mapa = this.mapaSaldosContinuos();
     const anio = this.catalogos.anioSeleccionado();
     const mes = this.catalogos.mesSeleccionado();
+    const periodoKey = `${anio}-${mes}`;
+    const dias = this.diasDelMes();
+    const matriz = this.asignaciones();
+    const estados = this.estadosPorCuadrante();
+    const catalogo = this.catalogos.catalogoTurnosMap();
+    const saldos = this.saldosConsolidadosMap();
+    const esDescansoPred = predicadoDescansoObligatorio();
     const predFest = (iso: string) => Boolean(FestivosColombiaHelper.esFestivo(iso));
 
     return emps.map((eRaw) => {
       const e = this.resolverEmpleadoConEmpresaActual(eRaw, empresasMap);
-      const nominal = calcularMetaNominalMesEmpleado(e, anio, mes, predFest);
-      const key = `${e.id}::${anio}-${mes}`;
+      const key = `${e.id}::${periodoKey}`;
       const saldoObj = mapa[key];
-      const saldoReal = saldoObj !== undefined ? saldoObj.saldoInicial : e.saldoBancoAnterior;
+      const celdasEmp = matriz[e.id] || {};
+      const metricas = calcularMetricasMesColaborador(
+        e,
+        celdasEmp,
+        dias,
+        catalogo,
+        saldos,
+        anio,
+        mes,
+        saldoObj?.saldoInicial,
+        esDescansoPred,
+        predFest
+      );
+      const tieneActividadMes = metricas.horasTrabajadas > 0 || metricas.horasAmortizadasComp > 0;
+      const serviciosEmp = new Set<string>([e.servicioBaseId]);
+      for (const celda of Object.values(celdasEmp)) {
+        if (celda?.servicioEjecutorId && celda.codigo && celda.codigo !== '' && celda.codigo !== 'L') {
+          serviciosEmp.add(celda.servicioEjecutorId);
+        }
+      }
+      const cuadranteMesConsolidado = Array.from(serviciosEmp).some((srvId) => {
+        const est = estados[`${srvId}::${periodoKey}`];
+        return est === 'PUBLICADO' || est === 'CERRADO_NOMINA';
+      });
+      const saldoBancoActual = r2(
+        tieneActividadMes ? metricas.nuevoSaldoBanco : (saldoObj?.saldoFinal ?? metricas.nuevoSaldoBanco)
+      );
+      const saldoBancoDiferenciaMes = r2(saldoBancoActual - metricas.saldoAntReal);
+
       return {
         ...e,
-        horasSemanalesAplicadas: nominal.horasSemanalesAplicadas,
-        horasContratoMes: nominal.horasContratadasNominales,
-        saldoBancoAnterior: saldoReal,
+        horasSemanalesAplicadas: metricas.horasSemanalesAplicadas,
+        horasContratoMes: metricas.horasContratadasNominales,
+        horasContratadasEfectivas: metricas.horasContratadasEfectivas,
+        horasExoneradasMes: metricas.horasExoneradas,
+        diasProrrateadosMes: metricas.diasHabilesProrrateados,
+        saldoBancoAnterior: metricas.saldoAntReal,
+        saldoBancoActual,
+        saldoBancoDiferenciaMes,
+        tieneActividadMes,
+        cuadranteMesConsolidado,
       };
     });
   });
@@ -511,7 +593,7 @@ export class CuadranteStore {
         if (!cod) continue;
         const cfg = catalogo[cod];
         if (!cfg || cfg.esAusencia) continue;
-        const hOrd = horasLiquidadasCelda(cfg, d.fechaIso, esDescansoPredicado, reglas);
+        const hOrd = horasLiquidadasCelda(cfg, d.fechaIso, esDescansoPredicado, reglas, celda);
         if (hOrd <= 0) continue;
 
         const ejecutorId = celda?.servicioEjecutorId || emp.servicioBaseId;
@@ -566,6 +648,151 @@ export class CuadranteStore {
     }
     return todas;
   });
+
+  readonly resumenSimultaneidadBreaks = computed<ResumenSimultaneidadBreaksServicio>(() => {
+    const dias = this.diasDelMes();
+    const srvId = this.catalogos.servicioSeleccionadoId();
+    const catalogo = this.catalogos.catalogoTurnosMap();
+    const filas = this.filasServicioCompletas();
+
+    const ocupacionPorClave: Record<string, OcupacionTandaBreak> = {};
+    const alertasPorDia: Record<number, AlertaSimultaneidadBreak[]> = {};
+    let totalAlertas = 0;
+
+    for (const d of dias) {
+      // Agrupar colaboradores activos en este servicio en d.dia por código de turno
+      const porTurno = new Map<string, Array<{ empId: string; celda: CeldaAsignacion }>>();
+      for (const f of filas) {
+        const celda = f.celdas[d.dia];
+        const cod = (celda?.codigo || '').trim().toUpperCase();
+        if (!cod) continue;
+        const ejecutorId = celda?.servicioEjecutorId || f.empleado.servicioBaseId;
+        if (ejecutorId !== srvId) continue;
+        const cfg = catalogo[cod];
+        if (!cfg || !cfg.recesoHabilitado || cfg.esAusencia) continue;
+        const lista = porTurno.get(cod) || [];
+        lista.push({ empId: f.empleado.id, celda });
+        porTurno.set(cod, lista);
+      }
+
+      for (const [cod, items] of porTurno.entries()) {
+        const cfg = catalogo[cod];
+        if (!cfg) continue;
+        const tandas = obtenerTandasBreakDeTurno(cfg);
+        if (tandas.length === 0) continue;
+        const maxSim = Math.max(1, Number(cfg.recesoMaxSimultaneos || 1));
+
+        for (const t of tandas) {
+          ocupacionPorClave[`${d.dia}::${cod}::${t.orden}`] = {
+            orden: t.orden,
+            etiqueta: t.etiqueta || `T${t.orden}`,
+            inicio: t.inicio,
+            fin: t.fin,
+            asignados: 0,
+            maxSimultaneos: maxSim,
+            enAlerta: false,
+            empleadosIds: [],
+          };
+        }
+
+        for (const { empId, celda } of items) {
+          const ordenBase = celda.breakTandaOrden ?? tandas[0].orden;
+          const tMatch = tandas.find((t) => t.orden === ordenBase) || tandas[0];
+          const key = `${d.dia}::${cod}::${tMatch.orden}`;
+          const bucket = ocupacionPorClave[key];
+          if (bucket) {
+            bucket.asignados++;
+            bucket.empleadosIds.push(empId);
+            if (bucket.asignados > maxSim) {
+              bucket.enAlerta = true;
+            }
+          }
+        }
+
+        for (const t of tandas) {
+          const bucket = ocupacionPorClave[`${d.dia}::${cod}::${t.orden}`];
+          if (bucket && bucket.enAlerta) {
+            totalAlertas++;
+            if (!alertasPorDia[d.dia]) alertasPorDia[d.dia] = [];
+            alertasPorDia[d.dia].push({
+              dia: d.dia,
+              codigoTurno: cod,
+              tandaOrden: bucket.orden,
+              etiqueta: bucket.etiqueta,
+              inicio: bucket.inicio,
+              fin: bucket.fin,
+              asignados: bucket.asignados,
+              maxSimultaneos: maxSim,
+            });
+          }
+        }
+      }
+    }
+
+    return {
+      totalAlertas,
+      alertasPorDia,
+      ocupacionPorClave,
+    };
+  });
+
+  obtenerResumenTandasDia(srvId: string, dia: number, codigoTurno: string): ResumenTandasBreakDia | null {
+    const codUpper = (codigoTurno || '').trim().toUpperCase();
+    if (!codUpper) return null;
+    const cfg = this.catalogos.catalogoTurnosMap()[codUpper];
+    if (!cfg || !cfg.recesoHabilitado || cfg.esAusencia) return null;
+
+    const tandas = obtenerTandasBreakDeTurno(cfg);
+    if (tandas.length === 0) return null;
+    const maxSim = Math.max(1, Number(cfg.recesoMaxSimultaneos || 1));
+
+    const matriz = this.asignaciones();
+    const empleados = this.catalogos.empleados();
+    const ocupacionMap = new Map<number, OcupacionTandaBreak>();
+    for (const t of tandas) {
+      ocupacionMap.set(t.orden, {
+        orden: t.orden,
+        etiqueta: t.etiqueta || `T${t.orden}`,
+        inicio: t.inicio,
+        fin: t.fin,
+        asignados: 0,
+        maxSimultaneos: maxSim,
+        enAlerta: false,
+        empleadosIds: [],
+      });
+    }
+
+    let totalColaboradoresTurno = 0;
+    for (const emp of empleados) {
+      const celda = matriz[emp.id]?.[dia];
+      const cod = (celda?.codigo || '').trim().toUpperCase();
+      if (cod !== codUpper) continue;
+      const ejecutorId = celda?.servicioEjecutorId || emp.servicioBaseId;
+      if (ejecutorId !== srvId) continue;
+
+      totalColaboradoresTurno++;
+      const ordenBase = celda?.breakTandaOrden ?? tandas[0].orden;
+      const tMatch = tandas.find((t) => t.orden === ordenBase) || tandas[0];
+      const bucket = ocupacionMap.get(tMatch.orden);
+      if (bucket) {
+        bucket.asignados++;
+        bucket.empleadosIds.push(emp.id);
+        bucket.enAlerta = bucket.asignados > maxSim;
+      }
+    }
+
+    const tandasResumen = Array.from(ocupacionMap.values()).sort((a, b) => a.orden - b.orden);
+    return {
+      dia,
+      codigoTurno: codUpper,
+      recesoHabilitado: true,
+      recesoRemunerado: Boolean(cfg.recesoRemunerado),
+      maxSimultaneos: maxSim,
+      totalColaboradoresTurno,
+      tandas: tandasResumen,
+      tieneAlerta: tandasResumen.some((t) => t.enAlerta),
+    };
+  }
 
   readonly coberturaPorDia = computed<Record<number, { dia: number; noche: number }>>(() => {
     const dias = this.diasDelMes();
@@ -901,22 +1128,33 @@ export class CuadranteStore {
       }
 
       // 4. Validar tope semanal (Ley 2101/2021 + Art. 22 Ley 50/1990 máx +12h extras/sem + Art. 165 CST promedio 3 semanas)
-      const itemsEmp: { fechaIso: string; turno: TipoTurnoConfig | undefined }[] = [];
+      const itemsEmp: { fechaIso: string; turno: TurnoLiquidable | undefined }[] = [];
       for (let dPrev = inicioRetro; dPrev <= ultimoDiaPrev; dPrev++) {
-        const cP = celdasPrevEmp?.[dPrev]?.codigo || '';
+        const celdaP = celdasPrevEmp?.[dPrev];
+        const cP = celdaP?.codigo || '';
         const cfgP = cP ? catalogo[cP] : undefined;
         if (cfgP) {
           itemsEmp.push({
             fechaIso: `${anioPrev}-${String(mesPrev).padStart(2, '0')}-${String(dPrev).padStart(2, '0')}`,
-            turno: cfgP,
+            turno:
+              celdaP?.breakInicio || celdaP?.breakFin
+                ? { ...cfgP, breakInicio: celdaP.breakInicio ?? null, breakFin: celdaP.breakFin ?? null }
+                : cfgP,
           });
         }
       }
       for (const d of dias) {
-        const cod = f.celdas[d.dia]?.codigo || '';
+        const celdaAct = f.celdas[d.dia];
+        const cod = celdaAct?.codigo || '';
         const cfg = cod ? catalogo[cod] : undefined;
         if (cfg) {
-          itemsEmp.push({ fechaIso: d.fechaIso, turno: cfg });
+          itemsEmp.push({
+            fechaIso: d.fechaIso,
+            turno:
+              celdaAct?.breakInicio || celdaAct?.breakFin
+                ? { ...cfg, breakInicio: celdaAct.breakInicio ?? null, breakFin: celdaAct.breakFin ?? null }
+                : cfg,
+          });
         }
       }
 
@@ -1149,10 +1387,11 @@ export class CuadranteStore {
         const celdasEmp = matriz[e.id] || {};
         let horasMesActual = 0;
         for (const d of dias) {
-          const cod = celdasEmp[d.dia]?.codigo || '';
+          const celdaEmpDia = celdasEmp[d.dia];
+          const cod = celdaEmpDia?.codigo || '';
           const cfg = cod ? catalogo[cod] : undefined;
           if (cfg && !cfg.esAusencia) {
-            horasMesActual = r2(horasMesActual + horasLiquidadasCelda(cfg, d.fechaIso, predDesc, reglas));
+            horasMesActual = r2(horasMesActual + horasLiquidadasCelda(cfg, d.fechaIso, predDesc, reglas, celdaEmpDia));
           }
         }
         return {
@@ -1237,6 +1476,9 @@ export class CuadranteStore {
                 servicioEjecutorId: celdaDb.servicioEjecutorId,
                 ...(celdaDb.nota ? { nota: celdaDb.nota } : {}),
                 ...(celdaDb.fijada ? { fijada: true } : {}),
+                ...(celdaDb.breakTandaOrden != null ? { breakTandaOrden: Number(celdaDb.breakTandaOrden) } : {}),
+                ...(celdaDb.breakInicio ? { breakInicio: celdaDb.breakInicio } : {}),
+                ...(celdaDb.breakFin ? { breakFin: celdaDb.breakFin } : {}),
               };
             }
             mapaPeriodo[empId] = filaEmp;
@@ -1553,6 +1795,12 @@ export class CuadranteStore {
         turnoNuevo: c.turnoAnterior,
         previstoAnterior: celdaPre?.previsto ?? c.previstoAnterior,
         esRotacion: celdaPre?.esRotacion,
+        breakTandaOrdenAnterior: celdaPre?.breakTandaOrden ?? c.breakTandaOrdenNuevo ?? null,
+        breakInicioAnterior: celdaPre?.breakInicio ?? c.breakInicioNuevo ?? null,
+        breakFinAnterior: celdaPre?.breakFin ?? c.breakFinNuevo ?? null,
+        breakTandaOrdenNuevo: c.breakTandaOrdenAnterior ?? null,
+        breakInicioNuevo: c.breakInicioAnterior ?? null,
+        breakFinNuevo: c.breakFinAnterior ?? null,
       });
 
       const empObj = this.catalogos.empleados().find((e) => e.id === c.empId);
@@ -1569,6 +1817,13 @@ export class CuadranteStore {
         esRotacion: esRotacionDest,
         servicioEjecutorId: liberaPropiedadDia ? undefined : ultimoPaso.servicioId,
         ...(celdaPre?.nota ? { nota: celdaPre.nota } : {}),
+        ...(!liberaPropiedadDia && c.breakTandaOrdenAnterior != null
+          ? {
+              breakTandaOrden: c.breakTandaOrdenAnterior,
+              ...(c.breakInicioAnterior ? { breakInicio: c.breakInicioAnterior } : {}),
+              ...(c.breakFinAnterior ? { breakFin: c.breakFinAnterior } : {}),
+            }
+          : {}),
       };
       actualMap[c.empId] = filaEmp;
     }
@@ -1599,6 +1854,9 @@ export class CuadranteStore {
           codigo: c.turnoAnterior,
           previsto: celdaDest?.previsto ?? (enBorrador ? c.turnoAnterior : ''),
           esRotacion: !!celdaDest?.esRotacion,
+          breakTandaOrden: celdaDest?.breakTandaOrden ?? null,
+          breakInicio: celdaDest?.breakInicio ?? null,
+          breakFin: celdaDest?.breakFin ?? null,
         };
       });
       persistencia$ = this.api.guardarLoteCuadrante({
@@ -1623,6 +1881,9 @@ export class CuadranteStore {
           esRotacion: !!celdaDest?.esRotacion,
           justificacion: justificacionAuditoria,
           origenAccion: 'DESHACER',
+          breakTandaOrden: celdaDest?.breakTandaOrden ?? null,
+          breakInicio: celdaDest?.breakInicio ?? null,
+          breakFin: celdaDest?.breakFin ?? null,
         });
       });
       persistencia$ = llamadas.length > 0 ? forkJoin(llamadas) : of(null);
@@ -1699,6 +1960,12 @@ export class CuadranteStore {
         turnoNuevo: c.turnoAnterior,
         previstoAnterior: celdaPre?.previsto ?? c.previstoAnterior,
         esRotacion: celdaPre?.esRotacion,
+        breakTandaOrdenAnterior: celdaPre?.breakTandaOrden ?? c.breakTandaOrdenNuevo ?? null,
+        breakInicioAnterior: celdaPre?.breakInicio ?? c.breakInicioNuevo ?? null,
+        breakFinAnterior: celdaPre?.breakFin ?? c.breakFinNuevo ?? null,
+        breakTandaOrdenNuevo: c.breakTandaOrdenAnterior ?? null,
+        breakInicioNuevo: c.breakInicioAnterior ?? null,
+        breakFinNuevo: c.breakFinAnterior ?? null,
       });
 
       const empObj = this.catalogos.empleados().find((e) => e.id === c.empId);
@@ -1715,6 +1982,13 @@ export class CuadranteStore {
         esRotacion: esRotacionDest,
         servicioEjecutorId: liberaPropiedadDia ? undefined : ultimoPaso.servicioId,
         ...(celdaPre?.nota ? { nota: celdaPre.nota } : {}),
+        ...(!liberaPropiedadDia && c.breakTandaOrdenAnterior != null
+          ? {
+              breakTandaOrden: c.breakTandaOrdenAnterior,
+              ...(c.breakInicioAnterior ? { breakInicio: c.breakInicioAnterior } : {}),
+              ...(c.breakFinAnterior ? { breakFin: c.breakFinAnterior } : {}),
+            }
+          : {}),
       };
       actualMap[c.empId] = filaEmp;
     }
@@ -1745,6 +2019,9 @@ export class CuadranteStore {
           codigo: c.turnoAnterior,
           previsto: celdaDest?.previsto ?? (enBorrador ? c.turnoAnterior : ''),
           esRotacion: !!celdaDest?.esRotacion,
+          breakTandaOrden: celdaDest?.breakTandaOrden ?? null,
+          breakInicio: celdaDest?.breakInicio ?? null,
+          breakFin: celdaDest?.breakFin ?? null,
         };
       });
       persistencia$ = this.api.guardarLoteCuadrante({
@@ -1769,6 +2046,9 @@ export class CuadranteStore {
           esRotacion: !!celdaDest?.esRotacion,
           justificacion: justificacionAuditoria,
           origenAccion: 'REHACER',
+          breakTandaOrden: celdaDest?.breakTandaOrden ?? null,
+          breakInicio: celdaDest?.breakInicio ?? null,
+          breakFin: celdaDest?.breakFin ?? null,
         });
       });
       persistencia$ = llamadas.length > 0 ? forkJoin(llamadas) : of(null);
@@ -1945,6 +2225,49 @@ export class CuadranteStore {
     return 'MANUAL';
   }
 
+  private resolverBreakParaAsignacion(
+    actualMap: Record<string, Record<number, CeldaAsignacion>>,
+    empId: string,
+    dia: number,
+    nuevoCodigo: string,
+    srvId: string
+  ): { breakTandaOrden: number | null; breakInicio: string | null; breakFin: string | null } {
+    const codUpper = (nuevoCodigo || '').trim().toUpperCase();
+    const cfgNuevo = codUpper ? this.catalogos.catalogoTurnosMap()[codUpper] : undefined;
+    if (!cfgNuevo || !cfgNuevo.recesoHabilitado || cfgNuevo.esAusencia) {
+      return { breakTandaOrden: null, breakInicio: null, breakFin: null };
+    }
+    const tandas = obtenerTandasBreakDeTurno(cfgNuevo);
+    if (tandas.length === 0) {
+      return { breakTandaOrden: null, breakInicio: null, breakFin: null };
+    }
+
+    const empleados = this.catalogos.empleados();
+    const empMap = new Map(empleados.map((e) => [e.id, e]));
+    const conteos: Record<number, number> = {};
+    for (const [otroEmpId, filaOtro] of Object.entries(actualMap)) {
+      if (otroEmpId === empId) continue;
+      const c = filaOtro?.[dia];
+      if (!c) continue;
+      if ((c.codigo || '').trim().toUpperCase() !== codUpper) continue;
+      const empOtro = empMap.get(otroEmpId);
+      const ejecutorOtro = c.servicioEjecutorId || empOtro?.servicioBaseId;
+      if (ejecutorOtro !== srvId) continue;
+      const orden = c.breakTandaOrden ?? tandas[0].orden;
+      conteos[orden] = (conteos[orden] || 0) + 1;
+    }
+
+    const elegida = seleccionarTandaBreakEquilibrada(tandas, conteos, Math.max(0, dia - 1));
+    if (!elegida) {
+      return { breakTandaOrden: null, breakInicio: null, breakFin: null };
+    }
+    return {
+      breakTandaOrden: elegida.orden,
+      breakInicio: elegida.inicio,
+      breakFin: elegida.fin,
+    };
+  }
+
   aplicarTurnoEnCelda(
     empId: string,
     dia: number,
@@ -2023,6 +2346,10 @@ export class CuadranteStore {
     const origenAccion = opciones?.origenAccion || this.inferirOrigenAccion(origen);
     const justificacionEnviar = opciones?.justificacion?.trim() || origen;
 
+    const breakAsig = liberaPropiedadDia
+      ? { breakTandaOrden: null, breakInicio: null, breakFin: null }
+      : this.resolverBreakParaAsignacion(actualMap, empId, dia, nuevoCodigo, srvId);
+
     const cambioHistorial: CambioCeldaHistorial = {
       empId,
       dia,
@@ -2030,6 +2357,12 @@ export class CuadranteStore {
       turnoNuevo: nuevoCodigo,
       previstoAnterior: celdaActual?.previsto,
       esRotacion,
+      breakTandaOrdenAnterior: celdaActual?.breakTandaOrden ?? null,
+      breakInicioAnterior: celdaActual?.breakInicio ?? null,
+      breakFinAnterior: celdaActual?.breakFin ?? null,
+      breakTandaOrdenNuevo: breakAsig.breakTandaOrden,
+      breakInicioNuevo: breakAsig.breakInicio,
+      breakFinNuevo: breakAsig.breakFin,
     };
 
     filaEmp[dia] = {
@@ -2038,6 +2371,13 @@ export class CuadranteStore {
       esRotacion,
       servicioEjecutorId: liberaPropiedadDia ? undefined : srvId,
       ...(celdaActual?.nota ? { nota: celdaActual.nota } : {}),
+      ...(breakAsig.breakTandaOrden != null && breakAsig.breakInicio && breakAsig.breakFin
+        ? {
+            breakTandaOrden: breakAsig.breakTandaOrden,
+            breakInicio: breakAsig.breakInicio,
+            breakFin: breakAsig.breakFin,
+          }
+        : {}),
     };
 
     const cfgNuevo = this.catalogos.catalogoTurnosMap()[nuevoCodigo];
@@ -2059,6 +2399,12 @@ export class CuadranteStore {
           turnoNuevo: 'S' as CodigoTurno,
           previstoAnterior: celdaSig?.previsto,
           esRotacion: esRotacionBase,
+          breakTandaOrdenAnterior: celdaSig?.breakTandaOrden ?? null,
+          breakInicioAnterior: celdaSig?.breakInicio ?? null,
+          breakFinAnterior: celdaSig?.breakFin ?? null,
+          breakTandaOrdenNuevo: null,
+          breakInicioNuevo: null,
+          breakFinNuevo: null,
         };
         filaEmp[dia + 1] = {
           codigo: 'S',
@@ -2077,6 +2423,9 @@ export class CuadranteStore {
         this.loteArrastreActual.push(cambioHistorial);
       } else {
         this.loteArrastreActual[idxExistente].turnoNuevo = nuevoCodigo;
+        this.loteArrastreActual[idxExistente].breakTandaOrdenNuevo = breakAsig.breakTandaOrden;
+        this.loteArrastreActual[idxExistente].breakInicioNuevo = breakAsig.breakInicio;
+        this.loteArrastreActual[idxExistente].breakFinNuevo = breakAsig.breakFin;
       }
       if (cambioSalienteHistorial) {
         const idxSig = this.loteArrastreActual.findIndex((c) => c.empId === empId && c.dia === dia + 1);
@@ -2084,6 +2433,9 @@ export class CuadranteStore {
           this.loteArrastreActual.push(cambioSalienteHistorial);
         } else {
           this.loteArrastreActual[idxSig].turnoNuevo = 'S' as CodigoTurno;
+          this.loteArrastreActual[idxSig].breakTandaOrdenNuevo = null;
+          this.loteArrastreActual[idxSig].breakInicioNuevo = null;
+          this.loteArrastreActual[idxSig].breakFinNuevo = null;
         }
       }
     } else {
@@ -2120,6 +2472,9 @@ export class CuadranteStore {
         esRotacion,
         justificacion: justificacionEnviar,
         origenAccion,
+        breakTandaOrden: breakAsig.breakTandaOrden,
+        breakInicio: breakAsig.breakInicio,
+        breakFin: breakAsig.breakFin,
       }),
     ];
 
@@ -2136,6 +2491,9 @@ export class CuadranteStore {
           esRotacion,
           justificacion: `${justificacionEnviar} (Auto Saliente Post-Guardia)`,
           origenAccion,
+          breakTandaOrden: null,
+          breakInicio: null,
+          breakFin: null,
         })
       );
     }
@@ -2374,6 +2732,240 @@ export class CuadranteStore {
       });
   }
 
+  cambiarBreakCelda(empId: string, dia: number, tandaOrden: number | null): void {
+    if (this.catalogos.esColaborador()) return;
+    if (this.estadoCuadrante() === 'CERRADO_NOMINA') {
+      this.notificacion.mostrar('⛔ El cuadro de turnos está CERRADO para Nómina. Reábrelo para editar breaks.');
+      return;
+    }
+
+    const actualMap = { ...this.asignaciones() };
+    const filaEmp = { ...(actualMap[empId] || {}) };
+    const celdaActual = filaEmp[dia];
+    const srvId = this.catalogos.servicioSeleccionadoId();
+    const anio = this.catalogos.anioSeleccionado();
+    const mes = this.catalogos.mesSeleccionado();
+
+    if (!celdaActual || !celdaActual.codigo) {
+      this.notificacion.mostrar('ℹ️ Esta celda no tiene un turno asignado para configurar break.');
+      return;
+    }
+
+    if (celdaActual.fijada) {
+      this.notificacion.mostrar('📌 Celda fijada: desbloquéala antes de cambiar su tanda de break.');
+      return;
+    }
+
+    if (
+      celdaActual.servicioEjecutorId &&
+      celdaActual.servicioEjecutorId !== srvId &&
+      celdaActual.codigo !== 'L'
+    ) {
+      const srvOtro = this.catalogos.servicios().find((s) => s.id === celdaActual.servicioEjecutorId);
+      this.notificacion.mostrar(
+        `📍 Celda Espejo bloqueada: cambia la tanda de break desde "${srvOtro?.nombre || 'el otro servicio'}".`
+      );
+      return;
+    }
+
+    const codUpper = celdaActual.codigo.trim().toUpperCase();
+    const cfg = this.catalogos.catalogoTurnosMap()[codUpper];
+    if (!cfg || !cfg.recesoHabilitado || cfg.esAusencia) {
+      this.notificacion.mostrar(`ℹ️ El turno ${codUpper} no tiene break/almuerzo habilitado.`);
+      return;
+    }
+
+    const tandas = obtenerTandasBreakDeTurno(cfg);
+    if (tandas.length === 0) return;
+
+    const targetTanda =
+      tandaOrden != null
+        ? tandas.find((t) => t.orden === tandaOrden) || tandas[0]
+        : tandas[0];
+
+    if (
+      celdaActual.breakTandaOrden === targetTanda.orden &&
+      celdaActual.breakInicio === targetTanda.inicio &&
+      celdaActual.breakFin === targetTanda.fin
+    ) {
+      return;
+    }
+
+    const prevAsignaciones = this.asignacionesPorPeriodo();
+    filaEmp[dia] = {
+      ...celdaActual,
+      breakTandaOrden: targetTanda.orden,
+      breakInicio: targetTanda.inicio,
+      breakFin: targetTanda.fin,
+    };
+    actualMap[empId] = filaEmp;
+    this.actualizarAsignacionesMesActual(actualMap);
+
+    this.api
+      .guardarBreakCelda({
+        servicioId: srvId,
+        anio,
+        mes,
+        dia,
+        empleadoId: empId,
+        breakTandaOrden: targetTanda.orden,
+        breakInicio: targetTanda.inicio,
+        breakFin: targetTanda.fin,
+      })
+      .subscribe({
+        next: () => {
+          if (this.estadoCuadrante() === 'PUBLICADO') {
+            this.cuadranteEditadoPublicado$.next();
+          }
+          this.celdaHistorialActualizada$.next({ empId, dia });
+          const resumenDia = this.obtenerResumenTandasDia(srvId, dia, codUpper);
+          const tandaOcup = resumenDia?.tandas.find((t) => t.orden === targetTanda.orden);
+          const alertaTxt = tandaOcup?.enAlerta
+            ? ` ⚠️ (${tandaOcup.asignados}/${tandaOcup.maxSimultaneos} simultáneos)`
+            : '';
+          this.notificacion.mostrar(
+            `🍽️ Break actualizado a ${targetTanda.etiqueta || 'T' + targetTanda.orden} (${targetTanda.inicio}–${targetTanda.fin})${alertaTxt}.`
+          );
+        },
+        error: (err) => {
+          this.asignacionesPorPeriodo.set(prevAsignaciones);
+          const msg = err?.error?.message || 'Error al guardar la tanda de break en PostgreSQL.';
+          this.notificacion.mostrar(`⛔ ${msg}`);
+        },
+      });
+  }
+
+  rebalancearBreaksDia(dia: number, codigoTurnoFiltro?: string): void {
+    if (this.catalogos.esColaborador()) return;
+    if (this.estadoCuadrante() === 'CERRADO_NOMINA') {
+      this.notificacion.mostrar('⛔ El cuadro de turnos está CERRADO para Nómina. Reábrelo para balancear breaks.');
+      return;
+    }
+
+    const srvId = this.catalogos.servicioSeleccionadoId();
+    const anio = this.catalogos.anioSeleccionado();
+    const mes = this.catalogos.mesSeleccionado();
+    const catalogo = this.catalogos.catalogoTurnosMap();
+    const prevAsignaciones = this.asignacionesPorPeriodo();
+    const actualMap = { ...this.asignaciones() };
+    const codFiltroUpper = codigoTurnoFiltro ? codigoTurnoFiltro.trim().toUpperCase() : null;
+
+    // Agrupar filas del servicio actual en ese día por código de turno
+    const porTurno = new Map<
+      string,
+      Array<{ empId: string; celda: CeldaAsignacion; fijada: boolean }>
+    >();
+    for (const f of this.filasServicioCompletas()) {
+      const celda = actualMap[f.empleado.id]?.[dia];
+      const cod = (celda?.codigo || '').trim().toUpperCase();
+      if (!cod) continue;
+      if (codFiltroUpper && cod !== codFiltroUpper) continue;
+      const ejecutor = celda?.servicioEjecutorId || f.empleado.servicioBaseId;
+      if (ejecutor !== srvId) continue;
+      const cfg = catalogo[cod];
+      if (!cfg || !cfg.recesoHabilitado || cfg.esAusencia) continue;
+
+      const list = porTurno.get(cod) || [];
+      list.push({ empId: f.empleado.id, celda: celda!, fijada: Boolean(celda?.fijada) });
+      porTurno.set(cod, list);
+    }
+
+    const loteParaDb: Array<{
+      empleadoId: string;
+      dia: number;
+      codigo: string;
+      previsto?: string;
+      esRotacion?: boolean;
+      breakTandaOrden: number | null;
+      breakInicio: string | null;
+      breakFin: string | null;
+    }> = [];
+
+    for (const [cod, items] of porTurno.entries()) {
+      const cfg = catalogo[cod];
+      if (!cfg) continue;
+      const tandas = obtenerTandasBreakDeTurno(cfg);
+      if (tandas.length === 0) continue;
+
+      const conteos: Record<number, number> = {};
+      // Primero respetar las celdas fijadas y sumar su ocupación actual
+      for (const it of items) {
+        if (it.fijada) {
+          const ord = it.celda.breakTandaOrden ?? tandas[0].orden;
+          conteos[ord] = (conteos[ord] || 0) + 1;
+        }
+      }
+
+      // Repartir equitativamente los no fijados con offset rotativo por día
+      for (const it of items) {
+        if (it.fijada) continue;
+        const elegida = seleccionarTandaBreakEquilibrada(tandas, conteos, Math.max(0, dia - 1));
+        if (!elegida) continue;
+        conteos[elegida.orden] = (conteos[elegida.orden] || 0) + 1;
+
+        const cambioReal =
+          it.celda.breakTandaOrden !== elegida.orden ||
+          it.celda.breakInicio !== elegida.inicio ||
+          it.celda.breakFin !== elegida.fin;
+
+        if (cambioReal) {
+          const filaEmp = { ...(actualMap[it.empId] || {}) };
+          filaEmp[dia] = {
+            ...it.celda,
+            breakTandaOrden: elegida.orden,
+            breakInicio: elegida.inicio,
+            breakFin: elegida.fin,
+          };
+          actualMap[it.empId] = filaEmp;
+
+          loteParaDb.push({
+            empleadoId: it.empId,
+            dia,
+            codigo: it.celda.codigo,
+            previsto: it.celda.previsto,
+            esRotacion: Boolean(it.celda.esRotacion),
+            breakTandaOrden: elegida.orden,
+            breakInicio: elegida.inicio,
+            breakFin: elegida.fin,
+          });
+        }
+      }
+    }
+
+    if (loteParaDb.length === 0) {
+      this.notificacion.mostrar(`ℹ️ Las tandas de break del día ${dia} ya están equilibradas.`);
+      return;
+    }
+
+    this.actualizarAsignacionesMesActual(actualMap);
+
+    this.api
+      .guardarLoteCuadrante({
+        servicioId: srvId,
+        anio,
+        mes,
+        origenAccion: 'BALANCEAR_BREAKS',
+        justificacion: `⚖️ Balanceo automático de tandas de break (Día ${dia}${codFiltroUpper ? ` · ${codFiltroUpper}` : ''})`,
+        celdas: loteParaDb,
+      })
+      .subscribe({
+        next: () => {
+          if (this.estadoCuadrante() === 'PUBLICADO') {
+            this.cuadranteEditadoPublicado$.next();
+          }
+          this.celdaHistorialActualizada$.next({});
+          this.notificacion.mostrar(
+            `⚖️ Tandas de break balanceadas en el día ${dia} (${loteParaDb.length} colaborador(es) actualizados).`
+          );
+        },
+        error: (err) => {
+          this.asignacionesPorPeriodo.set(prevAsignaciones);
+          const msg = err?.error?.message || 'Error al persistir el balanceo de tandas de break.';
+          this.notificacion.mostrar(`⛔ ${msg}`);
+        },
+      });
+  }
+
   asignarApoyoDiaCelda(
     empId: string,
     dia: number,
@@ -2413,6 +3005,17 @@ export class CuadranteStore {
             previsto: celdaPre?.previsto ?? ((res.codigo || '') as CodigoTurno),
             esRotacion: res.esRotacion,
             servicioEjecutorId: res.servicioEjecutorId,
+            ...(res.breakTandaOrden != null
+              ? {
+                  breakTandaOrden: res.breakTandaOrden,
+                  ...(res.breakInicio ? { breakInicio: res.breakInicio } : {}),
+                  ...(res.breakFin ? { breakFin: res.breakFin } : {}),
+                }
+              : {
+                  breakTandaOrden: undefined,
+                  breakInicio: undefined,
+                  breakFin: undefined,
+                }),
           };
           actualMap[empId] = filaEmp;
           this.actualizarAsignacionesMesActual(actualMap);
@@ -2483,6 +3086,9 @@ export class CuadranteStore {
       codigo: string;
       previsto?: string;
       esRotacion?: boolean;
+      breakTandaOrden?: number | null;
+      breakInicio?: string | null;
+      breakFin?: string | null;
     }[] = [];
     const cambiosParaHistorial: CambioCeldaHistorial[] = [];
 
@@ -2514,6 +3120,12 @@ export class CuadranteStore {
           turnoNuevo: '' as CodigoTurno,
           previstoAnterior: (celda.previsto || celda.codigo) as CodigoTurno,
           esRotacion: esRotado,
+          breakTandaOrdenAnterior: celda.breakTandaOrden ?? null,
+          breakInicioAnterior: celda.breakInicio ?? null,
+          breakFinAnterior: celda.breakFin ?? null,
+          breakTandaOrdenNuevo: null,
+          breakInicioNuevo: null,
+          breakFinNuevo: null,
         });
 
         fila[d.dia] = {
@@ -2529,6 +3141,9 @@ export class CuadranteStore {
           codigo: '',
           previsto: prev,
           esRotacion: false,
+          breakTandaOrden: null,
+          breakInicio: null,
+          breakFin: null,
         });
         celdasLimpiadas++;
       }
@@ -2750,7 +3365,15 @@ export class CuadranteStore {
 
       const mapaActualizado = { ...this.asignaciones() };
       const filaEmp = { ...(mapaActualizado[empId] || {}) };
-      const loteLimpiar: { empleadoId: string; dia: number; codigo: string; esRotacion: boolean }[] = [];
+      const loteLimpiar: {
+        empleadoId: string;
+        dia: number;
+        codigo: string;
+        esRotacion: boolean;
+        breakTandaOrden: number | null;
+        breakInicio: string | null;
+        breakFin: string | null;
+      }[] = [];
       let fijadasOmitidas = 0;
 
       for (const [diaStr, celda] of Object.entries(filaEmp)) {
@@ -2772,6 +3395,9 @@ export class CuadranteStore {
             dia: diaNum,
             codigo: '',
             esRotacion: false,
+            breakTandaOrden: null,
+            breakInicio: null,
+            breakFin: null,
           });
         }
       }

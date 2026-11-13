@@ -199,6 +199,10 @@ model TipoTurno {
   horasDiurnas           Float
   horasNocturnas         Float
   minutosAlmuerzo        Int                       @default(0) // Minutos de almuerzo no computables (Art. 167 CST)
+  recesoHabilitado       Boolean                   @default(false)
+  recesoRemunerado       Boolean                   @default(false) // true = receso pagado dentro de la jornada; false = Art. 167 CST (descuenta)
+  recesoMaxSimultaneos   Int                       @default(1) // Máximo de colaboradores simultáneos en una misma tanda
+  recesoTandasJson       Json?                     // Array<{ orden, etiqueta, inicio, fin, duracionMin }>
   colorHex               String
   descuentaBancoHoras    Boolean                   @default(false)
   modoAmortizacionBanco  String                    @default("HORAS_FIJAS") // DIA_HABIL_EMPRESA | HORAS_FIJAS
@@ -260,6 +264,9 @@ model AsignacionTurno {
   codigoPrevisto     String?
   nota               String?
   fijada             Boolean           @default(false)
+  breakTandaOrden    Int?
+  breakInicio        String?
+  breakFin           String?
   hod                Float             @default(0)
   hon                Float             @default(0)
   hdfd               Float             @default(0)

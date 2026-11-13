@@ -15,7 +15,7 @@ import {
   SesionUsuarioSso,
   TipoTurnoConfig,
 } from './models';
-import { hoyColombiaIso } from './shared/liquidacion-horas';
+import { hoyColombiaIso, TandaBreakTurno } from './shared/liquidacion-horas';
 
 @Injectable({
   providedIn: 'root',
@@ -100,6 +100,7 @@ export class TurnosApiService {
     reqNocheDomFest?: number;
     turnosHabilitados?: string[];
     reglasPorCargo?: any[];
+    empleadosIds?: string[];
   }): Observable<any> {
     return this.http.post(`${this.baseUrl}/servicios-admin`, servicio);
   }
@@ -121,6 +122,7 @@ export class TurnosApiService {
       reqNocheDomFest?: number;
       turnosHabilitados?: string[];
       reglasPorCargo?: any[];
+      empleadosIds?: string[];
     }
   ): Observable<any> {
     return this.http.put(`${this.baseUrl}/servicios-admin/${id}`, servicio);
@@ -150,6 +152,20 @@ export class TurnosApiService {
       empleadoIds,
       servicioBaseId,
     });
+  }
+
+  actualizarCondicionesEmpleado(
+    empleadoId: string,
+    dto: {
+      servicioBaseId?: string;
+      empresaContratanteId?: string;
+      horasSemanalesOverride?: number | null;
+    }
+  ): Observable<any> {
+    return this.http.put<any>(
+      `${this.baseUrl}/servicios-admin/empleados/${encodeURIComponent(empleadoId)}/condiciones`,
+      dto
+    );
   }
 
   eliminarServicio(id: string): Observable<any> {
@@ -205,6 +221,10 @@ export class TurnosApiService {
     horasDiurnas: number;
     horasNocturnas: number;
     minutosAlmuerzo?: number;
+    recesoHabilitado?: boolean;
+    recesoRemunerado?: boolean;
+    recesoMaxSimultaneos?: number;
+    recesoTandasJson?: TandaBreakTurno[] | null;
     colorHex: string;
     descuentaBancoHoras: boolean;
     modoAmortizacionBanco?: string;
@@ -274,6 +294,9 @@ export class TurnosApiService {
             servicioEjecutorId?: string;
             nota?: string;
             fijada?: boolean;
+            breakTandaOrden?: number;
+            breakInicio?: string;
+            breakFin?: string;
           }
         >
       >
@@ -310,10 +333,40 @@ export class TurnosApiService {
     codigo: string;
     previsto?: string;
     esRotacion?: boolean;
+    breakTandaOrden?: number | null;
+    breakInicio?: string | null;
+    breakFin?: string | null;
     justificacion?: string;
     origenAccion?: string;
   }): Observable<any> {
     return this.http.put(`${this.baseUrl}/cuadrantes/celda`, payload);
+  }
+
+  guardarBreakCelda(payload: {
+    servicioId: string;
+    anio: number;
+    mes: number;
+    dia: number;
+    empleadoId: string;
+    breakTandaOrden?: number | null;
+    breakInicio?: string | null;
+    breakFin?: string | null;
+  }): Observable<{
+    ok: boolean;
+    id: string;
+    breakTandaOrden: number | null;
+    breakInicio: string | null;
+    breakFin: string | null;
+    horas?: { hod: number; hon: number; hdfd: number; hdfn: number };
+  }> {
+    return this.http.patch<{
+      ok: boolean;
+      id: string;
+      breakTandaOrden: number | null;
+      breakInicio: string | null;
+      breakFin: string | null;
+      horas?: { hod: number; hon: number; hdfd: number; hdfn: number };
+    }>(`${this.baseUrl}/cuadrantes/celda/break`, payload);
   }
 
   guardarNotaCelda(payload: {
@@ -360,6 +413,9 @@ export class TurnosApiService {
     servicioEjecutorId: string;
     esRotacion: boolean;
     codigo: string;
+    breakTandaOrden?: number | null;
+    breakInicio?: string | null;
+    breakFin?: string | null;
   }> {
     return this.http.patch<{
       ok: boolean;
@@ -367,6 +423,9 @@ export class TurnosApiService {
       servicioEjecutorId: string;
       esRotacion: boolean;
       codigo: string;
+      breakTandaOrden?: number | null;
+      breakInicio?: string | null;
+      breakFin?: string | null;
     }>(`${this.baseUrl}/cuadrantes/celda/apoyo`, payload);
   }
 
@@ -382,6 +441,9 @@ export class TurnosApiService {
       codigo: string;
       previsto?: string;
       esRotacion?: boolean;
+      breakTandaOrden?: number | null;
+      breakInicio?: string | null;
+      breakFin?: string | null;
     }[];
   }): Observable<any> {
     return this.http.put(`${this.baseUrl}/cuadrantes/lote`, payload);

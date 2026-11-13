@@ -792,4 +792,132 @@ describe('CuadrantesController + CuadrantesReglasService', () => {
       })
     );
   });
+
+  it('PATCH /celda/break actualiza tanda/franja de break, recalcula horas, protege CERRADO/Espejo y expone en estado-global', async () => {
+    const tipoAdm = {
+      id: 'tt-adm',
+      codigo: 'ADM',
+      nombre: 'Administrativo Tandas',
+      horaInicio: '08:00',
+      horaFin: '17:00',
+      horasOrdinarias: 8,
+      horasDiurnas: 8,
+      horasNocturnas: 0,
+      minutosAlmuerzo: 60,
+      recesoHabilitado: true,
+      recesoRemunerado: false,
+      recesoMaxSimultaneos: 1,
+      recesoTandasJson: [
+        { orden: 1, etiqueta: 'T1', inicio: '12:00', fin: '13:00', duracionMin: 60 },
+        { orden: 2, etiqueta: 'T2', inicio: '13:00', fin: '14:00', duracionMin: 60 },
+      ],
+    };
+
+    prismaMock.asignacionTurno.findUnique.mockResolvedValueOnce({
+      id: 'asig-adm-1',
+      servicioEjecutorId: 'srv-urg',
+      tipoTurno: tipoAdm,
+      empleado: { id: 'emp-1', servicioBaseId: 'srv-urg', empresaContratante: null },
+    });
+
+    const resOk = await request(app.getHttpServer())
+      .patch('/api/v1/cuadrantes/celda/break')
+      .send({
+        servicioId: 'srv-urg',
+        anio: 2026,
+        mes: 11,
+        dia: 15,
+        empleadoId: 'emp-1',
+        breakTandaOrden: 2,
+      })
+      .expect(200);
+
+    expect(resOk.body).toEqual(
+      expect.objectContaining({
+        ok: true,
+        id: 'asig-adm-1',
+        breakTandaOrden: 2,
+        breakInicio: '13:00',
+        breakFin: '14:00',
+      })
+    );
+    expect(liquidacionMock.calcularHorasPorTipo).toHaveBeenCalledWith(
+      tipoAdm,
+      expect.any(Date),
+      undefined,
+      { breakTandaOrden: 2, breakInicio: '13:00', breakFin: '14:00' }
+    );
+    expect(prismaMock.asignacionTurno.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'asig-adm-1' },
+        data: expect.objectContaining({
+          breakTandaOrden: 2,
+          breakInicio: '13:00',
+          breakFin: '14:00',
+        }),
+      })
+    );
+
+    // Bloqueo en CERRADO_NOMINA -> 409
+    prismaMock.cuadrante.findUnique.mockResolvedValueOnce({ id: 'cuad-1', estado: 'CERRADO_NOMINA' });
+    await request(app.getHttpServer())
+      .patch('/api/v1/cuadrantes/celda/break')
+      .send({
+        servicioId: 'srv-urg',
+        anio: 2026,
+        mes: 11,
+        dia: 15,
+        empleadoId: 'emp-1',
+        breakTandaOrden: 1,
+      })
+      .expect(409);
+
+    // Bloqueo en Celda Espejo -> 409
+    prismaMock.asignacionTurno.findUnique.mockResolvedValueOnce({
+      id: 'asig-adm-espejo',
+      servicioEjecutorId: 'srv-uci',
+      servicioEjecutor: { nombre: 'UCI Adultos' },
+      tipoTurno: tipoAdm,
+    });
+    await request(app.getHttpServer())
+      .patch('/api/v1/cuadrantes/celda/break')
+      .send({
+        servicioId: 'srv-urg',
+        anio: 2026,
+        mes: 11,
+        dia: 15,
+        empleadoId: 'emp-1',
+        breakTandaOrden: 1,
+      })
+      .expect(409);
+
+    // estado-global expone breakTandaOrden, breakInicio y breakFin
+    prismaMock.asignacionTurno.findMany.mockResolvedValueOnce([
+      {
+        empleadoId: 'emp-1',
+        fecha: new Date('2026-11-15T00:00:00.000Z'),
+        esRotacion: false,
+        codigoPrevisto: 'ADM',
+        nota: null,
+        fijada: false,
+        breakTandaOrden: 2,
+        breakInicio: '13:00',
+        breakFin: '14:00',
+        servicioEjecutorId: 'srv-urg',
+        tipoTurno: { codigo: 'ADM' },
+        cuadrante: { anio: 2026 },
+      },
+    ]);
+    const resGlobal = await request(app.getHttpServer())
+      .get('/api/v1/cuadrantes/estado-global?anio=2026')
+      .expect(200);
+    expect(resGlobal.body.asignacionesPorPeriodo['2026-11']['emp-1']['15']).toEqual(
+      expect.objectContaining({
+        codigo: 'ADM',
+        breakTandaOrden: 2,
+        breakInicio: '13:00',
+        breakFin: '14:00',
+      })
+    );
+  });
 });

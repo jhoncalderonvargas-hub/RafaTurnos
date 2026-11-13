@@ -292,4 +292,56 @@ describe('AutocompletadoService', () => {
     // Ninguna de las dos celdas fijadas entra al loteParaDb
     expect(res.loteParaDb.some((c) => c.empleadoId === 'e1' && (c.dia === 5 || c.dia === 6))).toBeFalse();
   });
+
+  it('distribuye tandas de break de forma equilibrada entre compañeros del mismo turno en autocompletado', () => {
+    const turnoTandas = {
+      ...CATALOGO_TURNOS['ADM'],
+      codigo: 'ADM_B',
+      nombre: 'Admin Tandas',
+      recesoHabilitado: true,
+      recesoRemunerado: false,
+      recesoMaxSimultaneos: 1,
+      recesoTandasJson: [
+        { orden: 1, etiqueta: 'T1', inicio: '12:00', fin: '13:00', duracionMin: 60 },
+        { orden: 2, etiqueta: 'T2', inicio: '13:00', fin: '14:00', duracionMin: 60 },
+      ],
+    };
+    const catalogoExt = { ...CATALOGO_TURNOS, ADM_B: turnoTandas };
+    const srv: ServicioHospitalario = {
+      id: 'srv-adm',
+      codigo: 'ADM',
+      nombre: 'Administración',
+      tipoAsistencia: 'ADMINISTRATIVO',
+      reqDia: 2,
+      reqNoche: 0,
+      modalidadDias: 'LUN_VIE_HABILES',
+      turnosHabilitados: ['ADM_B', 'L'],
+    };
+
+    const filas = [makeFila('a1'), makeFila('a2')];
+    const res = service.generarAutocompletadoCuadrante({
+      srv,
+      srvId: 'srv-adm',
+      dias: diasNoviembre2026(),
+      catalogo: catalogoExt,
+      listaTurnosCatalogo: Object.values(catalogoExt).filter((t) => t.visibleEnPaleta !== false),
+      prevMapSnapshot: { a1: {}, a2: {} },
+      filasBase: filas,
+      filtroCategoriaActiva: 'TODAS',
+      enBorradorGlobal: true,
+      obtenerMetasDiaServicio: () => ({ reqDia: 2, reqNoche: 0, cerrado: false }),
+    });
+
+    // Día 3 (martes hábil): a1 y a2 reciben ADM_B en tandas distintas (T1 y T2, sin chocar)
+    const c1 = res.actualMap['a1'][3];
+    const c2 = res.actualMap['a2'][3];
+    expect(c1?.codigo).toBe('ADM_B');
+    expect(c2?.codigo).toBe('ADM_B');
+    expect([c1?.breakTandaOrden, c2?.breakTandaOrden].sort()).toEqual([1, 2]);
+    expect(c1?.breakInicio).not.toBe(c2?.breakInicio);
+
+    const dbDay3 = res.loteParaDb.filter((x) => x.dia === 3 && x.codigo === 'ADM_B');
+    expect(dbDay3.length).toBe(2);
+    expect(dbDay3.every((x) => x.breakTandaOrden != null && !!x.breakInicio && !!x.breakFin)).toBeTrue();
+  });
 });

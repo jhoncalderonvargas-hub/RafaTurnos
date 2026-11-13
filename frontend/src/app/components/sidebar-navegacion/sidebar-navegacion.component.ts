@@ -1,7 +1,17 @@
 import { Component, EventEmitter, Input, Output } from '@angular/core';
 import { RolUsuarioSso, SesionUsuarioSso } from '../../models';
 
-export type VistaApp = 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'AUDITORIA' | 'PORTAL_EMPLEADO' | 'CONFIGURACION';
+export type VistaApp =
+  | 'PLANIFICADOR'
+  | 'DASHBOARD'
+  | 'REPORTES'
+  | 'AUDITORIA'
+  | 'PORTAL_EMPLEADO'
+  | 'GESTION_SERVICIOS'
+  | 'GESTION_PERSONAL'
+  | 'GESTION_TURNOS'
+  | 'GESTION_EMPRESAS'
+  | 'GESTION_FESTIVOS';
 
 @Component({
   selector: 'app-sidebar-navegacion',
@@ -66,10 +76,10 @@ export type VistaApp = 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'AUDITORIA' |
             class="side-item"
             [class.active]="vistaActual === 'DASHBOARD'"
             (click)="itemNavegacionClick.emit('DASHBOARD')"
-            title="Solicitudes de Permuta">
+            title="Cambios y Solicitudes de Permuta">
             <span class="side-icon">🔄</span>
             @if (!sidebarContraido) {
-              <span class="side-label">Solicitudes</span>
+              <span class="side-label">Cambios y Solicitudes</span>
             }
             @if (notificacionesSolicitudesCount > 0) {
               <span class="pill-count">{{ notificacionesSolicitudesCount }}</span>
@@ -82,10 +92,10 @@ export type VistaApp = 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'AUDITORIA' |
               class="side-item"
               [class.active]="vistaActual === 'REPORTES'"
               (click)="itemNavegacionClick.emit('REPORTES')"
-              title="Reportes y Analítica">
+              title="Nómina y Reportes">
               <span class="side-icon">📊</span>
               @if (!sidebarContraido) {
-                <span class="side-label">Reportes</span>
+                <span class="side-label">Nómina y Reportes</span>
               }
             </button>
 
@@ -103,7 +113,7 @@ export type VistaApp = 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'AUDITORIA' |
           }
 
           @if (!sidebarContraido) {
-            <div class="side-section-label">COLABORADOR</div>
+            <div class="side-section-label">MI ESPACIO</div>
           } @else {
             <div class="side-divider"></div>
           }
@@ -125,7 +135,7 @@ export type VistaApp = 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'AUDITORIA' |
 
           @if (esAdminTh) {
             @if (!sidebarContraido) {
-              <div class="side-section-label">CONFIGURACIÓN</div>
+              <div class="side-section-label">GESTIÓN</div>
             } @else {
               <div class="side-divider"></div>
             }
@@ -133,12 +143,48 @@ export type VistaApp = 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'AUDITORIA' |
             <button
               type="button"
               class="side-item"
-              [class.active]="vistaActual === 'CONFIGURACION'"
-              (click)="itemNavegacionClick.emit('CONFIGURACION')"
-              title="Configuración (Empresas, Servicios, Catálogo de Turnos y Festivos)">
-              <span class="side-icon">⚙️</span>
+              [class.active]="vistaActual === 'GESTION_SERVICIOS'"
+              (click)="itemNavegacionClick.emit('GESTION_SERVICIOS')"
+              title="Gestión de Servicios (Unidades, metas, personal y apoyos)">
+              <span class="side-icon">🏥</span>
               @if (!sidebarContraido) {
-                <span class="side-label">Configuración</span>
+                <span class="side-label">Gestión de Servicios</span>
+              }
+            </button>
+
+            <button
+              type="button"
+              class="side-item"
+              [class.active]="vistaActual === 'GESTION_PERSONAL'"
+              (click)="itemNavegacionClick.emit('GESTION_PERSONAL')"
+              title="Gestión de Personal (Nómina, traslados y jornadas)">
+              <span class="side-icon">🧑‍⚕️</span>
+              @if (!sidebarContraido) {
+                <span class="side-label">Gestión de Personal</span>
+              }
+            </button>
+
+            <button
+              type="button"
+              class="side-item"
+              [class.active]="vistaActual === 'GESTION_TURNOS'"
+              (click)="itemNavegacionClick.emit('GESTION_TURNOS')"
+              title="Gestión de Turnos (Códigos, horarios, descansos y banco de horas)">
+              <span class="side-icon">🎨</span>
+              @if (!sidebarContraido) {
+                <span class="side-label">Gestión de Turnos</span>
+              }
+            </button>
+
+            <button
+              type="button"
+              class="side-item"
+              [class.active]="vistaActual === 'GESTION_EMPRESAS'"
+              (click)="itemNavegacionClick.emit('GESTION_EMPRESAS')"
+              title="Gestión de Empresas (Empresas contratantes y regímenes CST/1042)">
+              <span class="side-icon">🏢</span>
+              @if (!sidebarContraido) {
+                <span class="side-label">Gestión de Empresas</span>
               }
               @if (empresasPendientesCount > 0) {
                 <span
@@ -146,6 +192,18 @@ export type VistaApp = 'PLANIFICADOR' | 'DASHBOARD' | 'REPORTES' | 'AUDITORIA' |
                   [title]="empresasPendientesCount + ' empresa(s) contratante(s) pendiente(s) por confirmar reglas'">
                   {{ empresasPendientesCount }}
                 </span>
+              }
+            </button>
+
+            <button
+              type="button"
+              class="side-item"
+              [class.active]="vistaActual === 'GESTION_FESTIVOS'"
+              (click)="itemNavegacionClick.emit('GESTION_FESTIVOS')"
+              title="Festivos y Días Cívicos">
+              <span class="side-icon">🇨🇴</span>
+              @if (!sidebarContraido) {
+                <span class="side-label">Festivos y Días Cívicos</span>
               }
             </button>
           }

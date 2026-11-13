@@ -43,6 +43,7 @@ import {
   resumenNormativoPeriodo,
   SEMAFORO_BANCO_HORAS,
   sumarDiasIso,
+  TandaBreakTurno,
   TOPE_HORAS_EXTRAS_SEMANALES,
   TurnoLiquidable,
   VIGENCIAS_INICIO_NOCTURNO,
@@ -60,6 +61,10 @@ export interface TipoTurnoLiquidableDb {
   horasDiurnas: number;
   horasNocturnas: number;
   minutosAlmuerzo: number;
+  recesoHabilitado?: boolean;
+  recesoRemunerado?: boolean;
+  recesoMaxSimultaneos?: number;
+  recesoTandasJson?: unknown;
   descuentaBancoHoras: boolean;
   modoAmortizacionBanco?: string;
   horasAmortizacionBanco?: number | null;
@@ -83,7 +88,8 @@ export interface HorasPersistibles {
 
 export function toTurnoLiquidable(
   tipo: Partial<TipoTurnoLiquidableDb> | null | undefined,
-  codigo?: string
+  codigo?: string,
+  breakInstancia?: { breakInicio?: string | null; breakFin?: string | null } | null
 ): TurnoLiquidable | null {
   if (!tipo) return null;
   const cod = (tipo.codigo || codigo || '').trim().toUpperCase();
@@ -98,6 +104,10 @@ export function toTurnoLiquidable(
       ? tipo.bloqueaPermutas
       : esCodigoExoneracionContrato(cod);
 
+  const recesoTandasJson = Array.isArray(tipo.recesoTandasJson)
+    ? (tipo.recesoTandasJson as TandaBreakTurno[])
+    : null;
+
   return {
     codigo: cod || undefined,
     horaInicio: tipo.horaInicio,
@@ -106,6 +116,13 @@ export function toTurnoLiquidable(
     horasDiurnas: Number(tipo.horasDiurnas) || 0,
     horasNocturnas: Number(tipo.horasNocturnas) || 0,
     minutosAlmuerzo: Number(tipo.minutosAlmuerzo) || 0,
+    recesoHabilitado: Boolean(tipo.recesoHabilitado),
+    recesoRemunerado: Boolean(tipo.recesoRemunerado),
+    recesoMaxSimultaneos:
+      tipo.recesoMaxSimultaneos !== undefined ? Number(tipo.recesoMaxSimultaneos) : undefined,
+    recesoTandasJson,
+    breakInicio: breakInstancia?.breakInicio ?? null,
+    breakFin: breakInstancia?.breakFin ?? null,
     esAusencia,
     prorrateaMetaContrato,
     bloqueaPermutas,
@@ -151,7 +168,8 @@ export class LiquidacionService implements OnModuleInit {
   async calcularHorasPorTipo(
     tipo: Partial<TipoTurnoLiquidableDb> | null | undefined,
     fechaUtc: Date,
-    reglas?: Partial<ReglasEmpresaContrato> | null
+    reglas?: Partial<ReglasEmpresaContrato> | null,
+    breakInstancia?: { breakInicio?: string | null; breakFin?: string | null } | null
   ): Promise<HorasPersistibles> {
     if (!tipo) {
       return { hod: 0, hon: 0, hdfd: 0, hdfn: 0, hed: 0, hen: 0 };
@@ -167,7 +185,7 @@ export class LiquidacionService implements OnModuleInit {
       Number(sigIso.substring(0, 4)),
     ]);
 
-    const turnoLiq = toTurnoLiquidable(tipo, cod);
+    const turnoLiq = toTurnoLiquidable(tipo, cod, breakInstancia);
     const liq = liquidarTurno(turnoLiq, fechaIso, this.predicadoDescanso(), reglas);
     return {
       hod: liq.hod,
@@ -236,7 +254,15 @@ export class LiquidacionService implements OnModuleInit {
       const liq =
         !cod || cod === 'BLANCO'
           ? { hod: 0, hon: 0, hdfd: 0, hdfn: 0 }
-          : liquidarTurno(toTurnoLiquidable(a.tipoTurno, cod), fechaIso, pred, reglas);
+          : liquidarTurno(
+              toTurnoLiquidable(a.tipoTurno, cod, {
+                breakInicio: (a as any).breakInicio,
+                breakFin: (a as any).breakFin,
+              }),
+              fechaIso,
+              pred,
+              reglas
+            );
 
       if (
         Math.abs((a.hod || 0) - liq.hod) > 0.001 ||
@@ -478,7 +504,10 @@ export class LiquidacionService implements OnModuleInit {
       for (const a of lista) {
         const cod = (a.tipoTurno?.codigo || '').trim().toUpperCase();
         if (!cod || cod === 'BLANCO') continue;
-        const turnoLiq = toTurnoLiquidable(a.tipoTurno, cod);
+        const turnoLiq = toTurnoLiquidable(a.tipoTurno, cod, {
+          breakInicio: (a as any).breakInicio,
+          breakFin: (a as any).breakFin,
+        });
         horasAmortizadasComp += obtenerHorasAmortizacionTurno(
           turnoLiq,
           reglas.horasSemanalesContrato,
@@ -732,7 +761,10 @@ export class LiquidacionService implements OnModuleInit {
 
         const fechaUtc = new Date(a.fecha);
         const fechaIso = fechaUtc.toISOString().substring(0, 10);
-        const turno = toTurnoLiquidable(a.tipoTurno, cod);
+        const turno = toTurnoLiquidable(a.tipoTurno, cod, {
+          breakInicio: (a as any).breakInicio,
+          breakFin: (a as any).breakFin,
+        });
         itemsVentanaSemanal.push({ fechaIso, codigo: cod, turno });
 
         if (fechaUtc < primerDia || fechaUtc > ultimoDia) continue;

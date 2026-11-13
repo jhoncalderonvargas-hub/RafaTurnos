@@ -25,15 +25,23 @@ import {
   CODIGOS_TURNOS_SISTEMA_OBLIGATORIOS,
   combinarReglasEmpresa,
   desglosarHorarioOrdinario,
+  duracionHorarioMin,
   esCodigoExoneracionContrato,
   esFechaIsoValida,
+  formatearHoraMin,
+  generarTandasEscalonadasDefault,
   hoyColombiaIso,
+  MINUTOS_DIA,
   ModoAmortizacionBanco,
+  normalizarTandasBreak,
   obtenerHorasAmortizacionTurno,
+  parseHoraMin,
+  TandaBreakTurno,
   UMBRAL_HORAS_TURNO_NOCTURNO,
 } from '../shared/liquidacion-horas';
 import { clasificarFranjasTurno } from './autocompletado.service';
 import { NotificacionStore } from './notificacion.store';
+import { resolverTemaColor, TemaColorTurno } from '../utils/color-tema';
 
 /** Número para CSV con separador ';' (configuración regional es-CO): coma decimal y máximo 2 decimales. */
 export function numeroCsv(valor: number | undefined | null): string {
@@ -98,6 +106,7 @@ export class CatalogosSsoStore {
   readonly servicios = signal<ServicioHospitalario[]>([]);
   readonly servicioSeleccionadoId = signal<string>('');
   readonly empleados = signal<EmpleadoHospital[]>([]);
+  readonly sincronizandoNominaIntranet = signal<boolean>(false);
   readonly catalogoTurnosMap = signal<Record<string, TipoTurnoConfig>>({ ...CATALOGO_TURNOS });
 
   readonly empleadosActualizados$ = new Subject<EmpleadoHospital[]>();
@@ -193,6 +202,7 @@ export class CatalogosSsoStore {
   ]);
   readonly nuevoServicioPermitePermutaEntreCargos = signal<boolean>(false);
   readonly nuevoServicioCargosPermitidosIds = signal<string[]>([]);
+  readonly nuevoServicioEmpleadosIds = signal<string[]>([]);
   readonly nuevoServicioMetasPorTurno = signal<MetaTurnoServicio[]>([]);
   readonly nuevoServicioReglasPorCargo = signal<ReglaCargoServicio[]>([]);
   readonly enlaceHermanoSrv1 = signal<string>('');
@@ -213,6 +223,11 @@ export class CatalogosSsoStore {
   readonly turnoFormHoraInicio = signal<string>('07:00');
   readonly turnoFormHoraFin = signal<string>('15:00');
   readonly turnoFormMinutosAlmuerzo = signal<number>(0);
+  readonly turnoFormRecesoHabilitado = signal<boolean>(false);
+  readonly turnoFormRecesoRemunerado = signal<boolean>(false);
+  readonly turnoFormRecesoMaxSimultaneos = signal<number>(1);
+  readonly turnoFormDuracionBreakMin = signal<number>(30);
+  readonly turnoFormRecesoTandas = signal<TandaBreakTurno[]>([]);
   readonly turnoFormColorKey = signal<string>('AZUL_CIELO');
   readonly turnoFormNocturnoPesado = signal<boolean>(false);
   readonly turnoFormProrrateaMeta = signal<boolean>(false);
@@ -238,12 +253,16 @@ export class CatalogosSsoStore {
     { key: 'BLANCO_LIBRE', nombre: 'Blanco Libre', bgHex: '#FFFFFF', textHex: '#64748B', borderHex: '#E2E8F0' },
   ];
 
-  // Cálculo automático de horas Ordinarias, Diurnas (06:00-19:00) y Nocturnas (19:00-06:00) - Ley 2466 / CST Art. 160 y Art. 167 (Almuerzo)
+  // Cálculo automático de horas Ordinarias, Diurnas (06:00-19:00) y Nocturnas (19:00-06:00) - Ley 2466 / CST Art. 160 y Art. 167 (Almuerzo / Break)
   readonly calculoAutomaticoHorasTurno = computed<{
     ordinarias: number;
     diurnas: number;
     nocturnas: number;
     minutosAlmuerzo: number;
+    recesoHabilitado: boolean;
+    recesoRemunerado: boolean;
+    duracionBreakMin: number;
+    tandasBreakCount: number;
     horarioTexto: string;
   }>(() => {
     const modo = this.turnoFormModoJornada();
@@ -253,32 +272,57 @@ export class CatalogosSsoStore {
         diurnas: 0,
         nocturnas: 0,
         minutosAlmuerzo: 0,
+        recesoHabilitado: false,
+        recesoRemunerado: false,
+        duracionBreakMin: 0,
+        tandasBreakCount: 0,
         horarioTexto: 'Descanso / Novedad',
-      };
-    }
-    if (modo === 'GUARDIA_24H') {
-      const ini = this.turnoFormHoraInicio() || '07:00';
-      const g24 = desglosarHorarioOrdinario(ini, ini, 0, hoyColombiaIso());
-      return {
-        ordinarias: g24?.ordinarias ?? 24,
-        diurnas: g24?.diurnas ?? 13,
-        nocturnas: g24?.nocturnas ?? 11,
-        minutosAlmuerzo: 0,
-        horarioTexto: `${ini} - ${ini} (+1)`,
       };
     }
 
     const iniStr = this.turnoFormHoraInicio() || '07:00';
-    const finStr = this.turnoFormHoraFin() || '15:00';
-    const minAlmuerzo = Math.max(0, Number(this.turnoFormMinutosAlmuerzo()) || 0);
-    const desglose = desglosarHorarioOrdinario(iniStr, finStr, minAlmuerzo, hoyColombiaIso(), false);
+    const finStr = modo === 'GUARDIA_24H' ? iniStr : this.turnoFormHoraFin() || '15:00';
+    const recesoHabilitado = this.turnoFormRecesoHabilitado();
+    const recesoRemunerado = this.turnoFormRecesoRemunerado();
+    const tandas = this.turnoFormRecesoTandas();
+    const tandaBase = tandas[0];
+    const durBreak = tandaBase?.duracionMin ?? Math.max(5, this.turnoFormDuracionBreakMin() || 30);
+
+    const minAlmuerzo = recesoHabilitado
+      ? recesoRemunerado
+        ? 0
+        : durBreak
+      : modo === 'HORARIO'
+        ? Math.max(0, Number(this.turnoFormMinutosAlmuerzo()) || 0)
+        : 0;
+
+    const es24 = modo === 'GUARDIA_24H';
+    const desglose = desglosarHorarioOrdinario(
+      iniStr,
+      finStr,
+      minAlmuerzo,
+      hoyColombiaIso(),
+      es24,
+      null,
+      recesoHabilitado && tandaBase
+        ? {
+            recesoRemunerado,
+            breakInicio: tandaBase.inicio,
+            breakFin: tandaBase.fin,
+          }
+        : { recesoRemunerado: recesoHabilitado && recesoRemunerado }
+    );
 
     return {
-      ordinarias: desglose?.ordinarias ?? 0,
-      diurnas: desglose?.diurnas ?? 0,
-      nocturnas: desglose?.nocturnas ?? 0,
+      ordinarias: desglose?.ordinarias ?? (es24 ? 24 : 0),
+      diurnas: desglose?.diurnas ?? (es24 ? 13 : 0),
+      nocturnas: desglose?.nocturnas ?? (es24 ? 11 : 0),
       minutosAlmuerzo: minAlmuerzo,
-      horarioTexto: `${iniStr} - ${finStr}`,
+      recesoHabilitado,
+      recesoRemunerado,
+      duracionBreakMin: recesoHabilitado ? durBreak : 0,
+      tandasBreakCount: recesoHabilitado ? tandas.length : 0,
+      horarioTexto: es24 ? `${iniStr} - ${iniStr} (+1)` : `${iniStr} - ${finStr}`,
     };
   });
 
@@ -504,8 +548,9 @@ export class CatalogosSsoStore {
         const cod = (t.codigo || '').toUpperCase();
         if (!cod || cod === 'BLANCO') continue;
         const existente = copia[cod];
-        const temaEncontrado = this.temasColorTurno.find(
-          (tm) => tm.bgHex.toLowerCase() === (t.colorHex || '').toLowerCase()
+        const tema = resolverTemaColor(
+          t.colorHex || existente?.bgHex,
+          this.temasColorTurno
         );
 
         const horasOrd = Number(t.horasOrdinarias ?? existente?.horasOrdinarias ?? 0);
@@ -514,13 +559,11 @@ export class CatalogosSsoStore {
         const horario =
           t.horaInicio && t.horaFin
             ? horasOrd === 24
-              ? `${horaIni} - ${horaFin} (+1)`
+              ? `${horaIni} - ${horaIni} (+1)`
               : horasOrd > 0
                 ? `${horaIni} - ${horaFin}`
                 : 'Descanso / Novedad'
             : existente?.horario || (horasOrd > 0 ? `${horaIni} - ${horaFin}` : 'Descanso / Novedad');
-
-        const tema = temaEncontrado || this.temasColorTurno[0];
         const activo = t.activo !== undefined ? Boolean(t.activo) : existente?.activo ?? true;
         const esAusencia =
           t.esAusencia !== undefined
@@ -544,6 +587,26 @@ export class CatalogosSsoStore {
             ? Boolean(t.esSistemaObligatorio)
             : existente?.esSistemaObligatorio ?? CODIGOS_TURNOS_SISTEMA_OBLIGATORIOS.has(cod);
 
+        const recesoTandasJson = normalizarTandasBreak(
+          t.recesoTandasJson,
+          horaIni,
+          horaFin,
+          horasOrd >= 24
+        );
+        const minAlm = Number(t.minutosAlmuerzo ?? existente?.minutosAlmuerzo ?? 0);
+        const recesoHabilitado =
+          t.recesoHabilitado !== undefined
+            ? Boolean(t.recesoHabilitado)
+            : existente?.recesoHabilitado ?? (recesoTandasJson.length > 0 || minAlm > 0);
+        const recesoRemunerado =
+          t.recesoRemunerado !== undefined
+            ? Boolean(t.recesoRemunerado)
+            : existente?.recesoRemunerado ?? false;
+        const recesoMaxSimultaneos =
+          t.recesoMaxSimultaneos !== undefined
+            ? Math.max(1, Number(t.recesoMaxSimultaneos) || 1)
+            : existente?.recesoMaxSimultaneos ?? 1;
+
         copia[cod] = {
           codigo: cod,
           nombre: t.nombre || existente?.nombre || cod,
@@ -553,10 +616,17 @@ export class CatalogosSsoStore {
           horasOrdinarias: horasOrd,
           horasDiurnas: Number(t.horasDiurnas ?? existente?.horasDiurnas ?? 0),
           horasNocturnas: Number(t.horasNocturnas ?? existente?.horasNocturnas ?? 0),
-          minutosAlmuerzo: Number(t.minutosAlmuerzo ?? existente?.minutosAlmuerzo ?? 0),
-          bgHex: t.colorHex || existente?.bgHex || tema.bgHex,
-          textHex: temaEncontrado ? temaEncontrado.textHex : existente?.textHex || tema.textHex,
-          borderHex: temaEncontrado ? temaEncontrado.borderHex : existente?.borderHex || tema.borderHex,
+          minutosAlmuerzo: minAlm,
+          recesoHabilitado,
+          recesoRemunerado,
+          recesoMaxSimultaneos,
+          recesoTandasJson:
+            recesoHabilitado && recesoTandasJson.length > 0
+              ? recesoTandasJson
+              : existente?.recesoTandasJson ?? null,
+          bgHex: tema.bgHex,
+          textHex: tema.textHex,
+          borderHex: tema.borderHex,
           esAusencia,
           prorrateaMetaContrato,
           bloqueaPermutas,
@@ -767,6 +837,21 @@ export class CatalogosSsoStore {
     );
   }
 
+  alternarEmpleadoEnServicioForm(empleadoId: string): void {
+    const id = String(empleadoId || '').trim();
+    if (!id) return;
+    this.nuevoServicioEmpleadosIds.update((lista) =>
+      lista.includes(id) ? lista.filter((x) => x !== id) : [...lista, id]
+    );
+  }
+
+  cambiarNuevoServicioEmpleadosIds(ids: string[]): void {
+    const limpios = Array.from(
+      new Set((ids || []).map((x) => String(x || '').trim()).filter(Boolean))
+    );
+    this.nuevoServicioEmpleadosIds.set(limpios);
+  }
+
   actualizarMetaTurnoEnServicioForm(
     codigoTurno: string,
     campo: 'minimoBase' | 'esperadoBase' | 'minimoDomFest' | 'esperadoDomFest',
@@ -849,6 +934,59 @@ export class CatalogosSsoStore {
       },
       error: (err) => {
         const msg = err?.error?.message || 'Error al trasladar lote de colaboradores.';
+        this.notificacion.mostrar(`⛔ ${msg}`);
+      },
+    });
+  }
+
+  actualizarCondicionesEmpleado(
+    empleadoId: string,
+    dto: {
+      servicioBaseId?: string;
+      empresaContratanteId?: string;
+      horasSemanalesOverride?: number | null;
+    }
+  ): void {
+    this.api.actualizarCondicionesEmpleado(empleadoId, dto).subscribe({
+      next: (res) => {
+        const adv = res?.advertenciaCargoCompatible ? ` (${res.advertenciaCargoCompatible})` : '';
+        this.notificacion.mostrar(`✅ Condiciones del colaborador actualizadas en PostgreSQL.${adv}`);
+        this.recargarEmpleados();
+        if (dto.servicioBaseId) {
+          this.recargarServicios();
+        }
+        if (dto.empresaContratanteId || dto.horasSemanalesOverride !== undefined) {
+          this.recargarEmpresas();
+          this.empresasActualizadas$.next();
+        }
+      },
+      error: (err) => {
+        const msg = err?.error?.message || 'Error al actualizar condiciones del colaborador.';
+        this.notificacion.mostrar(`⛔ ${msg}`);
+      },
+    });
+  }
+
+  sincronizarNominaIntranet(): void {
+    if (this.sincronizandoNominaIntranet()) return;
+    this.sincronizandoNominaIntranet.set(true);
+    this.api.sincronizarEmpleadosIntranet().subscribe({
+      next: (res) => {
+        this.sincronizandoNominaIntranet.set(false);
+        this.recargarEmpleados();
+        this.recargarEmpresas();
+        this.recargarCategorias();
+        this.recargarServicios();
+        const pend = Array.isArray(res?.empresasPendientes) ? res.empresasPendientes.length : 0;
+        const extraPend =
+          pend > 0 ? ` ⚠️ ${pend} empresa(s) requiere(n) confirmar reglas normativas.` : '';
+        this.notificacion.mostrar(
+          `✅ Nómina sincronizada con Intranet (${res?.creados || 0} nuevo(s), ${res?.actualizados || 0} actualizado(s)).${extraPend}`
+        );
+      },
+      error: (err) => {
+        this.sincronizandoNominaIntranet.set(false);
+        const msg = err?.error?.message || 'No se pudo sincronizar la nómina desde la Intranet.';
         this.notificacion.mostrar(`⛔ ${msg}`);
       },
     });
@@ -1056,6 +1194,7 @@ export class CatalogosSsoStore {
         ? [...srv.cargosPermitidosIds]
         : (srv.cargosPermitidos || []).map((c) => c.categoriaId).filter(Boolean);
     this.nuevoServicioCargosPermitidosIds.set(cargosIds);
+    this.nuevoServicioEmpleadosIds.set([]);
 
     const metasSrv = this.construirMetasDesdeTurnosSeleccionados(
       turnosSrv,
@@ -1156,6 +1295,7 @@ export class CatalogosSsoStore {
     this.nuevoServicioTurnosHabilitados.set(turnosDef);
     this.nuevoServicioPermitePermutaEntreCargos.set(false);
     this.nuevoServicioCargosPermitidosIds.set([]);
+    this.nuevoServicioEmpleadosIds.set([]);
     this.nuevoServicioMetasPorTurno.set([]);
     this.nuevoServicioReglasPorCargo.set([]);
   }
@@ -1168,6 +1308,7 @@ export class CatalogosSsoStore {
     const turnosHabilitados = this.nuevoServicioTurnosHabilitados();
     const metasPorTurno = this.nuevoServicioMetasPorTurno();
     const cargosPermitidosIds = this.nuevoServicioCargosPermitidosIds();
+    const empleadosIds = this.nuevoServicioEmpleadosIds();
     const permitePermutaEntreCargos = this.nuevoServicioPermitePermutaEntreCargos();
 
     for (const m of metasPorTurno) {
@@ -1232,6 +1373,7 @@ export class CatalogosSsoStore {
       cargosPermitidosIds,
       turnosHabilitados,
       reglasPorCargo,
+      ...(empleadosIds.length > 0 ? { empleadosIds } : {}),
     };
 
     if (metasPorTurno.length > 0) {
@@ -1255,10 +1397,22 @@ export class CatalogosSsoStore {
       this.api
         .actualizarServicio(editandoId, payloadBase)
         .subscribe({
-          next: () => {
-            this.notificacion.mostrar(`✅ Servicio "${nom}", cargos permitidos y metas por turno actualizados en PostgreSQL.`);
+          next: (res) => {
+            const adscritos = Number(res?.empleadosAdscritos || 0);
+            const advCargo = Array.isArray(res?.advertenciasCargo) ? res.advertenciasCargo : [];
+            const extraAds = adscritos > 0 ? ` 👥 ${adscritos} colaborador(es) adscrito(s).` : '';
+            const extraAdv =
+              advCargo.length > 0
+                ? ` ⚠️ ${advCargo.length} cargo(s) aún no figuran en cargos permitidos.`
+                : '';
+            this.notificacion.mostrar(
+              `✅ Servicio "${nom}", cargos permitidos y metas por turno actualizados en PostgreSQL.${extraAds}${extraAdv}`
+            );
             this.cancelarEdicionServicio();
             this.recargarServicios();
+            if (empleadosIds.length > 0 || adscritos > 0) {
+              this.recargarEmpleados();
+            }
           },
           error: (err) => {
             const msg = err?.error?.message || err?.message || 'Error de conexión con el backend';
@@ -1269,10 +1423,22 @@ export class CatalogosSsoStore {
       this.api
         .crearServicio(payloadBase)
         .subscribe({
-          next: () => {
-            this.notificacion.mostrar(`✅ Servicio "${nom}" creado y persistido en PostgreSQL.`);
+          next: (res) => {
+            const adscritos = Number(res?.empleadosAdscritos || 0);
+            const advCargo = Array.isArray(res?.advertenciasCargo) ? res.advertenciasCargo : [];
+            const extraAds = adscritos > 0 ? ` 👥 ${adscritos} colaborador(es) adscrito(s).` : '';
+            const extraAdv =
+              advCargo.length > 0
+                ? ` ⚠️ ${advCargo.length} cargo(s) aún no figuran en cargos permitidos.`
+                : '';
+            this.notificacion.mostrar(
+              `✅ Servicio "${nom}" creado y persistido en PostgreSQL.${extraAds}${extraAdv}`
+            );
             this.cancelarEdicionServicio();
             this.recargarServicios();
+            if (empleadosIds.length > 0 || adscritos > 0) {
+              this.recargarEmpleados();
+            }
           },
           error: (err) => {
             const msg = err?.error?.message || err?.message || 'Error de conexión con el backend';
@@ -1402,12 +1568,231 @@ export class CatalogosSsoStore {
   }
 
   // Gestión del Catálogo Maestro de Tipos de Turno
+  private reclampTandasPorHorarioActual(): void {
+    const modo = this.turnoFormModoJornada();
+    if (modo === 'DESCANSO') return;
+    const ini = this.turnoFormHoraInicio() || '07:00';
+    const fin = modo === 'GUARDIA_24H' ? ini : this.turnoFormHoraFin() || '15:00';
+    const es24 = modo === 'GUARDIA_24H';
+    const norm = normalizarTandasBreak(this.turnoFormRecesoTandas(), ini, fin, es24);
+    if (norm.length > 0) {
+      this.turnoFormRecesoTandas.set(norm);
+    } else if (this.turnoFormRecesoHabilitado()) {
+      const dur = Math.max(5, Math.min(240, this.turnoFormDuracionBreakMin() || 30));
+      this.turnoFormRecesoTandas.set(
+        generarTandasEscalonadasDefault(ini, fin, 1, dur, es24)
+      );
+    }
+  }
+
+  cambiarTurnoHoraInicioForm(hora: string): void {
+    this.turnoFormHoraInicio.set(hora || '07:00');
+    if (this.turnoFormRecesoHabilitado()) {
+      this.reclampTandasPorHorarioActual();
+    }
+  }
+
+  cambiarTurnoHoraFinForm(hora: string): void {
+    this.turnoFormHoraFin.set(hora || '15:00');
+    if (this.turnoFormRecesoHabilitado()) {
+      this.reclampTandasPorHorarioActual();
+    }
+  }
+
+  cambiarTurnoRecesoHabilitadoForm(habilitado: boolean): void {
+    const activo = Boolean(habilitado);
+    this.turnoFormRecesoHabilitado.set(activo);
+    if (!activo) {
+      this.turnoFormMinutosAlmuerzo.set(0);
+      return;
+    }
+    const modo = this.turnoFormModoJornada();
+    if (modo === 'DESCANSO') return;
+    const ini = this.turnoFormHoraInicio() || '07:00';
+    const fin = modo === 'GUARDIA_24H' ? ini : this.turnoFormHoraFin() || '15:00';
+    const es24 = modo === 'GUARDIA_24H';
+    const actuales = this.turnoFormRecesoTandas();
+    const dur = Math.max(
+      5,
+      Math.min(240, this.turnoFormDuracionBreakMin() || actuales[0]?.duracionMin || 30)
+    );
+    this.turnoFormDuracionBreakMin.set(dur);
+    if (actuales.length === 0) {
+      const generadas = generarTandasEscalonadasDefault(ini, fin, 1, dur, es24);
+      this.turnoFormRecesoTandas.set(generadas);
+      if (generadas[0]) {
+        this.turnoFormDuracionBreakMin.set(generadas[0].duracionMin);
+      }
+    } else {
+      this.reclampTandasPorHorarioActual();
+    }
+    const baseDur = this.turnoFormRecesoTandas()[0]?.duracionMin ?? dur;
+    this.turnoFormMinutosAlmuerzo.set(this.turnoFormRecesoRemunerado() ? 0 : baseDur);
+  }
+
+  cambiarTurnoRecesoRemuneradoForm(remunerado: boolean): void {
+    const esPagado = Boolean(remunerado);
+    this.turnoFormRecesoRemunerado.set(esPagado);
+    const dur = this.turnoFormRecesoTandas()[0]?.duracionMin ?? this.turnoFormDuracionBreakMin();
+    this.turnoFormMinutosAlmuerzo.set(this.turnoFormRecesoHabilitado() && !esPagado ? dur : 0);
+  }
+
+  cambiarTurnoRecesoMaxSimultaneosForm(maxSim: number): void {
+    const val = Number.isFinite(Number(maxSim)) ? Math.max(1, Math.min(99, Math.round(Number(maxSim)))) : 1;
+    this.turnoFormRecesoMaxSimultaneos.set(val);
+  }
+
+  cambiarTurnoDuracionBreakForm(duracionMin: number): void {
+    const modo = this.turnoFormModoJornada();
+    if (modo === 'DESCANSO') return;
+    const ini = this.turnoFormHoraInicio() || '07:00';
+    const fin = modo === 'GUARDIA_24H' ? ini : this.turnoFormHoraFin() || '15:00';
+    const es24 = modo === 'GUARDIA_24H';
+    const durTotal = duracionHorarioMin(ini, fin, es24) ?? 480;
+    const s = parseHoraMin(ini) ?? 420;
+    const durMax = Math.max(15, Math.min(240, durTotal - 10));
+    const dur = Math.max(5, Math.min(durMax, Math.round(Number(duracionMin) || 30)));
+    this.turnoFormDuracionBreakMin.set(dur);
+
+    const tandas = this.turnoFormRecesoTandas();
+    if (tandas.length === 0) {
+      const gen = generarTandasEscalonadasDefault(ini, fin, 1, dur, es24);
+      this.turnoFormRecesoTandas.set(gen);
+    } else {
+      const actualizadas = tandas.map((t) => {
+        const bIniRaw = parseHoraMin(t.inicio);
+        let rel = bIniRaw !== null ? bIniRaw - s : Math.floor((durTotal - dur) / 2);
+        if (rel < 0) rel += MINUTOS_DIA;
+        rel = Math.max(0, Math.min(durTotal - dur, Math.round(rel / 15) * 15));
+        return {
+          ...t,
+          inicio: formatearHoraMin(s + rel),
+          fin: formatearHoraMin(s + rel + dur),
+          duracionMin: dur,
+        };
+      });
+      this.turnoFormRecesoTandas.set(actualizadas);
+    }
+    this.turnoFormMinutosAlmuerzo.set(
+      this.turnoFormRecesoHabilitado() && !this.turnoFormRecesoRemunerado() ? dur : 0
+    );
+  }
+
+  agregarTandaBreakForm(): void {
+    const modo = this.turnoFormModoJornada();
+    if (modo === 'DESCANSO') return;
+    const tandas = this.turnoFormRecesoTandas();
+    if (tandas.length >= 6) {
+      this.notificacion.mostrar('ℹ️ Se permiten máximo 6 tandas de break por turno.');
+      return;
+    }
+    const ini = this.turnoFormHoraInicio() || '07:00';
+    const fin = modo === 'GUARDIA_24H' ? ini : this.turnoFormHoraFin() || '15:00';
+    const es24 = modo === 'GUARDIA_24H';
+    const durTotal = duracionHorarioMin(ini, fin, es24) ?? 480;
+    const s = parseHoraMin(ini) ?? 420;
+    const dur = Math.max(5, Math.min(240, this.turnoFormDuracionBreakMin() || tandas[0]?.duracionMin || 30));
+
+    if (tandas.length === 0) {
+      this.turnoFormRecesoTandas.set(generarTandasEscalonadasDefault(ini, fin, 1, dur, es24));
+      return;
+    }
+
+    const ultima = tandas[tandas.length - 1];
+    const lastFinRaw = parseHoraMin(ultima.fin);
+    let lastFinRel = lastFinRaw !== null ? lastFinRaw - s : Math.floor(durTotal / 2);
+    if (lastFinRel <= 0) lastFinRel += MINUTOS_DIA;
+    const snappedRel = Math.round(lastFinRel / 15) * 15;
+
+    if (snappedRel + dur <= durTotal) {
+      const nueva: TandaBreakTurno = {
+        orden: tandas.length + 1,
+        etiqueta: `T${tandas.length + 1}`,
+        inicio: formatearHoraMin(s + snappedRel),
+        fin: formatearHoraMin(s + snappedRel + dur),
+        duracionMin: dur,
+      };
+      this.turnoFormRecesoTandas.set([...tandas, nueva]);
+      return;
+    }
+
+    const reescalonadas = generarTandasEscalonadasDefault(ini, fin, tandas.length + 1, dur, es24);
+    this.turnoFormRecesoTandas.set(reescalonadas);
+    if (reescalonadas[0]) {
+      this.turnoFormDuracionBreakMin.set(reescalonadas[0].duracionMin);
+    }
+  }
+
+  escalonarTandasBreakAutomaticoForm(): void {
+    const modo = this.turnoFormModoJornada();
+    if (modo === 'DESCANSO') return;
+    const ini = this.turnoFormHoraInicio() || '07:00';
+    const fin = modo === 'GUARDIA_24H' ? ini : this.turnoFormHoraFin() || '15:00';
+    const es24 = modo === 'GUARDIA_24H';
+    const cant = Math.max(1, this.turnoFormRecesoTandas().length || 2);
+    const dur = Math.max(5, Math.min(240, this.turnoFormDuracionBreakMin() || 30));
+    const gen = generarTandasEscalonadasDefault(ini, fin, cant, dur, es24);
+    this.turnoFormRecesoTandas.set(gen);
+    if (gen[0]) {
+      this.turnoFormDuracionBreakMin.set(gen[0].duracionMin);
+      this.turnoFormMinutosAlmuerzo.set(this.turnoFormRecesoRemunerado() ? 0 : gen[0].duracionMin);
+    }
+  }
+
+  eliminarTandaBreakForm(orden: number): void {
+    const actuales = this.turnoFormRecesoTandas();
+    if (actuales.length <= 1) return;
+    const filtradas = actuales
+      .filter((t) => t.orden !== orden)
+      .map((t, idx) => ({
+        ...t,
+        orden: idx + 1,
+        etiqueta: `T${idx + 1}`,
+      }));
+    this.turnoFormRecesoTandas.set(filtradas);
+  }
+
+  moverTandaBreakForm(orden: number, nuevoInicioRelMin: number): void {
+    const modo = this.turnoFormModoJornada();
+    if (modo === 'DESCANSO') return;
+    const ini = this.turnoFormHoraInicio() || '07:00';
+    const fin = modo === 'GUARDIA_24H' ? ini : this.turnoFormHoraFin() || '15:00';
+    const es24 = modo === 'GUARDIA_24H';
+    const durTotal = duracionHorarioMin(ini, fin, es24);
+    const s = parseHoraMin(ini);
+    if (durTotal === null || s === null) return;
+
+    this.turnoFormRecesoTandas.update((lista) =>
+      lista.map((t) => {
+        if (t.orden !== orden) return t;
+        const durTanda = Math.max(5, Math.min(durTotal - 5, t.duracionMin || 30));
+        const maxRel = Math.max(0, durTotal - durTanda);
+        const relSnap = Math.max(0, Math.min(maxRel, Math.round(nuevoInicioRelMin / 15) * 15));
+        const absIni = s + relSnap;
+        const absFin = absIni + durTanda;
+        return {
+          ...t,
+          inicio: formatearHoraMin(absIni),
+          fin: formatearHoraMin(absFin),
+          duracionMin: durTanda,
+        };
+      })
+    );
+  }
+
   cambiarTurnoModoJornadaForm(modo: 'HORARIO' | 'GUARDIA_24H' | 'DESCANSO'): void {
     this.turnoFormModoJornada.set(modo);
     if (modo !== 'DESCANSO') {
       this.turnoFormProrrateaMeta.set(false);
       this.turnoFormEsAusencia.set(false);
       this.turnoFormDescuentaBanco.set(false);
+      if (this.turnoFormRecesoHabilitado()) {
+        this.reclampTandasPorHorarioActual();
+      }
+    } else {
+      this.turnoFormRecesoHabilitado.set(false);
+      this.turnoFormRecesoRemunerado.set(false);
+      this.turnoFormMinutosAlmuerzo.set(0);
     }
   }
 
@@ -1447,7 +1832,35 @@ export class CatalogosSsoStore {
 
     this.turnoFormHoraInicio.set(turno.horaInicio || '07:00');
     this.turnoFormHoraFin.set(turno.horaFin || '15:00');
-    this.turnoFormMinutosAlmuerzo.set(turno.minutosAlmuerzo ?? 0);
+    const minAlm = turno.minutosAlmuerzo ?? 0;
+    this.turnoFormMinutosAlmuerzo.set(minAlm);
+
+    const iniT = turno.horaInicio || '07:00';
+    const finT = turno.horasOrdinarias === 24 ? iniT : turno.horaFin || '15:00';
+    const es24T = turno.horasOrdinarias === 24;
+    const tandasExistentes = normalizarTandasBreak(turno.recesoTandasJson, iniT, finT, es24T);
+    const recesoHab =
+      turno.horasOrdinarias > 0 &&
+      (turno.recesoHabilitado !== undefined
+        ? Boolean(turno.recesoHabilitado)
+        : tandasExistentes.length > 0 || minAlm > 0);
+    this.turnoFormRecesoHabilitado.set(recesoHab);
+    this.turnoFormRecesoRemunerado.set(recesoHab ? Boolean(turno.recesoRemunerado) : false);
+    this.turnoFormRecesoMaxSimultaneos.set(Math.max(1, Number(turno.recesoMaxSimultaneos) || 1));
+
+    if (recesoHab) {
+      const durBase = tandasExistentes[0]?.duracionMin ?? (minAlm > 0 ? minAlm : 30);
+      this.turnoFormDuracionBreakMin.set(durBase);
+      this.turnoFormRecesoTandas.set(
+        tandasExistentes.length > 0
+          ? tandasExistentes
+          : generarTandasEscalonadasDefault(iniT, finT, 1, durBase, es24T)
+      );
+    } else {
+      this.turnoFormDuracionBreakMin.set(30);
+      this.turnoFormRecesoTandas.set([]);
+    }
+
     this.turnoFormNocturnoPesado.set(!!turno.esNocturnoPesado);
     this.turnoFormProrrateaMeta.set(Boolean(turno.prorrateaMetaContrato));
     this.turnoFormEsAusencia.set(Boolean(turno.esAusencia));
@@ -1462,11 +1875,8 @@ export class CatalogosSsoStore {
       turno.descuentaBancoHoras ? obtenerHorasAmortizacionTurno(turno) || 8 : 8
     );
 
-    const tema =
-      this.temasColorTurno.find(
-        (tm) => tm.bgHex.toLowerCase() === turno.bgHex.toLowerCase()
-      ) || this.temasColorTurno[0];
-    this.turnoFormColorKey.set(tema.key);
+    const tema = resolverTemaColor(turno.bgHex, this.temasColorTurno);
+    this.turnoFormColorKey.set(tema.key.startsWith('HEX_') ? tema.bgHex : tema.key);
   }
 
   limpiarFormularioTurno(): void {
@@ -1477,6 +1887,11 @@ export class CatalogosSsoStore {
     this.turnoFormHoraInicio.set('07:00');
     this.turnoFormHoraFin.set('15:00');
     this.turnoFormMinutosAlmuerzo.set(0);
+    this.turnoFormRecesoHabilitado.set(false);
+    this.turnoFormRecesoRemunerado.set(false);
+    this.turnoFormRecesoMaxSimultaneos.set(1);
+    this.turnoFormDuracionBreakMin.set(30);
+    this.turnoFormRecesoTandas.set([]);
     this.turnoFormColorKey.set('AZUL_CIELO');
     this.turnoFormNocturnoPesado.set(false);
     this.turnoFormProrrateaMeta.set(false);
@@ -1527,15 +1942,42 @@ export class CatalogosSsoStore {
       ? Math.max(0.5, Number(this.turnoFormHorasAmortizacion()) || 8)
       : null;
 
-    const tema =
-      this.temasColorTurno.find((t) => t.key === this.turnoFormColorKey()) ||
-      this.temasColorTurno[0];
+    const tema = resolverTemaColor(this.turnoFormColorKey(), this.temasColorTurno);
 
     const prevCatalogo = this.catalogoTurnosMap();
     const prevServiciosHab = this.nuevoServicioTurnosHabilitados();
     const existente = prevCatalogo[codigo];
     const esAusencia = modo === 'DESCANSO' ? this.turnoFormEsAusencia() : false;
     const bloqueaPermutas = this.turnoFormBloqueaPermutas();
+    const es24Guardar = modo === 'GUARDIA_24H';
+    const recesoHabilitadoGuardar = modo !== 'DESCANSO' && this.turnoFormRecesoHabilitado();
+    const recesoRemuneradoGuardar = recesoHabilitadoGuardar && this.turnoFormRecesoRemunerado();
+    const recesoMaxSimGuardar = recesoHabilitadoGuardar
+      ? Math.max(1, Math.min(99, Math.round(Number(this.turnoFormRecesoMaxSimultaneos()) || 1)))
+      : 1;
+    const tandasNormalizadas = recesoHabilitadoGuardar
+      ? normalizarTandasBreak(
+          this.turnoFormRecesoTandas(),
+          horaInicioFinal,
+          horaFinFinal,
+          es24Guardar
+        )
+      : [];
+    const recesoTandasGuardar: TandaBreakTurno[] =
+      recesoHabilitadoGuardar && tandasNormalizadas.length === 0
+        ? generarTandasEscalonadasDefault(
+            horaInicioFinal,
+            horaFinFinal,
+            1,
+            this.turnoFormDuracionBreakMin() || 30,
+            es24Guardar
+          )
+        : tandasNormalizadas;
+    const minutosAlmuerzoGuardar = recesoHabilitadoGuardar
+      ? recesoRemuneradoGuardar
+        ? 0
+        : (recesoTandasGuardar[0]?.duracionMin ?? calc.minutosAlmuerzo)
+      : calc.minutosAlmuerzo;
 
     const nuevoTurno: TipoTurnoConfig = {
       codigo,
@@ -1546,7 +1988,11 @@ export class CatalogosSsoStore {
       horasOrdinarias: calc.ordinarias,
       horasDiurnas: calc.diurnas,
       horasNocturnas: calc.nocturnas,
-      minutosAlmuerzo: calc.minutosAlmuerzo,
+      minutosAlmuerzo: minutosAlmuerzoGuardar,
+      recesoHabilitado: recesoHabilitadoGuardar,
+      recesoRemunerado: recesoRemuneradoGuardar,
+      recesoMaxSimultaneos: recesoMaxSimGuardar,
+      recesoTandasJson: recesoHabilitadoGuardar ? recesoTandasGuardar : null,
       bgHex: tema.bgHex,
       textHex: tema.textHex,
       borderHex: tema.borderHex,
@@ -1580,7 +2026,11 @@ export class CatalogosSsoStore {
         horasOrdinarias: nuevoTurno.horasOrdinarias,
         horasDiurnas: nuevoTurno.horasDiurnas,
         horasNocturnas: nuevoTurno.horasNocturnas,
-        minutosAlmuerzo: nuevoTurno.minutosAlmuerzo || 0,
+        minutosAlmuerzo: minutosAlmuerzoGuardar,
+        recesoHabilitado: recesoHabilitadoGuardar,
+        recesoRemunerado: recesoRemuneradoGuardar,
+        recesoMaxSimultaneos: recesoMaxSimGuardar,
+        recesoTandasJson: recesoHabilitadoGuardar ? recesoTandasGuardar : null,
         colorHex: nuevoTurno.bgHex,
         descuentaBancoHoras: nuevoTurno.descuentaBancoHoras,
         modoAmortizacionBanco: modoAmortizacion,
@@ -1698,6 +2148,10 @@ export class CatalogosSsoStore {
         horasDiurnas: itemActual.horasDiurnas,
         horasNocturnas: itemActual.horasNocturnas,
         minutosAlmuerzo: itemActual.minutosAlmuerzo || 0,
+        recesoHabilitado: Boolean(itemActual.recesoHabilitado),
+        recesoRemunerado: Boolean(itemActual.recesoRemunerado),
+        recesoMaxSimultaneos: itemActual.recesoMaxSimultaneos ?? 1,
+        recesoTandasJson: itemActual.recesoTandasJson ?? null,
         colorHex: itemActual.bgHex,
         descuentaBancoHoras: itemActual.descuentaBancoHoras,
         modoAmortizacionBanco: itemActual.modoAmortizacionBanco || 'HORAS_FIJAS',

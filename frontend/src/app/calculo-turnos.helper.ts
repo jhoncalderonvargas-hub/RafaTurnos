@@ -15,15 +15,30 @@ import {
   esCodigoExoneracionContrato,
   esTurnoNocturnoPrincipal,
   evaluarEstadoBancoHoras,
+  generarTandasEscalonadasDefault,
   liquidarPeriodo,
   liquidarTurno,
+  normalizarTandasBreak,
   obtenerHorasAmortizacionTurno,
   PredicadoDescanso,
   r2,
   RecargosVigentes,
   recargosVigentes,
   ReglasEmpresaContrato,
+  TandaBreakTurno,
+  TurnoLiquidable,
 } from './shared/liquidacion-horas';
+
+export function obtenerTandasBreakDeTurno(
+  cfg?: Partial<TipoTurnoConfig> | Partial<TurnoLiquidable> | null
+): TandaBreakTurno[] {
+  if (!cfg || !cfg.recesoHabilitado) return [];
+  const permite24h = (cfg.horasOrdinarias || 0) >= 24;
+  const norm = normalizarTandasBreak(cfg.recesoTandasJson, cfg.horaInicio, cfg.horaFin, permite24h);
+  if (norm.length > 0) return norm;
+  const fallbackMin = cfg.minutosAlmuerzo && cfg.minutosAlmuerzo > 0 ? cfg.minutosAlmuerzo : 60;
+  return generarTandasEscalonadasDefault(cfg.horaInicio, cfg.horaFin, 1, fallbackMin, permite24h);
+}
 
 export interface MetricasMesColaborador {
   horasTrabajadas: number;
@@ -134,9 +149,14 @@ export function horasLiquidadasCelda(
   cfg: TipoTurnoConfig | undefined,
   fechaIso: string,
   esDescanso: PredicadoDescanso = predicadoDescansoObligatorio(),
-  reglas?: Partial<ReglasEmpresaContrato> | null
+  reglas?: Partial<ReglasEmpresaContrato> | null,
+  celda?: Pick<CeldaAsignacion, 'breakInicio' | 'breakFin'> | null
 ): number {
-  return liquidarTurno(cfg, fechaIso, esDescanso, reglas).total;
+  const turnoEff: TurnoLiquidable | undefined =
+    cfg && celda?.breakInicio && celda?.breakFin
+      ? { ...cfg, breakInicio: celda.breakInicio, breakFin: celda.breakFin }
+      : cfg;
+  return liquidarTurno(turnoEff, fechaIso, esDescanso, reglas).total;
 }
 
 function fechaIsoDelDia(anio: number, mes: number, dia: number): string {
@@ -164,7 +184,7 @@ export function resumirHorasPeriodo(
   const predFest = esFestivo ?? ((iso: string) => esDescanso(iso));
   const hSem = reglas?.horasSemanalesContrato ?? 42;
   const dBase = reglas?.diasBaseSemana ?? 6;
-  const items: { fechaIso: string; codigo?: string; turno: TipoTurnoConfig | undefined }[] = [];
+  const items: { fechaIso: string; codigo?: string; turno: TurnoLiquidable | undefined }[] = [];
   let horasAmortizadasComp = 0;
 
   for (const [diaStr, celda] of Object.entries(celdasEmp || {})) {
@@ -176,10 +196,14 @@ export function resumirHorasPeriodo(
       items.push({ fechaIso, codigo: cod, turno: undefined });
       continue;
     }
+    const turnoEff: TurnoLiquidable =
+      celda?.breakInicio && celda?.breakFin
+        ? { ...cfg, breakInicio: celda.breakInicio, breakFin: celda.breakFin }
+        : cfg;
     horasAmortizadasComp = r2(
-      horasAmortizadasComp + obtenerHorasAmortizacionTurno(cfg, hSem, dBase)
+      horasAmortizadasComp + obtenerHorasAmortizacionTurno(turnoEff, hSem, dBase)
     );
-    items.push({ fechaIso, codigo: cod, turno: cfg });
+    items.push({ fechaIso, codigo: cod, turno: turnoEff });
   }
 
   const diasHabilesProrrateados = contarDiasHabilesProrrateados(items, predFest);
@@ -224,10 +248,11 @@ export function calcularMetricasMesColaborador(
   let diasInc = 0;
   let diasLic = 0;
   let diasFam = 0;
-  const items: { fechaIso: string; codigo?: string; turno: TipoTurnoConfig | undefined }[] = [];
+  const items: { fechaIso: string; codigo?: string; turno: TurnoLiquidable | undefined }[] = [];
 
   for (const d of dias) {
-    const cod = (celdas[d.dia]?.codigo || '').trim().toUpperCase();
+    const celda = celdas[d.dia];
+    const cod = (celda?.codigo || '').trim().toUpperCase();
     if (!cod || cod === 'BLANCO') continue;
     if (cod === 'VAC') diasVac++;
     if (cod === 'INC') diasInc++;
@@ -240,11 +265,15 @@ export function calcularMetricasMesColaborador(
       continue;
     }
 
-    items.push({ fechaIso: d.fechaIso, codigo: cod, turno: cfg });
+    const turnoEff: TurnoLiquidable =
+      celda?.breakInicio && celda?.breakFin
+        ? { ...cfg, breakInicio: celda.breakInicio, breakFin: celda.breakFin }
+        : cfg;
+    items.push({ fechaIso: d.fechaIso, codigo: cod, turno: turnoEff });
     if (esTurnoNocturnoPrincipal(cfg)) conteoNoches++;
     horasAmortizadasComp = r2(
       horasAmortizadasComp +
-        obtenerHorasAmortizacionTurno(cfg, reglas.horasSemanalesContrato, reglas.diasBaseSemana)
+        obtenerHorasAmortizacionTurno(turnoEff, reglas.horasSemanalesContrato, reglas.diasBaseSemana)
     );
   }
 

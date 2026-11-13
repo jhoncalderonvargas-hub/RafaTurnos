@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { defer, of, Subject, throwError } from 'rxjs';
 import { FestivosColombiaHelper } from '../festivos-colombia.helper';
-import { EmpleadoHospital, ServicioHospitalario } from '../models';
+import { CATALOGO_TURNOS, EmpleadoHospital, ServicioHospitalario } from '../models';
 import { TurnosApiService } from '../turnos-api.service';
 import { CatalogosSsoStore } from './catalogos-sso.store';
 import { CuadranteStore } from './cuadrante.store';
@@ -56,12 +56,16 @@ describe('CuadranteStore', () => {
       'guardarNotaCelda',
       'alternarFijacionCelda',
       'asignarApoyoDiaCelda',
+      'guardarBreakCelda',
     ]);
     apiSpy.actualizarEstadoCuadrante.and.returnValue(of({ ok: true }));
     apiSpy.guardarCeldaCuadrante.and.returnValue(of({ ok: true }));
     apiSpy.guardarLoteCuadrante.and.returnValue(of({ ok: true }));
     apiSpy.guardarNotaCelda.and.returnValue(of({ ok: true, id: 'asig-1', nota: null }));
     apiSpy.alternarFijacionCelda.and.returnValue(of({ ok: true, id: 'asig-1', fijada: true }));
+    apiSpy.guardarBreakCelda.and.returnValue(
+      of({ ok: true, id: 'asig-1', breakTandaOrden: 1, breakInicio: '12:00', breakFin: '13:00' })
+    );
     apiSpy.asignarApoyoDiaCelda.and.returnValue(
       of({ ok: true, id: 'asig-1', servicioEjecutorId: 'srv-mat', esRotacion: true, codigo: 'M8' })
     );
@@ -441,5 +445,139 @@ describe('CuadranteStore', () => {
     );
 
     sub.unsubscribe();
+  });
+
+  it('expone horasContratadasEfectivas y horasExoneradasMes en empleadosConSaldoActualizado segun prorrateo de ausencias', () => {
+    // Noviembre 2026: dia 3 es martes habil
+    store.asignacionesPorPeriodo.set({
+      '2026-11': {
+        e1: {
+          3: { codigo: 'VAC', servicioEjecutorId: 'srv-urg' },
+        },
+      },
+    });
+
+    const empActualizado = store.empleadosConSaldoActualizado().find((e) => e.id === 'e1');
+    expect(empActualizado).toBeDefined();
+    expect(empActualizado!.horasContratoMes).toBeGreaterThan(0);
+    expect(empActualizado!.diasProrrateadosMes).toBe(1);
+    expect(empActualizado!.horasExoneradasMes).toBeGreaterThan(0);
+    expect(empActualizado!.horasContratadasEfectivas).toBe(
+      Number((empActualizado!.horasContratoMes - empActualizado!.horasExoneradasMes!).toFixed(2))
+    );
+  });
+
+  it('expone saldoBancoAnterior y saldoBancoActual diferenciado segun actividad y estado del cuadrante', () => {
+    store.estadosPorCuadrante.set({ 'srv-urg::2026-11': 'BORRADOR' });
+    store.asignacionesPorPeriodo.set({
+      '2026-11': {
+        e1: {
+          2: { codigo: 'M8', servicioEjecutorId: 'srv-urg' },
+        },
+      },
+    });
+
+    let emp = store.empleadosConSaldoActualizado().find((e) => e.id === 'e1')!;
+    expect(emp.saldoBancoAnterior).toBe(0);
+    expect(emp.tieneActividadMes).toBeTrue();
+    expect(emp.cuadranteMesConsolidado).toBeFalse();
+    expect(emp.saldoBancoActual).toBeLessThan(0);
+    expect(emp.saldoBancoDiferenciaMes).toBe(emp.saldoBancoActual);
+
+    store.estadosPorCuadrante.set({ 'srv-urg::2026-11': 'PUBLICADO' });
+    emp = store.empleadosConSaldoActualizado().find((e) => e.id === 'e1')!;
+    expect(emp.cuadranteMesConsolidado).toBeTrue();
+  });
+
+  it('cambia tanda de break (con rollback y proteccion fijada), detecta traslapes de simultaneidad y rebalancea el dia', () => {
+    const turnoTandas = {
+      ...CATALOGO_TURNOS['ADM'],
+      codigo: 'ADM_B',
+      nombre: 'Admin Tandas',
+      recesoHabilitado: true,
+      recesoRemunerado: false,
+      recesoMaxSimultaneos: 1,
+      recesoTandasJson: [
+        { orden: 1, etiqueta: 'T1', inicio: '12:00', fin: '13:00', duracionMin: 60 },
+        { orden: 2, etiqueta: 'T2', inicio: '13:00', fin: '14:00', duracionMin: 60 },
+      ],
+    };
+    catalogos.aplicarCatalogoTurnosDesdeDb([
+      ...Object.values(CATALOGO_TURNOS),
+      turnoTandas,
+    ]);
+    catalogos.aplicarServiciosDesdeDb([
+      { ...srvUrg, turnosHabilitados: ['M8', 'T8', 'ADM_B', 'L'] },
+      srvMat,
+    ]);
+    catalogos.aplicarEmpleadosDesdeDb([
+      { id: 'e1', documento: '101', nombre: 'Ana', categoria: { nombre: 'Enfermero(a) Jefe' }, servicioBaseId: 'srv-urg', horasContratoMes: 168 },
+      { id: 'e2', documento: '102', nombre: 'Luis', categoria: { nombre: 'Enfermero(a) Jefe' }, servicioBaseId: 'srv-urg', horasContratoMes: 168 },
+    ]);
+
+    store.estadosPorCuadrante.set({ 'srv-urg::2026-11': 'BORRADOR' });
+    store.asignacionesPorPeriodo.set({
+      '2026-11': {
+        e1: {
+          10: { codigo: 'ADM_B', previsto: 'ADM_B', servicioEjecutorId: 'srv-urg', breakTandaOrden: 1, breakInicio: '12:00', breakFin: '13:00' },
+        },
+        e2: {
+          10: { codigo: 'ADM_B', previsto: 'ADM_B', servicioEjecutorId: 'srv-urg', breakTandaOrden: 1, breakInicio: '12:00', breakFin: '13:00', fijada: true },
+        },
+      },
+    });
+
+    // Ambos en T1 cuando maxSimultaneos=1 -> alerta de simultaneidad en servicio y dia 10
+    const sim = store.resumenSimultaneidadBreaks();
+    expect(sim.totalAlertas).toBe(1);
+    expect(sim.alertasPorDia[10].length).toBe(1);
+    expect(sim.alertasPorDia[10][0].asignados).toBe(2);
+
+    // e2 fijada no se puede cambiar manualmente
+    store.cambiarBreakCelda('e2', 10, 2);
+    expect(apiSpy.guardarBreakCelda).not.toHaveBeenCalled();
+
+    // Si falla API en e1 -> revierte breakTandaOrden a 1
+    apiSpy.guardarBreakCelda.and.returnValue(throwError(() => ({ error: { message: 'Fallo break' } })));
+    store.cambiarBreakCelda('e1', 10, 2);
+    expect(store.asignaciones()['e1'][10].breakTandaOrden).toBe(1);
+
+    // Si API responde OK en e1 -> pasa a T2 y desaparece la alerta
+    apiSpy.guardarBreakCelda.and.returnValue(
+      of({ ok: true, id: 'asig-1', breakTandaOrden: 2, breakInicio: '13:00', breakFin: '14:00' })
+    );
+    store.cambiarBreakCelda('e1', 10, 2);
+    expect(store.asignaciones()['e1'][10].breakTandaOrden).toBe(2);
+    expect(store.asignaciones()['e1'][10].breakInicio).toBe('13:00');
+    expect(store.resumenSimultaneidadBreaks().totalAlertas).toBe(0);
+
+    // Rebalancear dia cuando ambos vuelven a T1 (con e2 fijada en T1) -> mueve e1 a T2 via guardarLoteCuadrante
+    store.asignacionesPorPeriodo.set({
+      '2026-11': {
+        e1: {
+          10: { codigo: 'ADM_B', previsto: 'ADM_B', servicioEjecutorId: 'srv-urg', breakTandaOrden: 1, breakInicio: '12:00', breakFin: '13:00' },
+        },
+        e2: {
+          10: { codigo: 'ADM_B', previsto: 'ADM_B', servicioEjecutorId: 'srv-urg', breakTandaOrden: 1, breakInicio: '12:00', breakFin: '13:00', fijada: true },
+        },
+      },
+    });
+    store.rebalancearBreaksDia(10, 'ADM_B');
+    expect(store.asignaciones()['e2'][10].breakTandaOrden).toBe(1);
+    expect(store.asignaciones()['e1'][10].breakTandaOrden).toBe(2);
+    expect(apiSpy.guardarLoteCuadrante).toHaveBeenCalledWith(
+      jasmine.objectContaining({
+        origenAccion: 'BALANCEAR_BREAKS',
+        celdas: [
+          jasmine.objectContaining({
+            empleadoId: 'e1',
+            dia: 10,
+            breakTandaOrden: 2,
+            breakInicio: '13:00',
+            breakFin: '14:00',
+          }),
+        ],
+      })
+    );
   });
 });

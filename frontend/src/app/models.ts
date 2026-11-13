@@ -2,7 +2,10 @@ import {
   ModoAmortizacionBanco,
   ModoRecargoDominicalEmpresa,
   PlantillaNormativaEmpresa,
+  TandaBreakTurno,
 } from './shared/liquidacion-horas';
+
+export type { TandaBreakTurno };
 
 export type TipoAsistencia =
   | 'CUIDADOS_INTENSIVOS'
@@ -180,6 +183,10 @@ export interface TipoTurnoConfig {
   horasDiurnas: number;
   horasNocturnas: number;
   minutosAlmuerzo?: number;
+  recesoHabilitado?: boolean;
+  recesoRemunerado?: boolean;
+  recesoMaxSimultaneos?: number;
+  recesoTandasJson?: TandaBreakTurno[] | null;
   bgHex: string;
   textHex: string;
   borderHex: string;
@@ -209,7 +216,14 @@ export interface EmpleadoHospital {
   horasSemanalesLey?: number;
   horasSemanalesAplicadas?: number;
   horasContratoMes: number;
+  horasContratadasEfectivas?: number;
+  horasExoneradasMes?: number;
+  diasProrrateadosMes?: number;
   saldoBancoAnterior: number;
+  saldoBancoActual?: number;
+  saldoBancoDiferenciaMes?: number;
+  tieneActividadMes?: boolean;
+  cuadranteMesConsolidado?: boolean;
   saldoBancoOrigen?: { anio: number; mes: number; saldo: number };
   ultimoTurnoMesPrevio: CodigoTurno;
 }
@@ -221,6 +235,9 @@ export interface CeldaAsignacion {
   servicioEjecutorId?: string;
   nota?: string;
   fijada?: boolean;
+  breakTandaOrden?: number;
+  breakInicio?: string;
+  breakFin?: string;
 }
 
 export interface PermutaItem {
@@ -395,7 +412,7 @@ export const CATALOGO_TURNOS: Record<string, TipoTurnoConfig> = {
   D12: { codigo: 'D12', nombre: 'Guardia Diurna 12h', horario: '07:00 - 19:00', horaInicio: '07:00', horaFin: '19:00', horasOrdinarias: 12, horasDiurnas: 12, horasNocturnas: 0, bgHex: '#FED7AA', textHex: '#9A3412', borderHex: '#FB923C', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
   G24: { codigo: 'G24', nombre: 'Guardia Médica 24h', horario: '07:00 - 07:00 (+1)', horaInicio: '07:00', horaFin: '07:00', horasOrdinarias: 24, horasDiurnas: 13, horasNocturnas: 11, bgHex: '#FEE2E2', textHex: '#991B1B', borderHex: '#FCA5A5', esAusencia: false, esNocturnoPesado: true, descuentaBancoHoras: false, visibleEnPaleta: true },
 
-  ADM: { codigo: 'ADM', nombre: 'Administrativo 8h', horario: '08:00 - 17:00', horaInicio: '08:00', horaFin: '17:00', horasOrdinarias: 8, horasDiurnas: 8, horasNocturnas: 0, minutosAlmuerzo: 60, bgHex: '#F3F4F6', textHex: '#374151', borderHex: '#D1D5DB', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
+  ADM: { codigo: 'ADM', nombre: 'Administrativo 8h', horario: '08:00 - 17:00', horaInicio: '08:00', horaFin: '17:00', horasOrdinarias: 8, horasDiurnas: 8, horasNocturnas: 0, minutosAlmuerzo: 60, recesoHabilitado: true, recesoRemunerado: false, recesoMaxSimultaneos: 1, recesoTandasJson: [{ orden: 1, etiqueta: 'T1', inicio: '12:00', fin: '13:00', duracionMin: 60 }], bgHex: '#F3F4F6', textHex: '#374151', borderHex: '#D1D5DB', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
   MD: { codigo: 'MD', nombre: 'Madrugada / Aseo', horario: '06:00 - 14:00', horaInicio: '06:00', horaFin: '14:00', horasOrdinarias: 8, horasDiurnas: 8, horasNocturnas: 0, bgHex: '#E2E8F0', textHex: '#1E293B', borderHex: '#94A3B8', esAusencia: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
   AP: { codigo: 'AP', nombre: 'Refuerzo Horas Pico', horario: '10:00 - 18:00', horaInicio: '10:00', horaFin: '18:00', horasOrdinarias: 8, horasDiurnas: 8, horasNocturnas: 0, bgHex: '#CFFAFE', textHex: '#0891B2', borderHex: '#67E8F9', esAusencia: false, prorrateaMetaContrato: false, bloqueaPermutas: false, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
   DISP: { codigo: 'DISP', nombre: 'Disponibilidad / Retén', horario: 'Al llamado', horaInicio: '00:00', horaFin: '00:00', horasOrdinarias: 0, horasDiurnas: 0, horasNocturnas: 0, bgHex: '#FEF9C3', textHex: '#713F12', borderHex: '#FDE047', esAusencia: false, prorrateaMetaContrato: false, bloqueaPermutas: true, esNocturnoPesado: false, descuentaBancoHoras: false, visibleEnPaleta: true },
@@ -444,6 +461,12 @@ export interface CambioCeldaHistorial {
   turnoNuevo: CodigoTurno;
   previstoAnterior?: string;
   esRotacion?: boolean;
+  breakTandaOrdenAnterior?: number | null;
+  breakInicioAnterior?: string | null;
+  breakFinAnterior?: string | null;
+  breakTandaOrdenNuevo?: number | null;
+  breakInicioNuevo?: string | null;
+  breakFinNuevo?: string | null;
 }
 
 export interface PasoHistorialEdicion {

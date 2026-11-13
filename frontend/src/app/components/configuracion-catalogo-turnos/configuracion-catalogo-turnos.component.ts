@@ -1,29 +1,32 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { Component, ElementRef, EventEmitter, Input, OnDestroy, Output, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { TipoTurnoConfig } from '../../models';
+import { TandaBreakTurno, TipoTurnoConfig } from '../../models';
 import {
   CODIGOS_TURNOS_SISTEMA_OBLIGATORIOS,
+  duracionHorarioMin,
+  esMinutoNocturno,
   hoyColombiaIso,
+  MINUTOS_DIA,
   ModoAmortizacionBanco,
   obtenerHorasAmortizacionTurno,
+  parseHoraMin,
   textoFranjasVigentes,
 } from '../../shared/liquidacion-horas';
+import { coincideBusquedaCampos, dividirTerminosBusqueda } from '../../utils/busqueda-texto';
+import { resolverTemaColor, TemaColorTurno } from '../../utils/color-tema';
+export type { TemaColorTurno };
 
 export interface CalculoAutomaticoHorasTurno {
   ordinarias: number;
   horarioTexto: string;
   minutosAlmuerzo: number;
+  recesoHabilitado?: boolean;
+  recesoRemunerado?: boolean;
+  duracionBreakMin?: number;
+  tandasBreakCount?: number;
   diurnas: number;
   nocturnas: number;
-}
-
-export interface TemaColorTurno {
-  key: string;
-  nombre: string;
-  bgHex: string;
-  textHex: string;
-  borderHex: string;
 }
 
 @Component({
@@ -32,9 +35,21 @@ export interface TemaColorTurno {
   imports: [CommonModule, FormsModule],
   styleUrl: './configuracion-catalogo-turnos.component.css',
   template: `
+    <div class="module-hero-card">
+      <div class="module-hero-brand">
+        <div class="module-hero-icon" aria-hidden="true">🎨</div>
+        <div class="module-hero-titles">
+          <div class="module-hero-title-row">
+            <h2>Gestión de Turnos</h2>
+            <span class="module-hero-badge">{{ listaTurnosCatalogo.length }} turnos</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="catalogo-turnos-grid">
       <!-- Formulario de Creación / Edición de Turno -->
-      <div class="panel-card catalogo-form-card">
+      <div #formCard class="panel-card catalogo-form-card">
         <div class="panel-header">
           <h3>
             @if (turnoEditandoCodigo) {
@@ -118,20 +133,213 @@ export interface TemaColorTurno {
               }
             </div>
 
-            @if (turnoFormModoJornada === 'HORARIO') {
-              <div class="form-row">
-                <label for="turno-form-almuerzo">🍽️ Minutos de Almuerzo / Descanso Intermedio (No computable — Art. 167 CST):</label>
-                <input
-                  id="turno-form-almuerzo"
-                  type="number"
-                  min="0"
-                  max="480"
-                  step="5"
-                  placeholder="Ej: 0, 45, 60"
-                  [ngModel]="turnoFormMinutosAlmuerzo"
-                  (ngModelChange)="cambiarTurnoFormMinutosAlmuerzo.emit(+$event)"
-                />
-                <small class="hint-campo">0 min = turno continuo sin descuento; ej. 60 min descuenta 1.0 h de la duración bruta.</small>
+            @if (turnoFormModoJornada === 'HORARIO' || turnoFormModoJornada === 'GUARDIA_24H') {
+              <div class="break-config-card">
+                <label class="check-row break-toggle-row">
+                  <input
+                    id="turno-form-receso-check"
+                    type="checkbox"
+                    [ngModel]="turnoFormRecesoHabilitado"
+                    (ngModelChange)="cambiarTurnoRecesoHabilitado.emit($event)"
+                  />
+                  <span>🍽️ Agregar break / almuerzo (1 por turno)</span>
+                </label>
+
+                @if (turnoFormRecesoHabilitado) {
+                  <div class="break-collapsible-body">
+                    <div class="break-payroll-toggle" role="group" aria-label="Cómputo del break en jornada">
+                      <button
+                        type="button"
+                        class="break-mode-btn"
+                        [class.active]="!turnoFormRecesoRemunerado"
+                        (click)="cambiarTurnoRecesoRemunerado.emit(false)"
+                        title="Descuenta el tiempo de almuerzo/break de la jornada laborada (Art. 167 CST)">
+                        ⚖️ Descuenta de jornada
+                      </button>
+                      <button
+                        type="button"
+                        class="break-mode-btn"
+                        [class.active]="turnoFormRecesoRemunerado"
+                        (click)="cambiarTurnoRecesoRemunerado.emit(true)"
+                        title="Receso operativo incluido dentro de la jornada continua; no descuenta horas (0h desc.)">
+                        ☕ Incluido (pagado)
+                      </button>
+                    </div>
+
+                    <div class="break-params-row">
+                      <div class="break-param-col">
+                        <span class="break-param-label">Duración del break:</span>
+                        <div class="break-duration-cluster">
+                          @for (preset of duracionesPreset; track preset) {
+                            <button
+                              type="button"
+                              class="break-dur-pill"
+                              [class.active]="turnoFormDuracionBreakMin === preset"
+                              (click)="cambiarTurnoDuracionBreak.emit(preset)">
+                              {{ preset }}m
+                            </button>
+                          }
+                          <input
+                            id="turno-form-duracion-break"
+                            type="number"
+                            min="5"
+                            max="240"
+                            step="5"
+                            aria-label="Duración personalizada en minutos"
+                            class="break-dur-input"
+                            [ngModel]="turnoFormDuracionBreakMin"
+                            (ngModelChange)="cambiarTurnoDuracionBreak.emit(+$event)"
+                          />
+                        </div>
+                      </div>
+                      <div class="break-param-col break-max-col">
+                        <label for="turno-form-max-sim" class="break-param-label">Máx. simultáneos:</label>
+                        <input
+                          id="turno-form-max-sim"
+                          type="number"
+                          min="1"
+                          max="99"
+                          step="1"
+                          class="break-max-input"
+                          [ngModel]="turnoFormRecesoMaxSimultaneos"
+                          (ngModelChange)="cambiarTurnoRecesoMaxSimultaneos.emit(+$event)"
+                        />
+                      </div>
+                    </div>
+
+                    <!-- Línea Temporal Interactiva (Inicio -> Fin del Turno) -->
+                    <div class="break-timeline-section">
+                      <div class="break-timeline-header">
+                        <span class="break-timeline-range">
+                          🕒 {{ turnoFormHoraInicio || '07:00' }} → {{ turnoFormModoJornada === 'GUARDIA_24H' ? (turnoFormHoraInicio || '07:00') + ' (+1)' : (turnoFormHoraFin || '15:00') }}
+                        </span>
+                        <span class="break-timeline-hint">Arrastra cada tanda sobre la línea temporal</span>
+                      </div>
+
+                      <div #timelineTrack class="break-timeline-track">
+                        <div class="break-timeline-bg" aria-hidden="true">
+                          @for (seg of segmentosFondoTimeline; track $index) {
+                            <div
+                              class="break-bg-slice"
+                              [class.nocturno]="seg.esNocturno"
+                              [style.left.%]="seg.leftPct"
+                              [style.width.%]="seg.widthPct">
+                            </div>
+                          }
+                          @for (tick of marcasHorariasTimeline; track tick.label) {
+                            <div class="break-grid-line" [style.left.%]="tick.leftPct"></div>
+                          }
+                        </div>
+
+                        <div class="break-lanes">
+                          @for (tanda of turnoFormRecesoTandas; track tanda.orden) {
+                            @let pos = posicionTandaTimeline(tanda);
+                            @let activa = draggingOrden === tanda.orden || focusedOrden === tanda.orden;
+                            <div class="break-lane-row">
+                              <div
+                                class="break-tanda-bar"
+                                [class.dragging]="draggingOrden === tanda.orden"
+                                [class.is-selected]="activa"
+                                [class.tanda-color-1]="(tanda.orden - 1) % 4 === 0"
+                                [class.tanda-color-2]="(tanda.orden - 1) % 4 === 1"
+                                [class.tanda-color-3]="(tanda.orden - 1) % 4 === 2"
+                                [class.tanda-color-4]="(tanda.orden - 1) % 4 === 3"
+                                [style.left.%]="pos.leftPct"
+                                [style.width.%]="pos.widthPct"
+                                [attr.data-tanda-orden]="tanda.orden"
+                                tabindex="0"
+                                role="slider"
+                                [attr.aria-label]="'Tanda ' + tanda.etiqueta + ' de ' + tanda.inicio + ' a ' + tanda.fin"
+                                [attr.aria-valuemin]="0"
+                                [attr.aria-valuemax]="pos.maxRelMin"
+                                [attr.aria-valuenow]="pos.relStartMin"
+                                [attr.aria-valuetext]="tanda.inicio + ' a ' + tanda.fin"
+                                (focus)="focusedOrden = tanda.orden"
+                                (blur)="focusedOrden = focusedOrden === tanda.orden ? null : focusedOrden"
+                                (pointerdown)="onTandaPointerDown($event, tanda)"
+                                (keydown)="onTandaKeydown($event, tanda, pos.relStartMin)"
+                                [title]="tanda.etiqueta + ': ' + tanda.inicio + ' - ' + tanda.fin + ' (' + tanda.duracionMin + ' min). Arrastra o usa ← →.'">
+                                @if (activa) {
+                                  <span
+                                    class="break-live-callout"
+                                    [class.align-left]="pos.leftPct < 14"
+                                    [class.align-right]="pos.leftPct + pos.widthPct > 86"
+                                    aria-hidden="true">
+                                    {{ tanda.etiqueta }}: {{ tanda.inicio }}–{{ tanda.fin }}
+                                  </span>
+                                }
+                                <span class="break-tanda-label">
+                                  <strong>{{ tanda.etiqueta }}</strong>
+                                  @if (pos.widthPct >= 26) {
+                                    <span> {{ tanda.inicio }}–{{ tanda.fin }}</span>
+                                  }
+                                </span>
+                              </div>
+                              @if (turnoFormRecesoTandas.length > 1) {
+                                <button
+                                  type="button"
+                                  class="break-tanda-del-btn"
+                                  [attr.aria-label]="'Eliminar tanda ' + tanda.etiqueta"
+                                  [title]="'Eliminar tanda ' + tanda.etiqueta"
+                                  (click)="eliminarTandaBreak.emit(tanda.orden)">
+                                  ✕
+                                </button>
+                              }
+                            </div>
+                          }
+                        </div>
+
+                        <div class="break-timeline-ticks" aria-hidden="true">
+                          @for (tick of marcasHorariasTimeline; track tick.label) {
+                            <span class="break-tick" [style.left.%]="tick.leftPct">{{ tick.label }}</span>
+                          }
+                        </div>
+                      </div>
+
+                      <!-- Lectura exacta siempre visible de horarios de cada tanda -->
+                      <div class="break-tandas-readout" aria-live="polite">
+                        @for (tanda of turnoFormRecesoTandas; track tanda.orden) {
+                          <button
+                            type="button"
+                            class="break-readout-chip"
+                            [class.is-active]="draggingOrden === tanda.orden || focusedOrden === tanda.orden"
+                            [class.tanda-color-1]="(tanda.orden - 1) % 4 === 0"
+                            [class.tanda-color-2]="(tanda.orden - 1) % 4 === 1"
+                            [class.tanda-color-3]="(tanda.orden - 1) % 4 === 2"
+                            [class.tanda-color-4]="(tanda.orden - 1) % 4 === 3"
+                            (click)="enfocarBarraTanda(tanda.orden)"
+                            title="Clic para seleccionar en la línea temporal y ajustar con ← →">
+                            <strong>{{ tanda.etiqueta }}</strong>
+                            <span class="break-readout-time">{{ tanda.inicio }} – {{ tanda.fin }}</span>
+                            <span class="break-readout-dur">({{ tanda.duracionMin }}m)</span>
+                          </button>
+                        }
+                      </div>
+
+                      <div class="break-timeline-actions">
+                        <button
+                          type="button"
+                          class="btn-break-secondary"
+                          [disabled]="turnoFormRecesoTandas.length >= 6"
+                          (click)="agregarTandaBreak.emit()">
+                          + Agregar tanda
+                        </button>
+                        <button
+                          type="button"
+                          class="btn-break-secondary"
+                          (click)="escalonarTandasBreakAutomatico.emit()">
+                          ⚡ Escalonar automático
+                        </button>
+                      </div>
+
+                      @if (hayTraslapeTandas) {
+                        <div class="break-overlap-warning">
+                          ⚠️ Dos o más tandas se superponen en horario. Arrastra una barra o usa <strong>Escalonar automático</strong> para evitar servicio descubierto.
+                        </div>
+                      }
+                    </div>
+                  </div>
+                }
               </div>
             }
           }
@@ -140,35 +348,72 @@ export interface TemaColorTurno {
           <div class="auto-calc-banner">
             <div>
               <strong>⏱️ Total Computable: {{ calc.ordinarias }}h</strong>
-              <span class="calc-sub">({{ calc.horarioTexto }}@if (calc.minutosAlmuerzo > 0) { • 🍽️ -{{ calc.minutosAlmuerzo }} min almuerzo })</span>
+              <span class="calc-sub">
+                ({{ calc.horarioTexto }}
+                @if (calc.recesoHabilitado && calc.recesoRemunerado) {
+                  • ☕ Break {{ calc.duracionBreakMin }}m pagado
+                } @else if (calc.minutosAlmuerzo > 0) {
+                  • 🍽️ -{{ calc.minutosAlmuerzo }} min break CST
+                }
+                @if (calc.tandasBreakCount && calc.tandasBreakCount > 1) {
+                  • 🔄 {{ calc.tandasBreakCount }} tandas
+                })
+              </span>
             </div>
             <div class="calc-pills">
               <span class="calc-pill-day">☀️ Diurnas ref. ({{ franjasHoy.diurna }}): <strong>{{ calc.diurnas }}h</strong></span>
               <span class="calc-pill-night">🌙 Nocturnas ref. ({{ franjasHoy.nocturna }}): <strong>{{ calc.nocturnas }}h</strong></span>
             </div>
-            <small class="calc-empresa-note">
-              ℹ️ Vista previa calculada con referencia CST ({{ franjasHoy.nocturna }}). En el cuadrante y pre-nómina, cada colaborador liquida según la franja nocturna de su empresa contratante (ej. 18:00–06:00 Decreto 1042 o 19:00–06:00 CST).
-            </small>
           </div>
 
           <div class="form-row">
-            <label>Color del Turno:</label>
-            <div class="color-themes-grid">
+            <label id="label-color-turno">Color del Turno:</label>
+            <div class="color-themes-grid" role="radiogroup" aria-labelledby="label-color-turno">
               @for (tm of temasColorTurno; track tm.key) {
                 <button
                   type="button"
                   class="color-theme-swatch"
-                  [class.selected]="turnoFormColorKey === tm.key"
-                  [attr.aria-pressed]="turnoFormColorKey === tm.key"
+                  [class.selected]="esTemaSeleccionado(tm)"
+                  [attr.aria-pressed]="esTemaSeleccionado(tm)"
                   [attr.aria-label]="'Color ' + tm.nombre"
                   [style.background-color]="tm.bgHex"
                   [style.color]="tm.textHex"
                   [style.border-color]="tm.borderHex"
                   (click)="cambiarTurnoFormColorKey.emit(tm.key)"
-                  [title]="tm.nombre">
+                  [title]="tm.nombre + ' (' + tm.bgHex + ')'">
                   {{ turnoFormCodigo || 'T' }}
                 </button>
               }
+
+              <!-- Pastilla activa cuando es un color personalizado del espectro -->
+              @if (esColorPersonalizado) {
+                <button
+                  type="button"
+                  class="color-theme-swatch custom-swatch selected"
+                  [style.background-color]="temaActualForm.bgHex"
+                  [style.color]="temaActualForm.textHex"
+                  [style.border-color]="temaActualForm.borderHex"
+                  (click)="abrirSelectorNativo()"
+                  [title]="'Color personalizado actual: ' + temaActualForm.bgHex + '. Clic para cambiar en el espectro'">
+                  {{ turnoFormCodigo || 'T' }}
+                </button>
+              }
+
+              <!-- Botón disparador del espectro nativo (Distribución 2: [ 🎨 + ]) -->
+              <label
+                class="color-theme-swatch color-spectrum-trigger"
+                title="Abrir espectro de colores completo para elegir cualquier tono">
+                <span class="spectrum-icon" aria-hidden="true">🎨</span>
+                <span class="spectrum-plus" aria-hidden="true">+</span>
+                <input
+                  #nativeColorInput
+                  type="color"
+                  class="color-native-input"
+                  [ngModel]="temaActualForm.bgHex"
+                  (ngModelChange)="onColorSpectrumChange($event)"
+                  aria-label="Selector de espectro de color"
+                />
+              </label>
             </div>
           </div>
 
@@ -369,9 +614,19 @@ export interface TemaColorTurno {
                   </td>
                   <td class="col-reglas">
                     <div class="reglas-tags-wrap">
-                      @if (t.minutosAlmuerzo && t.minutosAlmuerzo > 0) {
-                        <span class="badge-custom-sm" title="Tiempo de almuerzo no computable descontado de la jornada (Art. 167 CST)">
-                          🍽️ -{{ t.minutosAlmuerzo }}m Almuerzo
+                      @let cantTandas = t.recesoTandasJson?.length || 0;
+                      @if (t.recesoHabilitado && t.recesoRemunerado) {
+                        <span class="badge-break-pagado-sm" [title]="'Receso operativo pagado (0h descuento)' + (cantTandas ? ' · ' + cantTandas + ' tanda(s)' : '')">
+                          ☕ Break {{ t.recesoTandasJson?.[0]?.duracionMin || 30 }}m Pagado
+                        </span>
+                      } @else if (t.minutosAlmuerzo && t.minutosAlmuerzo > 0) {
+                        <span class="badge-custom-sm" title="Tiempo de break/almuerzo no computable descontado de la jornada (Art. 167 CST)">
+                          🍽️ -{{ t.minutosAlmuerzo }}m Break CST
+                        </span>
+                      }
+                      @if (t.recesoHabilitado && t.recesoTandasJson && t.recesoTandasJson.length > 0) {
+                        <span class="badge-tandas-sm" [title]="'Tandas configuradas: ' + textoTandasBadge(t)">
+                          🔄 {{ t.recesoTandasJson.length }} {{ t.recesoTandasJson.length === 1 ? 'tanda' : 'tandas' }} · máx {{ t.recesoMaxSimultaneos || 1 }}
                         </span>
                       }
                       @if (t.esNocturnoPesado) {
@@ -393,7 +648,7 @@ export interface TemaColorTurno {
                           <span class="badge-banco-mini" [title]="'Amortiza ' + horasAmort + 'h fijas del Banco de Horas'">🏦 -{{ horasAmort }}h Banco</span>
                         }
                       }
-                      @if (!t.esNocturnoPesado && !t.descuentaBancoHoras && !t.esAusencia && !t.prorrateaMetaContrato && !t.bloqueaPermutas && (!t.minutosAlmuerzo || t.minutosAlmuerzo === 0)) {
+                      @if (!t.esNocturnoPesado && !t.descuentaBancoHoras && !t.esAusencia && !t.prorrateaMetaContrato && !t.bloqueaPermutas && !t.recesoHabilitado && (!t.minutosAlmuerzo || t.minutosAlmuerzo === 0)) {
                         <span class="text-muted-sm">Continuo</span>
                       }
                     </div>
@@ -413,7 +668,7 @@ export interface TemaColorTurno {
                       <button
                         type="button"
                         class="btn-sm-primary"
-                        (click)="cargarTurnoParaEdicion.emit(t)"
+                        (click)="onEditarTurno(t)"
                         title="Editar este turno en el formulario">
                         ✏️ Editar
                       </button>
@@ -450,13 +705,243 @@ export interface TemaColorTurno {
     </div>
   `,
 })
-export class ConfiguracionCatalogoTurnosComponent {
+export class ConfiguracionCatalogoTurnosComponent implements OnDestroy {
   readonly franjasHoy = textoFranjasVigentes(hoyColombiaIso());
+  readonly duracionesPreset = [15, 30, 45, 60];
   busquedaTurno = '';
   filtroFamiliaTurno: 'TODOS' | 'ORDINARIOS' | 'GUARDIAS' | 'DESCANSOS' = 'TODOS';
 
+  @ViewChild('timelineTrack') timelineTrackRef?: ElementRef<HTMLElement>;
+  @ViewChild('formCard') formCardRef?: ElementRef<HTMLElement>;
+  @ViewChild('nativeColorInput') nativeColorInputRef?: ElementRef<HTMLInputElement>;
+  draggingOrden: number | null = null;
+  focusedOrden: number | null = null;
+  private dragStartX = 0;
+  private dragInitialRelMin = 0;
+  private dragTrackWidth = 300;
+  private dragBoundMove?: (ev: PointerEvent) => void;
+  private dragBoundUp?: () => void;
+
+  get temaActualForm(): TemaColorTurno {
+    return resolverTemaColor(this.turnoFormColorKey, this.temasColorTurno);
+  }
+
+  get esColorPersonalizado(): boolean {
+    const key = (this.turnoFormColorKey || '').toUpperCase();
+    const actualBg = this.temaActualForm.bgHex.toLowerCase();
+    const esPreset = this.temasColorTurno.some(
+      (tm) => tm.key.toUpperCase() === key || tm.bgHex.toLowerCase() === actualBg
+    );
+    return !esPreset;
+  }
+
+  esTemaSeleccionado(tm: TemaColorTurno): boolean {
+    const actualBg = this.temaActualForm.bgHex.toLowerCase();
+    return (
+      actualBg === tm.bgHex.toLowerCase() ||
+      this.turnoFormColorKey.toUpperCase() === tm.key.toUpperCase()
+    );
+  }
+
+  onColorSpectrumChange(colorHex: string): void {
+    if (colorHex) {
+      this.cambiarTurnoFormColorKey.emit(colorHex.toUpperCase());
+    }
+  }
+
+  abrirSelectorNativo(): void {
+    const el = this.nativeColorInputRef?.nativeElement;
+    if (el) {
+      if (typeof (el as any).showPicker === 'function') {
+        try {
+          (el as any).showPicker();
+          return;
+        } catch {}
+      }
+      el.click();
+    }
+  }
+
+  ngOnDestroy(): void {
+    this.limpiarDragListeners();
+  }
+
+  private limpiarDragListeners(): void {
+    if (typeof window !== 'undefined') {
+      if (this.dragBoundMove) {
+        window.removeEventListener('pointermove', this.dragBoundMove);
+      }
+      if (this.dragBoundUp) {
+        window.removeEventListener('pointerup', this.dragBoundUp);
+        window.removeEventListener('pointercancel', this.dragBoundUp);
+      }
+    }
+    this.dragBoundMove = undefined;
+    this.dragBoundUp = undefined;
+    this.draggingOrden = null;
+  }
+
+  get duracionTurnoTimelineMin(): number {
+    const es24 = this.turnoFormModoJornada === 'GUARDIA_24H';
+    const ini = this.turnoFormHoraInicio || '07:00';
+    const fin = es24 ? ini : this.turnoFormHoraFin || '15:00';
+    return duracionHorarioMin(ini, fin, es24) ?? 480;
+  }
+
+  get inicioTurnoTimelineAbsMin(): number {
+    return parseHoraMin(this.turnoFormHoraInicio || '07:00') ?? 420;
+  }
+
+  get segmentosFondoTimeline(): Array<{ leftPct: number; widthPct: number; esNocturno: boolean }> {
+    const s = this.inicioTurnoTimelineAbsMin;
+    const dur = Math.max(30, this.duracionTurnoTimelineMin);
+    const fechaRef = hoyColombiaIso();
+    const slice = 30;
+    const out: Array<{ leftPct: number; widthPct: number; esNocturno: boolean }> = [];
+    for (let rel = 0; rel < dur; rel += slice) {
+      const len = Math.min(slice, dur - rel);
+      const minDia = ((s + rel) % MINUTOS_DIA + MINUTOS_DIA) % MINUTOS_DIA;
+      const esNocturno = esMinutoNocturno(minDia, fechaRef);
+      const prev = out[out.length - 1];
+      if (prev && prev.esNocturno === esNocturno) {
+        prev.widthPct += (len / dur) * 100;
+      } else {
+        out.push({
+          leftPct: (rel / dur) * 100,
+          widthPct: (len / dur) * 100,
+          esNocturno,
+        });
+      }
+    }
+    return out;
+  }
+
+  get marcasHorariasTimeline(): Array<{ label: string; leftPct: number }> {
+    const s = this.inicioTurnoTimelineAbsMin;
+    const dur = Math.max(30, this.duracionTurnoTimelineMin);
+    const stepMin = dur <= 360 ? 60 : dur <= 720 ? 120 : 240;
+    const ticks: Array<{ label: string; leftPct: number }> = [];
+    for (let rel = 0; rel <= dur; rel += stepMin) {
+      const absMin = ((s + rel) % MINUTOS_DIA + MINUTOS_DIA) % MINUTOS_DIA;
+      const hh = String(Math.floor(absMin / 60)).padStart(2, '0');
+      const mm = String(absMin % 60).padStart(2, '0');
+      ticks.push({ label: `${hh}:${mm}`, leftPct: (rel / dur) * 100 });
+    }
+    if (dur % stepMin !== 0) {
+      const absFin = ((s + dur) % MINUTOS_DIA + MINUTOS_DIA) % MINUTOS_DIA;
+      const hh = String(Math.floor(absFin / 60)).padStart(2, '0');
+      const mm = String(absFin % 60).padStart(2, '0');
+      ticks.push({ label: `${hh}:${mm}`, leftPct: 100 });
+    }
+    return ticks;
+  }
+
+  posicionTandaTimeline(tanda: TandaBreakTurno): {
+    leftPct: number;
+    widthPct: number;
+    relStartMin: number;
+    maxRelMin: number;
+  } {
+    const s = this.inicioTurnoTimelineAbsMin;
+    const dur = Math.max(30, this.duracionTurnoTimelineMin);
+    const iniRaw = parseHoraMin(tanda.inicio);
+    let relStartMin = iniRaw !== null ? iniRaw - s : 0;
+    if (relStartMin < 0) relStartMin += MINUTOS_DIA;
+    const durTanda = Math.max(5, Math.min(dur, tanda.duracionMin || 30));
+    const maxRelMin = Math.max(0, dur - durTanda);
+    relStartMin = Math.max(0, Math.min(maxRelMin, relStartMin));
+    const leftPct = (relStartMin / dur) * 100;
+    const widthPct = Math.max(8, (durTanda / dur) * 100);
+    return {
+      leftPct: Math.min(100 - widthPct, leftPct),
+      widthPct,
+      relStartMin,
+      maxRelMin,
+    };
+  }
+
+  get hayTraslapeTandas(): boolean {
+    const tandas = this.turnoFormRecesoTandas;
+    if (tandas.length < 2) return false;
+    const s = this.inicioTurnoTimelineAbsMin;
+    const rangos = tandas.map((t) => {
+      const iRaw = parseHoraMin(t.inicio) ?? s;
+      let start = iRaw - s;
+      if (start < 0) start += MINUTOS_DIA;
+      return { start, end: start + (t.duracionMin || 30) };
+    });
+    rangos.sort((a, b) => a.start - b.start);
+    for (let i = 1; i < rangos.length; i++) {
+      if (rangos[i].start < rangos[i - 1].end) return true;
+    }
+    return false;
+  }
+
+  onTandaPointerDown(event: PointerEvent, tanda: TandaBreakTurno): void {
+    event.preventDefault();
+    event.stopPropagation();
+    (event.currentTarget as HTMLElement | null)?.focus({ preventScroll: true });
+    const trackEl = this.timelineTrackRef?.nativeElement;
+    if (!trackEl) return;
+    this.limpiarDragListeners();
+    this.draggingOrden = tanda.orden;
+    this.dragStartX = event.clientX;
+    this.dragTrackWidth = Math.max(120, trackEl.getBoundingClientRect().width);
+    this.dragInitialRelMin = this.posicionTandaTimeline(tanda).relStartMin;
+    const durTotal = this.duracionTurnoTimelineMin;
+    const ordenObjetivo = tanda.orden;
+
+    this.dragBoundMove = (ev: PointerEvent) => {
+      const deltaPx = ev.clientX - this.dragStartX;
+      const deltaMin = (deltaPx / this.dragTrackWidth) * durTotal;
+      this.moverTandaBreak.emit({
+        orden: ordenObjetivo,
+        nuevoInicioRelMin: this.dragInitialRelMin + deltaMin,
+      });
+    };
+
+    this.dragBoundUp = () => {
+      this.limpiarDragListeners();
+    };
+
+    window.addEventListener('pointermove', this.dragBoundMove);
+    window.addEventListener('pointerup', this.dragBoundUp);
+    window.addEventListener('pointercancel', this.dragBoundUp);
+  }
+
+  onEditarTurno(turno: TipoTurnoConfig): void {
+    this.cargarTurnoParaEdicion.emit(turno);
+    const card = this.formCardRef?.nativeElement;
+    if (card && card.getBoundingClientRect().top < 12) {
+      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
+
+  enfocarBarraTanda(orden: number): void {
+    const trackEl = this.timelineTrackRef?.nativeElement;
+    const bar = trackEl?.querySelector<HTMLElement>(`.break-tanda-bar[data-tanda-orden="${orden}"]`);
+    bar?.focus({ preventScroll: true });
+    this.focusedOrden = orden;
+  }
+
+  onTandaKeydown(event: KeyboardEvent, tanda: TandaBreakTurno, relStartMin: number): void {
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      this.moverTandaBreak.emit({ orden: tanda.orden, nuevoInicioRelMin: relStartMin - 15 });
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      this.moverTandaBreak.emit({ orden: tanda.orden, nuevoInicioRelMin: relStartMin + 15 });
+    }
+  }
+
+  textoTandasBadge(t: TipoTurnoConfig): string {
+    return (t.recesoTandasJson || [])
+      .map((x) => `${x.etiqueta}: ${x.inicio}-${x.fin}`)
+      .join(' | ');
+  }
+
   get turnosFiltrados(): TipoTurnoConfig[] {
-    const q = this.busquedaTurno.trim().toLowerCase();
+    const terminos = dividirTerminosBusqueda(this.busquedaTurno);
     const f = this.filtroFamiliaTurno;
     return this.listaTurnosCatalogo.filter((t) => {
       if (f === 'ORDINARIOS') {
@@ -466,12 +951,8 @@ export class ConfiguracionCatalogoTurnosComponent {
       } else if (f === 'DESCANSOS') {
         if (t.horasOrdinarias > 0 && !t.esAusencia) return false;
       }
-      if (q) {
-        const match =
-          t.codigo.toLowerCase().includes(q) ||
-          t.nombre.toLowerCase().includes(q) ||
-          (t.horario || '').toLowerCase().includes(q);
-        if (!match) return false;
+      if (terminos.length > 0 && !coincideBusquedaCampos(terminos, [t.codigo, t.nombre, t.horario])) {
+        return false;
       }
       return true;
     });
@@ -484,6 +965,11 @@ export class ConfiguracionCatalogoTurnosComponent {
   @Input() turnoFormHoraInicio = '07:00';
   @Input() turnoFormHoraFin = '15:00';
   @Input() turnoFormMinutosAlmuerzo = 0;
+  @Input() turnoFormRecesoHabilitado = false;
+  @Input() turnoFormRecesoRemunerado = false;
+  @Input() turnoFormRecesoMaxSimultaneos = 1;
+  @Input() turnoFormDuracionBreakMin = 30;
+  @Input() turnoFormRecesoTandas: TandaBreakTurno[] = [];
   @Input({ required: true }) calc!: CalculoAutomaticoHorasTurno;
   @Input() temasColorTurno: TemaColorTurno[] = [];
   @Input() turnoFormColorKey = 'AZUL_CIELO';
@@ -503,6 +989,14 @@ export class ConfiguracionCatalogoTurnosComponent {
   @Output() cambiarTurnoFormHoraInicio = new EventEmitter<string>();
   @Output() cambiarTurnoFormHoraFin = new EventEmitter<string>();
   @Output() cambiarTurnoFormMinutosAlmuerzo = new EventEmitter<number>();
+  @Output() cambiarTurnoRecesoHabilitado = new EventEmitter<boolean>();
+  @Output() cambiarTurnoRecesoRemunerado = new EventEmitter<boolean>();
+  @Output() cambiarTurnoRecesoMaxSimultaneos = new EventEmitter<number>();
+  @Output() cambiarTurnoDuracionBreak = new EventEmitter<number>();
+  @Output() agregarTandaBreak = new EventEmitter<void>();
+  @Output() escalonarTandasBreakAutomatico = new EventEmitter<void>();
+  @Output() eliminarTandaBreak = new EventEmitter<number>();
+  @Output() moverTandaBreak = new EventEmitter<{ orden: number; nuevoInicioRelMin: number }>();
   @Output() cambiarTurnoFormColorKey = new EventEmitter<string>();
   @Output() cambiarTurnoFormNocturnoPesado = new EventEmitter<boolean>();
   @Output() cambiarTurnoFormProrrateaMeta = new EventEmitter<boolean>();
