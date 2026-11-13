@@ -345,14 +345,25 @@ export class CatalogosSsoStore {
     this.servicioSeleccionadoId.set(usuario.servicioBaseId);
   }
 
+  obtenerUrlRetornoIntranet(): string {
+    const guardada = this.sesionActual()?.intranetReturnUrl || this.intranetReturnUrl();
+    if (guardada) return guardada;
+
+    if (typeof window !== 'undefined') {
+      const hostname = window.location.hostname || 'localhost';
+      return `http://${hostname}:4300`;
+    }
+    return 'http://localhost:4300';
+  }
+
   notificarIntranet(): void {
-    const destino = this.sesionActual()?.intranetReturnUrl || this.intranetReturnUrl();
+    const destino = this.obtenerUrlRetornoIntranet();
     try {
       sessionStorage.removeItem('rafa_turnos_sso_jwt');
     } catch {}
     this.sesionActual.set(null);
-    this.notificacion.mostrar('ℹ️ Cerrando sesión y regresando a la Intranet Hospitalaria...');
-    if (destino && destino !== window.location.href) {
+    this.notificacion.mostrar('ℹ️ Regresando al Portal de la Intranet Hospitalaria...');
+    if (typeof window !== 'undefined') {
       window.location.href = destino;
     }
   }

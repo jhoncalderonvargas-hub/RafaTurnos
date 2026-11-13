@@ -9,13 +9,15 @@
 /* TOOLBAR CONTROLES - 3 CARRILES FIJOS (IZQUIERDA | CENTRO | DERECHA) */
 .toolbar-controls {
   background: #ffffff;
-  padding: 6px 12px;
+  padding: 3px 12px;
   border-bottom: 1px solid var(--border-subtle);
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   min-height: 44px;
+  max-height: 44px;
+  box-sizing: border-box;
   flex-shrink: 0;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
 }
@@ -64,27 +66,61 @@
   text-overflow: ellipsis;
 }
 
+.stepper-cluster {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5px;
+  min-height: 38px;
+}
+
+.month-stepper.month-stepper-toolbar {
+  height: 26px;
+  padding: 1.5px 2px;
+  border-radius: 6px;
+  gap: 2px;
+  background: #f1f5f9;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+}
+
+.month-stepper.month-stepper-toolbar .btn-nav-month {
+  height: 22px;
+  width: 20px;
+  padding: 0;
+  font-size: 9.5px;
+  border-radius: 4px;
+  line-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .month-stepper.month-stepper-toolbar .period-compact-display {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 25px;
+  height: 22px;
   min-width: 68px;
   padding: 0 7px;
   background: #ffffff;
   border: 1px solid #cbd5e1;
-  border-radius: 5px;
+  border-radius: 4px;
   font-size: 11.5px;
   font-weight: 700;
   color: #0f172a;
   white-space: nowrap;
   user-select: none;
+  line-height: 1;
+  transition: all 0.15s ease;
 }
 
 .month-stepper.month-stepper-toolbar .period-compact-display.is-published {
   background: #dcfce7;
-  border-color: #22c55e;
-  color: #166534;
+  border-color: #86efac;
+  color: #14532d;
 }
 
 .month-stepper.month-stepper-toolbar .period-compact-display.is-locked {
@@ -93,10 +129,51 @@
   color: #334155;
 }
 
+.month-stepper.month-stepper-toolbar .btn-hoy-period {
+  height: 22px;
+  padding: 0 6px;
+  font-size: 10.5px;
+  border-radius: 4px;
+  line-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stepper-pill-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 11px;
+  padding: 0 7px;
+  font-size: 8px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-radius: 9999px;
+  line-height: 11px;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.stepper-pill-status.pill-published {
+  background: #16a34a;
+  color: #ffffff;
+  box-shadow: 0 1px 2px rgba(22, 163, 74, 0.22);
+}
+
+.stepper-pill-status.pill-locked {
+  background: #475569;
+  color: #ffffff;
+  box-shadow: 0 1px 2px rgba(71, 85, 105, 0.22);
+}
+
 @media (max-width: 1380px) {
   .toolbar-controls {
-    padding: 6px 10px;
+    padding: 3px 10px;
     gap: 6px;
+    min-height: 44px;
+    max-height: 44px;
   }
 
   .select-servicio {

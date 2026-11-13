@@ -17,12 +17,12 @@
         }
       </p>
       @if (!catalogos.verificandoSesionSso()) {
-        <button
-          type="button"
+        <a
+          [href]="catalogos.obtenerUrlRetornoIntranet()"
           class="btn-primary sso-lock-btn"
           (click)="catalogos.notificarIntranet()">
           🔐 Ir al Portal de la Intranet Hospitalaria
-        </button>
+        </a>
       }
     </div>
   </div>

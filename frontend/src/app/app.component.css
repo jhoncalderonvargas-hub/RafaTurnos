@@ -50,6 +50,12 @@
   font-size: 14px;
   font-weight: 600;
   justify-content: center;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  color: #ffffff;
+  cursor: pointer;
 }
 
 /* ESTRUCTURA PRINCIPAL */

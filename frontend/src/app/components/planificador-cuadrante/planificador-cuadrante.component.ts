@@ -53,39 +53,46 @@ import {
           </select>
         </div>
 
-        <div class="month-stepper month-stepper-toolbar" title="Navegar entre meses y años">
-          <button
-            type="button"
-            class="btn-nav-month"
-            aria-label="Ir al mes anterior"
-            (click)="navegarMes.emit(-1)"
-            title="Ir al mes anterior">
-            ◀
-          </button>
-          <span
-            class="period-compact-display"
-            [class.is-published]="estadoCuadrante === 'PUBLICADO'"
-            [class.is-locked]="estadoCuadrante === 'CERRADO_NOMINA'"
-            [attr.aria-label]="'Periodo de planificación: ' + periodoAbreviado"
-            [title]="tituloPeriodoStepper">
-            {{ periodoAbreviado }}
-          </span>
-          <button
-            type="button"
-            class="btn-nav-month"
-            aria-label="Ir al mes siguiente"
-            (click)="navegarMes.emit(1)"
-            title="Ir al mes siguiente">
-            ▶
-          </button>
-          @if (!esPeriodoActual) {
+        <div class="stepper-cluster">
+          <div class="month-stepper month-stepper-toolbar" title="Navegar entre meses y años">
             <button
               type="button"
-              class="btn-hoy-period"
-              (click)="irAMesActual.emit()"
-              title="Volver al mes y año actual">
-              Hoy
+              class="btn-nav-month"
+              aria-label="Ir al mes anterior"
+              (click)="navegarMes.emit(-1)"
+              title="Ir al mes anterior">
+              ◀
             </button>
+            <span
+              class="period-compact-display"
+              [class.is-published]="estadoCuadrante === 'PUBLICADO'"
+              [class.is-locked]="estadoCuadrante === 'CERRADO_NOMINA'"
+              [attr.aria-label]="'Periodo de planificación: ' + periodoAbreviado"
+              [title]="tituloPeriodoStepper">
+              {{ periodoAbreviado }}
+            </span>
+            <button
+              type="button"
+              class="btn-nav-month"
+              aria-label="Ir al mes siguiente"
+              (click)="navegarMes.emit(1)"
+              title="Ir al mes siguiente">
+              ▶
+            </button>
+            @if (!esPeriodoActual) {
+              <button
+                type="button"
+                class="btn-hoy-period"
+                (click)="irAMesActual.emit()"
+                title="Volver al mes y año actual">
+                Hoy
+              </button>
+            }
+          </div>
+          @if (estadoCuadrante === 'PUBLICADO') {
+            <span class="stepper-pill-status pill-published">Publicado</span>
+          } @else if (estadoCuadrante === 'CERRADO_NOMINA') {
+            <span class="stepper-pill-status pill-locked">Cerrado</span>
           }
         </div>
       </div>

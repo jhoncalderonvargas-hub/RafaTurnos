@@ -228,7 +228,7 @@ describe('PlanificadorCuadranteComponent (Switch Compacto / Nombres y Horarios)'
     expect(el.querySelectorAll('.coverage-legacy-row').length).toBe(0);
   });
 
-  it('muestra el periodo compacto (Nov 2026) solo con flechas < > y colorea según estado sin píldora extra', () => {
+  it('muestra el periodo compacto (Nov 2026) con flechas < > y pastilla de estado debajo del cajón completo al publicar o cerrar', () => {
     const el: HTMLElement = fixture.nativeElement;
     expect(el.querySelector('.estado-cuadrante-badge')).toBeNull();
     expect(el.querySelector('.btn-cta-primary')).not.toBeNull();
@@ -237,6 +237,7 @@ describe('PlanificadorCuadranteComponent (Switch Compacto / Nombres y Horarios)'
 
     component.mesSeleccionado = 11;
     component.anioSeleccionado = 2026;
+    component.estadoCuadrante = 'BORRADOR';
     fixture.detectChanges();
 
     const periodDisplay = el.querySelector('.period-compact-display') as HTMLElement;
@@ -244,14 +245,21 @@ describe('PlanificadorCuadranteComponent (Switch Compacto / Nombres y Horarios)'
     expect(periodDisplay.textContent?.trim()).toBe('Nov 2026');
     expect(periodDisplay.classList.contains('is-published')).toBeFalse();
     expect(periodDisplay.classList.contains('is-locked')).toBeFalse();
+    expect(el.querySelector('.stepper-pill-status')).toBeNull();
 
     component.estadoCuadrante = 'PUBLICADO';
     fixture.detectChanges();
     expect(periodDisplay.classList.contains('is-published')).toBeTrue();
+    const pillPublished = el.querySelector('.stepper-pill-status.pill-published') as HTMLElement;
+    expect(pillPublished).not.toBeNull();
+    expect(pillPublished.textContent?.trim()).toBe('Publicado');
 
     component.estadoCuadrante = 'CERRADO_NOMINA';
     fixture.detectChanges();
     expect(periodDisplay.classList.contains('is-locked')).toBeTrue();
+    const pillLocked = el.querySelector('.stepper-pill-status.pill-locked') as HTMLElement;
+    expect(pillLocked).not.toBeNull();
+    expect(pillLocked.textContent?.trim()).toBe('Cerrado');
 
     const navSpy = spyOn(component.navegarMes, 'emit');
     const navButtons = el.querySelectorAll('.month-stepper-toolbar .btn-nav-month');
