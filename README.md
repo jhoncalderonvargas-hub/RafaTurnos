@@ -36,6 +36,7 @@ Toda la fase de análisis de requisitos, reglas de negocio y arquitectura se enc
 18. **[18. Modelo de Banco de Horas (Acumulación Continua)](./docs/analisis/18_modelo_banco_de_horas.md)**: Acumulación continua de horas a favor o en contra mes a mes sin periodicidad de caducidad, separación de recargos económicos CST, turno de compensación `COMP` y trazabilidad en el reporte de nómina.
 19. **[19. Gestión de Festivos Oficiales de Colombia y Caché](./docs/analisis/19_gestion_festivos_colombia_y_cache.md)**: Algoritmo propio interno (Meeus/Ley Emiliani), persistencia en PostgreSQL (`festivos_colombia`), resiliencia ante reinicios, precarga en RAM (`onApplicationBootstrap`) y soporte de excepciones/días cívicos manuales.
 20. **[20. Arquitectura de Integración, Sincronización y Gobierno de Servicios](./docs/analisis/20_arquitectura_integracion_sincronizacion_y_gobierno_servicios.md)**: Delimitación de responsabilidades (Intranet provee identidad y perfil profesional; Rafa Turnos gobierna servicios, afinidad entre hermanos y adscripción), sincronización multi-canal (Webhooks en tiempo real, Cron 02:00 AM, SSO JIT y botón de contingencia) y ciclo de vida de vacaciones.
+21. **[21. Experiencia Móvil, Portal del Colaborador Responsive y Barra de Navegación Inferior](./docs/analisis/21_ux_mobile_portal_colaborador_y_bottom_nav.md)**: Superación de limitaciones de Thurni en celulares, selector dual de vista (`📋 Agenda` vertical con horarios y descansos sin truncar vs `📅 Mes` con Ficha Inteligente Master-Detail), y Barra Inferior Móvil (*Bottom Navigation Bar*) en zona del pulgar con panel deslizante (*Bottom Sheet Drawer*).
 
 ---
 
@@ -67,9 +68,9 @@ Abre **[http://localhost:4300](http://localhost:4300)** en el navegador, selecci
 
 | Suite | Alcance | Comando |
 |---|---|---|
-| **Motor normativo CST / Ley 2101 / Ley 2466** | 45 pruebas puras sobre [`shared/liquidacion-horas.ts`](./shared/liquidacion-horas.ts) | `node scripts/verificar-liquidacion.mjs` |
+| **Motor normativo CST / Ley 2101 / Ley 2466** | 51 pruebas puras sobre [`shared/liquidacion-horas.ts`](./shared/liquidacion-horas.ts) | `node scripts/verificar-liquidacion.mjs` |
 | **Backend (Jest + Supertest)** | Guard SSO/RBAC, Cuadrantes, Permutas, iCal, Liquidación, Servicios y Festivos + verificación `sync:check` | `cd backend && npm run sync:check && npm test` |
-| **Frontend (Jasmine + Karma ChromeHeadless)** | Helpers de cálculo, Signal Stores (`NotificacionStore`, `CatalogosSsoStore`, `CuadranteStore`, `PermutasAuditoriaStore`, `PortalReportesStore`) y `AutocompletadoService` | `cd frontend && npm run sync:check && npm test` |
+| **Frontend (Jasmine + Karma ChromeHeadless)** | 78 pruebas unitarias: Componentes (`PortalColaborador`, `SidebarNavegacion`), Helpers de cálculo, Signal Stores y `AutocompletadoService` | `cd frontend && npm run sync:check && npm test` |
 | **E2E Ecosistema Completo (Idempotente)** | Planificación, Auditoría, Permutas, Feed `.ics` iCal y Cierre/Reapertura Nómina contra PostgreSQL + Intranet `:4300` + Backend `:3000` (limpia artefactos `2026-12` al terminar) | `node backend/test-e2e-ecosistema.js` |
 
 ---
@@ -86,6 +87,7 @@ Abre **[http://localhost:4300](http://localhost:4300)** en el navegador, selecci
 - [x] **Fase 9**: Optimización de Base de Datos y Rendimiento (Índices en PostgreSQL, eliminación de N+1 con batch lookups, transacciones atómicas `$transaction`, proyección estricta `select` y paginación `skip`/`take`).
 - [x] **Fase 10**: Validación Integral de Extremo a Extremo (E2E) (Planificación, auditoría forense, permutas entre pares, feeds iCal móviles RFC 5545 y cierre/reapertura de nómina).
 - [x] **Fase 11**: Empaquetado y Despliegue en Docker (Contenedores multi-stage para NestJS y Angular + Nginx reverse proxy, orquestados mediante `docker-compose.yml` y documentados en [**DEPLOY.md**](./DEPLOY.md)).
+- [x] **Fase 12**: Experiencia Móvil y Portal del Colaborador Responsive (Selector Dual Agenda/Mes, Barra de Navegación Inferior en zona del pulgar y Bottom Sheet Drawer [**Doc 21**](./docs/analisis/21_ux_mobile_portal_colaborador_y_bottom_nav.md)).
 
 ---
 
