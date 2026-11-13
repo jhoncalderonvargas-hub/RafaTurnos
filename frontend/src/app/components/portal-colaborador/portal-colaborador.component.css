@@ -630,3 +630,512 @@
   color: #047857;
   border-color: #a7f3d0;
 }
+
+/* ==========================================================================
+   SELECTOR DE VISTA (AGENDA LISTA VS CUADRÍCULA MES) Y COMPONENTES RESPONSIVE
+   ========================================================================== */
+.portal-cal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.portal-cal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Segmented Control Switcher */
+.portal-view-switcher {
+  display: inline-flex;
+  background: #f1f5f9;
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  gap: 3px;
+}
+
+.btn-view-tab {
+  padding: 5px 12px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #475569;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  user-select: none;
+}
+
+.btn-view-tab:hover:not(.is-active) {
+  color: #0f172a;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.btn-view-tab.is-active {
+  background: #ffffff;
+  color: #0284c7;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+/* --------------------------------------------------------------------------
+   VISTA AGENDA DIARIA VERTICAL (MOBILE-FIRST)
+   -------------------------------------------------------------------------- */
+.agenda-calendar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.agenda-day-card {
+  display: grid;
+  grid-template-columns: 78px 1fr auto;
+  align-items: center;
+  gap: 14px;
+  background: #ffffff;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.agenda-day-card:hover {
+  border-color: #38bdf8;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+  transform: translateY(-1px);
+}
+
+.agenda-day-card.selected-day {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15);
+}
+
+.agenda-day-card.today-card {
+  border-left: 4px solid #0284c7;
+}
+
+.agenda-day-card.holiday-card {
+  border-color: #fde68a;
+  background: #fffdf5;
+}
+
+.agenda-day-card.weekend-card:not(.holiday-card):not(.selected-day) {
+  background: #fbfdff;
+}
+
+.agenda-day-date-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 6px 4px;
+  min-width: 66px;
+  text-align: center;
+}
+
+.agenda-day-number {
+  font-size: 19px;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1;
+}
+
+.agenda-day-weekday {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  margin-top: 3px;
+}
+
+.agenda-hoy-badge {
+  display: inline-block;
+  margin-top: 3px;
+  font-size: 8.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: #0284c7;
+  color: #ffffff;
+  padding: 1px 5px;
+  border-radius: 999px;
+}
+
+.agenda-festivo-pill {
+  font-size: 9px;
+  font-weight: 800;
+  background: #fef3c7;
+  color: #b45309;
+  border-radius: 99px;
+  padding: 1px 5px;
+  margin-top: 4px;
+  white-space: nowrap;
+}
+
+.agenda-day-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.agenda-shift-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.agenda-shift-badge {
+  font-size: 12px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1.5px solid;
+  display: inline-flex;
+  align-items: center;
+}
+
+.agenda-shift-hours {
+  font-size: 12px;
+  font-weight: 700;
+  color: #334155;
+}
+
+.agenda-shift-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+  color: #64748b;
+}
+
+.agenda-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: #f1f5f9;
+}
+
+.agenda-meta-item.agenda-service-tag {
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.agenda-meta-item.agenda-service-tag.srv-rotado {
+  background: #faf5ff;
+  color: #7e22ce;
+}
+
+.agenda-meta-item.agenda-break-tag {
+  background: #fefce8;
+  color: #854d0e;
+  font-weight: 600;
+}
+
+.agenda-meta-item.agenda-break-tag.is-paid {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.agenda-meta-item.agenda-pin-tag {
+  background: #fef2f2;
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+.agenda-shift-note {
+  font-size: 11px;
+  color: #475569;
+  font-style: italic;
+  background: #f8fafc;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.agenda-shift-free {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.agenda-free-badge {
+  font-size: 12px;
+  font-weight: 700;
+  color: #047857;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.agenda-free-desc {
+  font-size: 11.5px;
+  color: #64748b;
+}
+
+.agenda-shift-unassigned {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agenda-unassigned-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  background: #f1f5f9;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.agenda-day-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-agenda-action {
+  height: 32px;
+  padding: 0 10px;
+  font-size: 11.5px;
+  font-weight: 700;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #334155;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.btn-agenda-action.btn-permuta-trigger:hover {
+  background: #0284c7;
+  color: #ffffff;
+  border-color: #0284c7;
+}
+
+.btn-agenda-action.btn-info-trigger:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+}
+
+/* --------------------------------------------------------------------------
+   FICHA INTELIGENTE DEL DÍA SELECCIONADO EN MODO CUADRÍCULA
+   -------------------------------------------------------------------------- */
+.dia-seleccionado-ficha {
+  margin-top: 14px;
+  padding: 12px 16px;
+  background: #f8fafc;
+  border: 1.5px solid #e2e8f0;
+  border-left: 4px solid #0284c7;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ficha-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ficha-title-block {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ficha-day-badge {
+  font-size: 13px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.ficha-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ficha-shift-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ficha-shift-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ficha-shift-code {
+  font-size: 12px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 5px;
+}
+
+.ficha-shift-hours {
+  font-size: 12.5px;
+  color: #1e293b;
+}
+
+.ficha-shift-details {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: #475569;
+}
+
+.ficha-free-card, .ficha-unassigned-card {
+  background: #ffffff;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  padding: 12px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+/* --------------------------------------------------------------------------
+   MEDIA QUERIES RESPONSIVE (TABLET Y SMARTPHONE)
+   -------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+  .nomina-container {
+    padding: 12px;
+    gap: 14px;
+  }
+
+  .nomina-banner {
+    padding: 14px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .portal-cal-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .portal-cal-header-actions {
+    justify-content: space-between;
+  }
+
+  .portal-view-switcher {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .portal-view-switcher .btn-view-tab {
+    flex: 1;
+    justify-content: center;
+    padding: 8px 12px;
+    font-size: 12.5px;
+  }
+
+  .agenda-day-card {
+    grid-template-columns: 60px 1fr;
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  .agenda-day-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+    border-top: 1px solid #f1f5f9;
+    padding-top: 8px;
+    margin-top: 2px;
+  }
+
+  .btn-agenda-action {
+    flex: 1;
+    height: 38px;
+  }
+
+  .kpi-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  .weekly-calendar-grid {
+    gap: 4px;
+  }
+
+  .weekday-header {
+    font-size: 10.5px;
+    padding: 6px 2px;
+  }
+
+  .emp-day-card {
+    min-height: 68px;
+    padding: 5px;
+  }
+
+  .emp-day-hours, .emp-day-service, .emp-day-break {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .kpi-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .weekday-header {
+    font-size: 9.5px;
+    padding: 4px 1px;
+  }
+
+  .emp-day-card {
+    min-height: 56px;
+    padding: 3px;
+  }
+
+  .emp-day-num {
+    font-size: 12px;
+  }
+
+  .emp-shift-pill {
+    padding: 2px 4px;
+  }
+
+  .emp-day-name {
+    display: none;
+  }
+}

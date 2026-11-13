@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { Component, EventEmitter, Input, Output, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
@@ -230,7 +230,7 @@ export interface DatosEmpleadoPortal {
           </div>
         </div>
 
-        <!-- Bloque 2: Mi Calendario Mensual Personal (Cuadrícula Semanal Lunes a Domingo) -->
+        <!-- Bloque 2: Mi Calendario Mensual Personal (Selector Agenda vs Cuadrícula Mes) -->
         <div class="panel-card">
           <div class="panel-header portal-cal-header">
             <div class="portal-cal-title-cluster">
@@ -255,10 +255,128 @@ export interface DatosEmpleadoPortal {
                 </button>
               </div>
             </div>
-            <span class="badge-info">Día {{ diaPermutaSeleccionado }} de {{ nombreMesSeleccionado }} Seleccionado</span>
+
+            <div class="portal-cal-header-actions">
+              <div class="portal-view-switcher" role="tablist" aria-label="Cambiar vista del calendario">
+                <button
+                  type="button"
+                  role="tab"
+                  class="btn-view-tab"
+                  [class.is-active]="modoVistaPortal() === 'AGENDA'"
+                  [attr.aria-selected]="modoVistaPortal() === 'AGENDA'"
+                  (click)="cambiarModoVista('AGENDA')"
+                  title="Ver turnos en lista continua (Ideal para celular)">
+                  📋 Agenda
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  class="btn-view-tab"
+                  [class.is-active]="modoVistaPortal() === 'MES'"
+                  [attr.aria-selected]="modoVistaPortal() === 'MES'"
+                  (click)="cambiarModoVista('MES')"
+                  title="Ver cuadrícula mensual completa">
+                  📅 Mes
+                </button>
+              </div>
+              <span class="badge-info">Día {{ diaPermutaSeleccionado }} de {{ nombreMesSeleccionado }} Seleccionado</span>
+            </div>
           </div>
 
-          <div class="weekly-calendar-grid">
+          @if (modoVistaPortal() === 'AGENDA') {
+            <!-- MODO 1: VISTA AGENDA DIARIA VERTICAL (MOBILE-FIRST) -->
+            <div class="agenda-calendar-list" role="feed" aria-label="Lista diaria de turnos">
+              @for (d of diasDelMes; track d.dia) {
+                @let celdaMia = obtenerCeldaDia(d.dia);
+                @let cfgMio = obtenerConfigTurno(celdaMia?.codigo || '');
+                @let srvDia = obtenerServicioDiaPortal(celdaMia, portal.empleado.servicioBaseId);
+                @let brkDia = obtenerBreakPortal(celdaMia, cfgMio);
+
+                <article
+                  class="agenda-day-card"
+                  [class.selected-day]="diaPermutaSeleccionado === d.dia"
+                  [class.today-card]="!!d.esHoy"
+                  [class.holiday-card]="!!d.festivo"
+                  [class.weekend-card]="d.esSabado || d.esDomingo"
+                  [class.is-free]="!celdaMia?.codigo || celdaMia?.codigo === 'L'"
+                  (click)="seleccionarDiaEnPortal.emit(d.dia)"
+                  (contextmenu)="onCardContextMenu($event, d.dia)">
+                  <div class="agenda-day-date-col">
+                    <span class="agenda-day-number">{{ d.dia }}</span>
+                    <span class="agenda-day-weekday">{{ d.letraDia }}</span>
+                    @if (d.esHoy) {
+                      <span class="agenda-hoy-badge">Hoy</span>
+                    }
+                    @if (d.festivo) {
+                      <span class="agenda-festivo-pill" [title]="d.festivo.nombre">🇨🇴 Festivo</span>
+                    }
+                  </div>
+
+                  <div class="agenda-day-body">
+                    @if (celdaMia && celdaMia.codigo && celdaMia.codigo !== 'L') {
+                      <div class="agenda-shift-header">
+                        <span
+                          class="agenda-shift-badge"
+                          [style.background-color]="cfgMio ? cfgMio.bgHex : '#f8fafc'"
+                          [style.color]="cfgMio ? cfgMio.textHex : '#0f172a'"
+                          [style.border-color]="cfgMio ? cfgMio.borderHex : '#cbd5e1'">
+                          {{ celdaMia.codigo }} · {{ cfgMio ? cfgMio.nombre : celdaMia.codigo }}
+                        </span>
+                        <span class="agenda-shift-hours">⏰ {{ cfgMio ? cfgMio.horario : 'Turno programado' }}</span>
+                      </div>
+
+                      <div class="agenda-shift-meta">
+                        @if (srvDia) {
+                          <span class="agenda-meta-item agenda-service-tag" [class.srv-rotado]="srvDia.esRotacion">
+                            {{ srvDia.esRotacion ? '🔄 Apoyo en ' : '🏥 ' }}{{ srvDia.nombre }}
+                          </span>
+                        }
+                        @if (brkDia) {
+                          <span class="agenda-meta-item agenda-break-tag" [class.is-paid]="brkDia.remunerado">
+                            🍽️ Break {{ brkDia.etiqueta }}: {{ brkDia.inicio }}–{{ brkDia.fin }}
+                          </span>
+                        }
+                        @if (celdaMia.fijada) {
+                          <span class="agenda-meta-item agenda-pin-tag">📌 Turno fijo</span>
+                        }
+                      </div>
+
+                      @if (celdaMia.nota) {
+                        <div class="agenda-shift-note">💬 {{ celdaMia.nota }}</div>
+                      }
+                    } @else if (celdaMia?.codigo === 'L') {
+                      <div class="agenda-shift-free">
+                        <span class="agenda-free-badge">🏖️ Descanso (Libre)</span>
+                        <span class="agenda-free-desc">Disfrute de descanso semanal programado</span>
+                      </div>
+                    } @else {
+                      <div class="agenda-shift-unassigned">
+                        <span class="agenda-unassigned-badge">⚪ Sin turno asignado</span>
+                      </div>
+                    }
+                  </div>
+
+                  <div class="agenda-day-actions">
+                    <button
+                      type="button"
+                      class="btn-agenda-action btn-permuta-trigger"
+                      (click)="$event.stopPropagation(); seleccionarDiaEnPortal.emit(d.dia)"
+                      title="Solicitar cambio para este día">
+                      🔄 Permutar
+                    </button>
+                    <button
+                      type="button"
+                      class="btn-agenda-action btn-info-trigger"
+                      (click)="onInfoDiaClick($event, d.dia)"
+                      title="Ver detalle e historial">
+                      ℹ️
+                    </button>
+                  </div>
+                </article>
+              }
+            </div>
+          } @else {
+            <div class="weekly-calendar-grid">
             <!-- Cabecera de los 7 días de la semana -->
             <div class="weekday-header">Lunes</div>
             <div class="weekday-header">Martes</div>
@@ -385,6 +503,67 @@ export interface DatosEmpleadoPortal {
               </div>
             }
           </div>
+
+          <!-- Ficha Inteligente del Día Seleccionado en Modo Cuadrícula -->
+          @let diaSelInfo = obtenerInfoDiaSeleccionado();
+          <div class="dia-seleccionado-ficha">
+            <div class="ficha-header">
+              <div class="ficha-title-block">
+                <span class="ficha-day-badge">📌 Día {{ diaPermutaSeleccionado }} de {{ nombreMesSeleccionado }}</span>
+                @if (diaSelInfo.festivo) {
+                  <span class="badge-custom">🇨🇴 Festivo: {{ diaSelInfo.festivo.nombre }}</span>
+                }
+                @if (diaSelInfo.esHoy) {
+                  <span class="badge-law">📍 Hoy</span>
+                }
+              </div>
+              <div class="ficha-actions">
+                @if (diaSelInfo.celda?.codigo && diaSelInfo.celda?.codigo !== 'L') {
+                  <button
+                    type="button"
+                    class="btn-tool"
+                    (click)="abrirInspectorDiaPortal.emit(diaPermutaSeleccionado)"
+                    title="Ver historial de cambios de este día">
+                    ℹ️ Historial / Auditoría
+                  </button>
+                }
+              </div>
+            </div>
+
+            <div class="ficha-body">
+              @if (diaSelInfo.celda && diaSelInfo.celda.codigo && diaSelInfo.celda.codigo !== 'L') {
+                <div class="ficha-shift-card" [style.border-color]="diaSelInfo.cfg?.borderHex || '#cbd5e1'">
+                  <div class="ficha-shift-top">
+                    <span
+                      class="ficha-shift-code"
+                      [style.background-color]="diaSelInfo.cfg?.bgHex || '#f1f5f9'"
+                      [style.color]="diaSelInfo.cfg?.textHex || '#0f172a'">
+                      {{ diaSelInfo.celda.codigo }} · {{ diaSelInfo.cfg?.nombre || diaSelInfo.celda.codigo }}
+                    </span>
+                    <span class="ficha-shift-hours">⏰ Horario: <strong>{{ diaSelInfo.cfg?.horario }}</strong></span>
+                  </div>
+                  <div class="ficha-shift-details">
+                    <span>🏥 Servicio: <strong>{{ diaSelInfo.servicio?.nombre || 'Servicio Hospitalario' }}</strong></span>
+                    @if (diaSelInfo.brk) {
+                      <span>🍽️ Break: <strong>{{ diaSelInfo.brk.etiqueta }} ({{ diaSelInfo.brk.inicio }} a {{ diaSelInfo.brk.fin }})</strong></span>
+                    }
+                    @if (diaSelInfo.celda.nota) {
+                      <span>💬 Nota: <em>{{ diaSelInfo.celda.nota }}</em></span>
+                    }
+                  </div>
+                </div>
+              } @else if (diaSelInfo.celda?.codigo === 'L') {
+                <div class="ficha-free-card">
+                  <span>🏖️ <strong>Día de Descanso Programado (Libre)</strong> · Disfrute de descanso semanal</span>
+                </div>
+              } @else {
+                <div class="ficha-unassigned-card">
+                  <span>⚪ <strong>Sin turno programado para este día</strong></span>
+                </div>
+              }
+            </div>
+          </div>
+        }
         </div>
 
         <!-- Bloque 3 y 4: Solicitar Cambio de Turno y Ver Equipo de Guardia -->
@@ -584,6 +763,56 @@ export interface DatosEmpleadoPortal {
   `,
 })
 export class PortalColaboradorComponent {
+  readonly modoVistaPortal = signal<'AGENDA' | 'MES'>(this.determinarModoInicial());
+
+  private determinarModoInicial(): 'AGENDA' | 'MES' {
+    if (typeof window !== 'undefined') {
+      try {
+        const guardado = localStorage.getItem('rafa_portal_vista_modo');
+        if (guardado === 'AGENDA' || guardado === 'MES') return guardado;
+      } catch {}
+      if (window.innerWidth < 768) return 'AGENDA';
+    }
+    return 'MES';
+  }
+
+  cambiarModoVista(modo: 'AGENDA' | 'MES'): void {
+    this.modoVistaPortal.set(modo);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('rafa_portal_vista_modo', modo);
+      } catch {}
+    }
+  }
+
+  obtenerInfoDiaSeleccionado(): {
+    dia: number;
+    columna?: DiaColumna;
+    celda?: CeldaAsignacion;
+    cfg?: TipoTurnoConfig;
+    servicio?: { nombre: string; esRotacion: boolean } | null;
+    brk?: { etiqueta: string; inicio: string; fin: string; remunerado: boolean } | null;
+    festivo?: any;
+    esHoy?: boolean;
+  } {
+    const dia = this.diaPermutaSeleccionado;
+    const columna = this.diasDelMes.find((d) => d.dia === dia);
+    const celda = this.obtenerCeldaDia(dia);
+    const cfg = this.obtenerConfigTurno(celda?.codigo || '');
+    const servicio = this.obtenerServicioDiaPortal(celda, this.portal?.empleado?.servicioBaseId);
+    const brk = this.obtenerBreakPortal(celda, cfg);
+    return {
+      dia,
+      columna,
+      celda,
+      cfg,
+      servicio,
+      brk,
+      festivo: columna?.festivo,
+      esHoy: columna?.esHoy,
+    };
+  }
+
   @Input({ required: true }) portal!: DatosEmpleadoPortal;
   @Input() esAdminTh = false;
   @Input() esCoordinador = false;

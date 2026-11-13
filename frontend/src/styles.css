@@ -335,6 +335,13 @@ input, select, textarea {
   gap: 20px;
 }
 
+@media (max-width: 992px) {
+  .two-col-panels {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+}
+
 .panel-card {
   background: #ffffff;
   border: 1px solid var(--border-subtle);
