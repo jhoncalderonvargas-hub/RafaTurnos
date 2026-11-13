@@ -133,3 +133,19 @@
     transform: translate(-50%, 0) scale(1);
   }
 }
+
+/* RESPONSIVE MÓVIL (<= 768px): SOPORTE BARRA INFERIOR */
+@media (max-width: 768px) {
+  .app-shell {
+    flex-direction: column;
+    height: 100dvh;
+    max-height: 100dvh;
+  }
+
+  .main-workspace {
+    height: 100dvh;
+    max-height: 100dvh;
+    padding-bottom: 60px;
+    box-sizing: border-box;
+  }
+}

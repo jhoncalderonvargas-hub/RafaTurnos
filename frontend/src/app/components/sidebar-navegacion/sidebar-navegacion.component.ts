@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { Component, EventEmitter, Input, Output, signal } from '@angular/core';
 import { RolUsuarioSso, SesionUsuarioSso } from '../../models';
 
 export type VistaApp =
@@ -247,9 +247,257 @@ export type VistaApp =
         </div>
       </aside>
     </div>
+
+    <!-- BARRA DE NAVEGACIÓN INFERIOR (BOTTOM NAV BAR) PARA MÓVIL (<= 768px) -->
+    <nav class="bottom-nav-bar" aria-label="Navegación móvil inferior">
+      @if (esColaborador) {
+        <button
+          type="button"
+          class="bottom-nav-item"
+          [class.active]="vistaActual === 'PORTAL_EMPLEADO' && !mostrarDrawerMas()"
+          (click)="navegarEnMovil('PORTAL_EMPLEADO')"
+          title="Ver mi calendario de turnos">
+          <span class="bottom-icon">👩‍⚕️</span>
+          <span class="bottom-label">Mi Turno</span>
+          @if (propuestasRecibidasCount > 0) {
+            <span class="bottom-badge" title="Propuestas de cambio recibidas">{{ propuestasRecibidasCount }}</span>
+          }
+        </button>
+
+        <button
+          type="button"
+          class="bottom-nav-item"
+          [class.active]="vistaActual === 'DASHBOARD' && !mostrarDrawerMas()"
+          (click)="navegarEnMovil('DASHBOARD')"
+          title="Solicitudes y permutas">
+          <span class="bottom-icon">🔄</span>
+          <span class="bottom-label">Permutas</span>
+          @if (notificacionesSolicitudesCount > 0) {
+            <span class="bottom-badge" title="Alertas de solicitudes">{{ notificacionesSolicitudesCount }}</span>
+          }
+        </button>
+
+        <button
+          type="button"
+          class="bottom-nav-item"
+          (click)="abrirModalIcalDesdeMovil()"
+          title="Sincronizar calendario con Google / iPhone">
+          <span class="bottom-icon">📲</span>
+          <span class="bottom-label">Celular</span>
+        </button>
+
+        <button
+          type="button"
+          class="bottom-nav-item"
+          [class.active]="mostrarDrawerMas()"
+          (click)="alternarDrawerMas()"
+          title="Más opciones y menú">
+          <span class="bottom-icon">☰</span>
+          <span class="bottom-label">Más</span>
+        </button>
+      } @else {
+        <!-- Coordinador o Administrador TH en móvil -->
+        <button
+          type="button"
+          class="bottom-nav-item"
+          [class.active]="vistaActual === 'PLANIFICADOR' && !mostrarDrawerMas()"
+          (click)="navegarEnMovil('PLANIFICADOR')"
+          title="Cuadro de turnos">
+          <span class="bottom-icon">📅</span>
+          <span class="bottom-label">Turnos</span>
+        </button>
+
+        <button
+          type="button"
+          class="bottom-nav-item"
+          [class.active]="vistaActual === 'DASHBOARD' && !mostrarDrawerMas()"
+          (click)="navegarEnMovil('DASHBOARD')"
+          title="Permutas y solicitudes">
+          <span class="bottom-icon">🔄</span>
+          <span class="bottom-label">Permutas</span>
+          @if (notificacionesSolicitudesCount > 0) {
+            <span class="bottom-badge">{{ notificacionesSolicitudesCount }}</span>
+          }
+        </button>
+
+        <button
+          type="button"
+          class="bottom-nav-item"
+          [class.active]="vistaActual === 'REPORTES' && !mostrarDrawerMas()"
+          (click)="navegarEnMovil('REPORTES')"
+          title="Reportes y nómina">
+          <span class="bottom-icon">📊</span>
+          <span class="bottom-label">Nómina</span>
+        </button>
+
+        <button
+          type="button"
+          class="bottom-nav-item"
+          [class.active]="mostrarDrawerMas()"
+          (click)="alternarDrawerMas()"
+          title="Menú ampliado">
+          <span class="bottom-icon">☰</span>
+          <span class="bottom-label">Más</span>
+          @if (empresasPendientesCount > 0 || propuestasRecibidasCount > 0) {
+            <span class="bottom-badge bottom-badge-warn">!</span>
+          }
+        </button>
+      }
+    </nav>
+
+    <!-- PANEL DESLIZANTE INFERIOR / CAJÓN "MÁS" (BOTTOM SHEET DRAWER) -->
+    @if (mostrarDrawerMas()) {
+      <div class="mobile-more-backdrop" (click)="cerrarDrawerMas()" aria-hidden="true"></div>
+      <aside class="mobile-more-sheet" role="dialog" aria-modal="true" aria-label="Menú ampliado">
+        <div class="mobile-sheet-handle-bar" (click)="cerrarDrawerMas()">
+          <div class="mobile-sheet-handle"></div>
+        </div>
+
+        <div class="mobile-sheet-header">
+          <div class="mobile-sheet-brand">
+            <img src="assets/logo-hospital-yolombo.jpg" alt="Logo Hospital San Rafael Yolombó" class="mobile-sheet-logo" />
+            <div>
+              <div class="mobile-sheet-title">Hospital San Rafael Yolombó</div>
+              <div class="mobile-sheet-sub">Rafa Turnos • Sello de Vida</div>
+            </div>
+          </div>
+          <button type="button" class="btn-close-sheet" (click)="cerrarDrawerMas()" aria-label="Cerrar menú">✕</button>
+        </div>
+
+        @if (sesionActual; as sesion) {
+          <div class="mobile-sheet-user-card">
+            <span class="mobile-user-icon">🔐</span>
+            <div class="mobile-user-info">
+              <strong class="mobile-user-name">{{ sesion.nombre }}</strong>
+              <span class="mobile-user-role">{{ etiquetaRol(sesion.rol) }} • C.C. {{ sesion.documento }}</span>
+            </div>
+          </div>
+        }
+
+        <div class="mobile-sheet-menu">
+          <div class="mobile-menu-section-title">MI ESPACIO</div>
+          <button
+            type="button"
+            class="mobile-menu-item"
+            [class.active]="vistaActual === 'PORTAL_EMPLEADO'"
+            (click)="navegarEnMovil('PORTAL_EMPLEADO')">
+            <span class="menu-icon">👩‍⚕️</span>
+            <span>Mi Calendario Personal</span>
+            @if (propuestasRecibidasCount > 0) {
+              <span class="pill-count">{{ propuestasRecibidasCount }}</span>
+            }
+          </button>
+
+          <button
+            type="button"
+            class="mobile-menu-item"
+            [class.active]="vistaActual === 'DASHBOARD'"
+            (click)="navegarEnMovil('DASHBOARD')">
+            <span class="menu-icon">🔄</span>
+            <span>Cambios y Solicitudes de Permuta</span>
+            @if (notificacionesSolicitudesCount > 0) {
+              <span class="pill-count">{{ notificacionesSolicitudesCount }}</span>
+            }
+          </button>
+
+          @if (!esColaborador) {
+            <div class="mobile-menu-section-title">OPERACIÓN</div>
+            <button
+              type="button"
+              class="mobile-menu-item"
+              [class.active]="vistaActual === 'PLANIFICADOR'"
+              (click)="navegarEnMovil('PLANIFICADOR')">
+              <span class="menu-icon">📅</span>
+              <span>Cuadro de Turnos</span>
+            </button>
+            <button
+              type="button"
+              class="mobile-menu-item"
+              [class.active]="vistaActual === 'REPORTES'"
+              (click)="navegarEnMovil('REPORTES')">
+              <span class="menu-icon">📊</span>
+              <span>Nómina y Reportes</span>
+            </button>
+            <button
+              type="button"
+              class="mobile-menu-item"
+              [class.active]="vistaActual === 'AUDITORIA'"
+              (click)="navegarEnMovil('AUDITORIA')">
+              <span class="menu-icon">🛡️</span>
+              <span>Auditoría y Trazabilidad</span>
+            </button>
+          }
+
+          @if (esAdminTh) {
+            <div class="mobile-menu-section-title">GESTIÓN Y CONFIGURACIÓN</div>
+            <button
+              type="button"
+              class="mobile-menu-item"
+              [class.active]="vistaActual === 'GESTION_SERVICIOS'"
+              (click)="navegarEnMovil('GESTION_SERVICIOS')">
+              <span class="menu-icon">🏥</span>
+              <span>Gestión de Servicios</span>
+            </button>
+            <button
+              type="button"
+              class="mobile-menu-item"
+              [class.active]="vistaActual === 'GESTION_PERSONAL'"
+              (click)="navegarEnMovil('GESTION_PERSONAL')">
+              <span class="menu-icon">🧑‍⚕️</span>
+              <span>Gestión de Personal</span>
+            </button>
+            <button
+              type="button"
+              class="mobile-menu-item"
+              [class.active]="vistaActual === 'GESTION_TURNOS'"
+              (click)="navegarEnMovil('GESTION_TURNOS')">
+              <span class="menu-icon">🎨</span>
+              <span>Gestión de Turnos</span>
+            </button>
+            <button
+              type="button"
+              class="mobile-menu-item"
+              [class.active]="vistaActual === 'GESTION_EMPRESAS'"
+              (click)="navegarEnMovil('GESTION_EMPRESAS')">
+              <span class="menu-icon">🏢</span>
+              <span>Gestión de Empresas</span>
+              @if (empresasPendientesCount > 0) {
+                <span class="pill-count pill-warn">{{ empresasPendientesCount }}</span>
+              }
+            </button>
+            <button
+              type="button"
+              class="mobile-menu-item"
+              [class.active]="vistaActual === 'GESTION_FESTIVOS'"
+              (click)="navegarEnMovil('GESTION_FESTIVOS')">
+              <span class="menu-icon">🇨🇴</span>
+              <span>Festivos y Días Cívicos</span>
+            </button>
+          }
+
+          <div class="mobile-menu-section-title">UTILIDADES</div>
+          <button
+            type="button"
+            class="mobile-menu-item"
+            (click)="abrirModalIcalDesdeMovil()">
+            <span class="menu-icon">📲</span>
+            <span>Vincular Calendario al Celular</span>
+          </button>
+          <button
+            type="button"
+            class="mobile-menu-item mobile-menu-intranet"
+            (click)="notificarIntranetDesdeMovil()">
+            <span class="menu-icon">⬅️</span>
+            <span>Volver a la Intranet Hospitalaria</span>
+          </button>
+        </div>
+      </aside>
+    }
   `,
 })
 export class SidebarNavegacionComponent {
+  readonly mostrarDrawerMas = signal(false);
+
   @Input() sidebarFijo = false;
   @Input() sidebarContraido = true;
   @Input() sidebarHovered = false;
@@ -267,6 +515,29 @@ export class SidebarNavegacionComponent {
   @Output() itemNavegacionClick = new EventEmitter<VistaApp>();
   @Output() abrirModalIcal = new EventEmitter<void>();
   @Output() notificarIntranet = new EventEmitter<void>();
+
+  alternarDrawerMas(): void {
+    this.mostrarDrawerMas.update((v) => !v);
+  }
+
+  cerrarDrawerMas(): void {
+    this.mostrarDrawerMas.set(false);
+  }
+
+  navegarEnMovil(vista: VistaApp): void {
+    this.mostrarDrawerMas.set(false);
+    this.itemNavegacionClick.emit(vista);
+  }
+
+  abrirModalIcalDesdeMovil(): void {
+    this.mostrarDrawerMas.set(false);
+    this.abrirModalIcal.emit();
+  }
+
+  notificarIntranetDesdeMovil(): void {
+    this.mostrarDrawerMas.set(false);
+    this.notificarIntranet.emit();
+  }
 
   etiquetaRol(rol?: RolUsuarioSso): string {
     if (rol === 'ADMIN_TH') return 'Talento Humano / Admin';
